@@ -2771,6 +2771,27 @@ function filterSessions() {
   });
 }
 
+// 统一四态中文标签（与 lib/status.js STATUS_LABELS 对应）
+const STATUS_LABELS = {
+  'awaiting-input': '待用户输入',
+  working: '工作中',
+  waiting: '等待中',
+  stopped: '已停止',
+};
+
+// 启动时从 /api/status-labels 并入服务端单源标签（新状态自动出现），失败静默回退本地副本。
+async function loadStatusLabels() {
+  try {
+    const data = await fetchJson('/api/status-labels');
+    if (data && data.labels) {
+      Object.assign(STATUS_LABELS, data.labels);
+      if (state.filteredSessions && state.filteredSessions.length) renderSessions();
+    }
+  } catch {
+    /* 保持本地回退 */
+  }
+}
+
 function sessionCardHtml(session) {
   const activeClass = session.id === state.selectedSessionId ? 'active' : '';
   const chips = [];
@@ -2809,7 +2830,10 @@ function sessionCardHtml(session) {
         <div class="session-item ${activeClass}" data-session-id="${escapeHtml(session.id)}" tabindex="0">
           <div class="top">
             <span>${escapeHtml(formatDate(session.timestamp))}</span>
-            ${session.status ? `<span class="badge ${escapeHtml(session.status)}">${escapeHtml(session.status)}</span>` : ''}
+            <span class="badges">
+              ${session.archived ? '<span class="badge archived" title="归档会话">📦</span>' : ''}
+              ${session.status ? `<span class="badge ${escapeHtml(session.status)}">${escapeHtml(STATUS_LABELS[session.status] || session.status)}</span>` : ''}
+            </span>
           </div>
           <div class="stats">${chips.join('')}</div>
           <div class="id">${session.title ? escapeHtml(session.title) : escapeHtml(session.id)}</div>
@@ -4615,11 +4639,24 @@ function startSse() {
   es.addEventListener('newMessages', (e) => {
     if (!state.sessionData) return;
     const { messages: newMsgs, session } = JSON.parse(e.data || '{}');
-    if (!Array.isArray(newMsgs) || newMsgs.length === 0) return;
+    const hasMsgs = Array.isArray(newMsgs) && newMsgs.length > 0;
+
+    if (session) Object.assign(state.sessionData.session || {}, session);
+
+    // 即时刷新侧栏会话状态徽标（服务端 newMessages 恒带 status；分组顺序由下方 loadSessions 收敛）。
+    // 结束/闲置标记可能不附带新消息，也要处理。
+    if (session && session.status && Array.isArray(state.sessions)) {
+      const s = state.sessions.find((x) => x.id === state.selectedSessionId);
+      if (s && s.status !== session.status) {
+        s.status = session.status;
+        renderSessions();
+      }
+    }
+
+    if (!hasMsgs) return;
 
     // Append new messages to session data
     state.sessionData.messages.push(...newMsgs);
-    if (session) Object.assign(state.sessionData.session || {}, session);
 
     // Expand visibleUnitCount to show new messages
     state.visibleUnitCount += newMsgs.length + 5;
@@ -4968,6 +5005,7 @@ document.addEventListener('keydown', async (event) => {
 });
 
 async function initialLoad() {
+  loadStatusLabels(); // 单源四态标签（服务端 /api/status-labels）
   await refreshAll(false);
   // First run without a stored platform: switch to the first platform that has sessions
   if (!hasStoredPlatform && state.platform === 'openclaw' && state.agents.length === 0) {

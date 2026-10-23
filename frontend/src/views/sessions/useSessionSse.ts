@@ -4,7 +4,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { watchUrl } from '@/api/client';
-import type { SessionDetail, SessionMessage, SessionMeta } from '@/api/types';
+import type { SessionDetail, SessionMessage, SessionMeta, SessionSummary } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 import { dirForPlatform, useAppStore } from '@/store';
 
@@ -47,7 +47,24 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
         session?: Partial<SessionMeta>;
       };
       const newMsgs = payload.messages;
-      if (!Array.isArray(newMsgs) || newMsgs.length === 0) return;
+      const hasMsgs = Array.isArray(newMsgs) && newMsgs.length > 0;
+      // 即时刷新侧栏会话状态：把推送过来的 status 合进所有活动列表缓存变体。
+      // 结束/闲置标记可能不附带新消息，因此先于空消息守卫处理（避免等下个 5s 轮询）。
+      const pushedStatus = typeof payload.session?.status === 'string' ? payload.session.status : null;
+      if (pushedStatus) {
+        queryClient.setQueriesData<SessionSummary[]>({ queryKey: ['sessions', platform], type: 'active' }, (old) => {
+          if (!old) return old;
+          return old.map((s) => (s.id === sessionId ? { ...s, status: pushedStatus } : s));
+        });
+      }
+      if (!hasMsgs) {
+        if (payload.session) {
+          queryClient.setQueryData<SessionDetail>(['session', platform, sessionId], (old) =>
+            old ? { ...old, session: { ...old.session, ...payload.session } } : old
+          );
+        }
+        return;
+      }
       queryClient.setQueryData<SessionDetail>(['session', platform, sessionId], (old) =>
         old
           ? { session: { ...old.session, ...(payload.session || {}) }, messages: [...old.messages, ...newMsgs] }

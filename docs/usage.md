@@ -241,10 +241,10 @@ All list/detail endpoints accept an optional `?dir=` parameter to override the d
 | Claude Code | JSONL | `~/.claude/projects/{project-slug}/{sessionId}.jsonl` (plus `{sessionId}/subagents/agent-*.jsonl` for spawned children) |
 | Hermes | SQLite | `~/.hermes/state.db` |
 | OMP | JSONL | `~/.omp/agent/sessions/*/{timestamp}_{id}.jsonl` |
-| DeepSeek Harness | JSONL / zstd-compressed JSONL | `~/.dsh/sessions/{project}/{id}/session.jsonl[.zstd]` |
+| DeepSeek Harness | JSONL / zstd-compressed JSONL | `~/.dsh/sessions/{project}/{id}/session[.vN].jsonl[.zstd]` — versioned durable logs (currently `session.v4.jsonl.zstd`) |
 | Gemini CLI | JSONL | `~/.gemini/tmp/{projectHash}/chats/session-*.jsonl` |
 
-dsh's `.jsonl.zstd` logs are a concatenation of independent Zstandard frames (one per append batch); AgentLRay scans the frame boundaries and decompresses every frame, tolerating a torn trailing frame after a crash. Reading compressed dsh logs requires Node.js ≥ 22.15 (built-in zstd); plain `session.jsonl` logs work on any supported Node.
+dsh's `.jsonl.zstd` logs are a concatenation of independent Zstandard frames (one per append batch); AgentLRay scans the frame boundaries and decompresses every frame, tolerating a torn trailing frame after a crash. The durable log is versioned: a session dir keeps a legacy `session.jsonl[.zstd]` (format 0) next to the frozen `session.v3.jsonl.zstd` / current `session.v4.jsonl.zstd`; AgentLRay reads the highest format version present, so the current log supersedes stale legacy copies. Reading compressed dsh logs requires Node.js ≥ 22.15 (built-in zstd); plain `session.jsonl` logs work on any supported Node.
 
 Archived sessions (`.jsonl.reset.*`, `.jsonl.deleted.*`) are shown for OpenClaw when "Include archived" is enabled; the other adapters list active `.jsonl` files only.
 

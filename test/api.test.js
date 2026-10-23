@@ -424,14 +424,15 @@ describe('backup', () => {
 
   it('copies every session log once, then skips everything on the second run', async () => {
     const first = await sendJson(srv.base, 'POST', '/api/backup', undefined);
-    // codex 2 + claude 2 + history.jsonl + omp 2 + dsh 2 + gemini 3 (incl. nested subagent transcript)
-    assert.equal(first.copied, 12);
+    // codex 2 + claude 2 + history.jsonl + omp 2 + dsh 5 + gemini 3 (incl. nested subagent transcript)
+    // dsh = 0001 plain + 0002 zstd + 0003 legacy-v0 + 0003 v3 + 0004 v4 (versioned durable logs archived too)
+    assert.equal(first.copied, 15);
     assert.equal(first.skipped, 0);
-    assert.equal(first.total, 12);
+    assert.equal(first.total, 15);
     assert.deepEqual(first.byPlatform.codex, { copied: 2, skipped: 0 });
     assert.deepEqual(first.byPlatform['claude-code'], { copied: 3, skipped: 0 });
     assert.deepEqual(first.byPlatform.omp, { copied: 2, skipped: 0 });
-    assert.deepEqual(first.byPlatform.dsh, { copied: 2, skipped: 0 });
+    assert.deepEqual(first.byPlatform.dsh, { copied: 5, skipped: 0 });
     assert.deepEqual(first.byPlatform.gemini, { copied: 3, skipped: 0 });
     // Archive stays inside the temp HOME
     assert.equal(first.archiveDir, path.join(srv.home, '.agentlray', 'archive'));
@@ -439,12 +440,12 @@ describe('backup', () => {
 
     const second = await sendJson(srv.base, 'POST', '/api/backup', undefined);
     assert.equal(second.copied, 0);
-    assert.equal(second.skipped, 12);
-    assert.equal(second.total, 12);
+    assert.equal(second.skipped, 15);
+    assert.equal(second.total, 15);
 
     const status = await getJson(srv.base, '/api/backup/status');
     assert.equal(status.archiveDir, first.archiveDir);
-    assert.equal(status.files, 12);
+    assert.equal(status.files, 15);
     assert.ok(status.bytes > 0);
     assert.ok(typeof status.lastBackup === 'string');
   });

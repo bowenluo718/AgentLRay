@@ -644,14 +644,36 @@
       color: #58a6ff;
     }
 
-    .badge.active {
-      color: #7ee787;
-      border-color: rgba(35, 134, 54, 0.45);
+    .badges {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
     }
 
     .badge.archived {
       color: #d29922;
       border-color: rgba(210, 153, 34, 0.45);
+    }
+
+    /* 统一四态徽标（status 由服务端按状态分组排序时给出） */
+    .badge.awaiting-input {
+      color: #f0b429;
+      border-color: rgba(240, 180, 41, 0.5);
+    }
+
+    .badge.working {
+      color: #7ee787;
+      border-color: rgba(35, 134, 54, 0.45);
+    }
+
+    .badge.waiting {
+      color: #58a6ff;
+      border-color: rgba(56, 139, 253, 0.5);
+    }
+
+    .badge.stopped {
+      color: var(--muted);
+      border-color: var(--border);
     }
 
     .main {

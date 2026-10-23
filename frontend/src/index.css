@@ -88,6 +88,7 @@
   #about {
     @apply border-t border-border px-6 py-10 text-sm leading-relaxed text-muted-foreground;
     background: hsl(var(--panel-alt));
+    display: none;
   }
   #about > div {
     @apply mx-auto flex max-w-3xl flex-col gap-4;

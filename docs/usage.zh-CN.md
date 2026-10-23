@@ -20,6 +20,7 @@
 
 - **多平台支持** — 一个界面统一查看 OpenClaw、Codex、Claude Code、Hermes、OMP、DeepSeek Harness、Gemini CLI 的会话日志（dsh 的多帧 zstd 压缩日志透明解压；Gemini CLI 的 `/rewind` 回滚记录会先折叠，回滚掉的历史不会重复渲染）
 - **会话浏览** — 浏览 Agent 列表，搜索/过滤会话，查看消息历史
+- **会话状态与分组** — 每个会话带统一状态徽标（待用户输入 / 工作中 / 等待中 / 已停止），列表默认按该顺序分组，组内按各平台默认排序（多数按开始时间新→旧）；状态由日志记录 + 时间窗口推断（取证口径，非进程级实时），详见[设计文档](.local/session-status-design.zh-CN.md)
 - **工具调用检查** — 可展开的工具调用详情，包含参数和返回结果
 - **Trace 视图** — 每轮对话的耗时瀑布图：模型推理（蓝）与工具执行（绿，出错为红）一目了然，点击色条在侧栏查看该 span 详情（紫色条则加载派生出的子 Agent 对话）
 - **Prompt 提取** — 按 session 提取全部真人 prompt（自动过滤工具结果、斜杠命令、系统注入等噪音），按工作目录分组，支持搜索 / JSON 导出 / 复制
@@ -32,7 +33,7 @@
 - **消息时间线** — 可视化对话流程图，不同角色用不同颜色标识
 - **Resume 命令** — 一键复制该会话在原 CLI 中的续跑命令（`codex resume`、`claude --resume`、`omp --resume=`）
 - **摘要可折叠** — 需要更多阅读空间时可折叠会话摘要
-- **自动刷新** — 会话列表和消息实时更新
+- **自动刷新** — 会话列表和消息实时更新；状态徽标随日志增长即时变化（SSE 推送）并按 5s 轮询校准
 - **设置面板** — 在页面上直接配置各平台目录，保存到 localStorage，无需重启
 - **会话备份** — 增量归档 Codex、Claude Code、OMP、DeepSeek Harness、Gemini CLI 的会话日志到 `~/.agentlray/archive`（Hermes 与 OpenClaw 不归档），在设置面板一键触发（也会每天自动执行），未变化的文件自动跳过
 - **键盘导航** — 使用方向键在会话之间切换
@@ -105,8 +106,8 @@ npm start
 
 1. **选择平台** — 点击顶部 `OpenClaw`、`Codex`、`Claude Code`、`Hermes`、`OMP`、`DeepSeek Harness` 或 `Gemini CLI`
 2. **选择 Agent** — OpenClaw 平台下，从下拉菜单选择 Agent（如 `xiaot`、`mimo`）
-3. **浏览会话** — 会话按时间倒序排列，每张卡片显示：
-   - 时间戳和状态（`active` / `archived`）
+3. **浏览会话** — 会话默认按状态分组排序：待用户输入 → 工作中 → 等待中 → 已停止（组内按开始时间新→旧），每张卡片显示：
+   - 时间戳与四态状态徽标（`待用户输入` / `工作中` / `等待中` / `已停止`；归档会话带 📦）
    - 消息计数：👤 用户、🤖 助手、🔧 工具调用
    - 🔗 Spawn 标记（如果该会话产生了子 Agent）
 4. **查看消息** — 点击会话加载完整对话
@@ -227,10 +228,10 @@ npm start
 | Claude Code | JSONL | `~/.claude/projects/{project-slug}/{sessionId}.jsonl`（派生子 Agent 另有 `{sessionId}/subagents/agent-*.jsonl`） |
 | Hermes | SQLite | `~/.hermes/state.db` |
 | OMP | JSONL | `~/.omp/agent/sessions/*/{timestamp}_{id}.jsonl` |
-| DeepSeek Harness | JSONL / zstd 压缩 JSONL | `~/.dsh/sessions/{project}/{id}/session.jsonl[.zstd]` |
+| DeepSeek Harness | JSONL / zstd 压缩 JSONL | `~/.dsh/sessions/{project}/{id}/session[.vN].jsonl[.zstd]` — 版本化持久日志（当前为 `session.v4.jsonl.zstd`） |
 | Gemini CLI | JSONL | `~/.gemini/tmp/{projectHash}/chats/session-*.jsonl` |
 
-dsh 的 `.jsonl.zstd` 日志是多个独立 Zstandard 帧的串联（每个持久化批次一帧）；AgentLRay 会扫描帧边界并逐帧解压，崩溃残留的尾部不完整帧会被容忍丢弃。读取压缩日志需要 Node.js ≥ 22.15（内置 zstd）；未压缩的 `session.jsonl` 在任何受支持的 Node 上都能读。
+dsh 的 `.jsonl.zstd` 日志是多个独立 Zstandard 帧的串联（每次持久化批次一帧）；AgentLRay 会扫描帧边界并逐帧解压，崩溃残留的尾部不完整帧会被容忍丢弃。持久日志是版本化的：会话目录可能同时保有一份遗留的 `session.jsonl[.zstd]`（格式 0）与固化后的 `session.v3.jsonl.zstd` / 当前 `session.v4.jsonl.zstd`；AgentLRay 读取目录内最高格式版本，保证用当前日志取代陈旧的遗留副本。读取压缩日志需要 Node.js ≥ 22.15（内置 zstd）；未压缩的 `session.jsonl` 在任何受支持的 Node 上都能读。
 
 启用「包含已归档」后，OpenClaw 还会显示 `.jsonl.reset.*` 和 `.jsonl.deleted.*` 的归档会话；其他适配器只列出活跃的 `.jsonl` 文件。
 

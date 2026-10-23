@@ -82,8 +82,8 @@ describe('sessions: hermes (node:sqlite)', () => {
     assert.equal(s1.toolCallCount, 1);
     assert.deepEqual(s1.topTools, [{ name: 'terminal', count: 1 }]);
     assert.ok(s1.firstUserMessage.startsWith('fixture: hermes-needle'));
-    assert.equal(s1.status, 'archived');
-    assert.equal(sessions[0].status, 'active');
+    assert.equal(s1.status, 'stopped');
+    assert.equal(sessions[0].status, 'stopped');
     assert.equal(s1.estimatedCost, 0.0031);
   });
 
