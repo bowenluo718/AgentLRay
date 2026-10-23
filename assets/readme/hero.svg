@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="290" viewBox="0 0 1200 290" role="img" aria-labelledby="title desc">
+  <title id="title">AgentLRay — execution evidence, not assumed success</title>
+  <desc id="desc">Conceptual recorded-order timeline: a check passes, an edit follows, then a dashed connection leads to an unknown next check. The adjacent README explains the limits and shows the actual interface using synthetic data.</desc>
+  <rect width="1200" height="290" rx="18" fill="#0d1117"/>
+  <g id="identity" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif">
+    <text x="60" y="114" fill="#e6edf3" font-size="88" font-weight="700">Agent<tspan fill="#58c4dc">XRay</tspan></text>
+  </g>
+  <g id="recorded-order" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="45" font-weight="600">
+    <path d="M88 201H492" fill="none" stroke="#58c4dc" stroke-width="3"/>
+    <path d="M516 201H924" fill="none" stroke="#8b949e" stroke-width="3" stroke-dasharray="9 10"/>
+    <circle cx="80" cy="201" r="13" fill="#58c4dc"/>
+    <circle cx="504" cy="201" r="13" fill="#e3b341"/>
+    <circle cx="936" cy="201" r="13" fill="#0d1117" stroke="#8b949e" stroke-width="3"/>
+    <rect x="112" y="167" width="295" height="65" fill="#0d1117"/>
+    <rect x="536" y="167" width="264" height="65" fill="#0d1117"/>
+    <rect x="968" y="167" width="179" height="65" fill="#0d1117"/>
+    <text x="122" y="216" fill="#58c4dc">CHECK ✓</text>
+    <text x="546" y="216" fill="#e3b341">EDIT ✓</text>
+    <text x="978" y="216" fill="#8b949e">?</text>
+  </g>
+</svg>

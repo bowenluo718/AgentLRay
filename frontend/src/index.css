@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Dark theme is the one and only theme — token values ported from the legacy
+ * palette in public/css/app.css (:root). Both :root and .dark carry the same
+ * values so shadcn components work with or without the .dark class.
+ */
+@layer base {
+  :root,
+  .dark {
+    /* legacy --bg #0d1117 */
+    --background: 216 28% 7%;
+    /* legacy --text #c9d1d9 */
+    --foreground: 212 17% 82%;
+    /* legacy --panel #161b22 */
+    --card: 215 21% 11%;
+    --card-foreground: 212 17% 82%;
+    --popover: 215 21% 11%;
+    --popover-foreground: 212 17% 82%;
+    /* legacy --user #1f6feb */
+    --primary: 212 84% 52%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 215 15% 15%;
+    --secondary-foreground: 212 17% 82%;
+    --muted: 215 15% 15%;
+    /* legacy --muted #8b949e */
+    --muted-foreground: 212 9% 58%;
+    --accent: 215 15% 17%;
+    --accent-foreground: 212 17% 88%;
+    /* legacy --danger #f85149 */
+    --destructive: 3 93% 63%;
+    --destructive-foreground: 0 0% 100%;
+    /* legacy --border #30363d */
+    --border: 213 12% 21%;
+    --input: 213 12% 21%;
+    --ring: 212 84% 52%;
+    --radius: 0.5rem;
+
+    /* legacy extras */
+    --panel: 215 21% 11%;
+    --panel-alt: 213 26% 9%;
+    --user: 212 84% 52%;
+    --assistant: 132 59% 33%;
+    --danger: 3 93% 63%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    height: 100%;
+  }
+  body {
+    min-height: 100%;
+  }
+  /*
+   * The dashboard still owns exactly one viewport; the page scrolls past it to
+   * reach the static #about section that lives after #root in index.html.
+   * Scroll chaining is left at the default on purpose: `overscroll-behavior:
+   * contain` on the inner panes blocks the chain even when a pane has nothing
+   * to scroll, which traps the wheel over most of the dashboard and makes
+   * #about unreachable by the one gesture a visitor will actually try.
+   */
+  #root {
+    height: 100vh;
+    height: 100dvh;
+  }
+  body {
+    @apply text-foreground font-sans antialiased;
+    /* legacy background: two radial glows over --bg */
+    background:
+      radial-gradient(circle at top left, rgba(31, 111, 235, 0.14), transparent 28%),
+      radial-gradient(circle at bottom right, rgba(35, 134, 54, 0.12), transparent 30%),
+      hsl(var(--background));
+    background-attachment: fixed;
+  }
+}
+
+/*
+ * Static "About AgentLRay" section. Its markup lives in index.html, after
+ * #root, so React cannot own it and neither can a component stylesheet.
+ */
+@layer components {
+  #about {
+    @apply border-t border-border px-6 py-10 text-sm leading-relaxed text-muted-foreground;
+    background: hsl(var(--panel-alt));
+  }
+  #about > div {
+    @apply mx-auto flex max-w-3xl flex-col gap-4;
+  }
+  #about h2 {
+    @apply text-lg font-semibold text-foreground;
+  }
+  #about h3 {
+    @apply pt-2 text-base font-semibold text-foreground;
+  }
+  #about ul {
+    @apply grid gap-1 sm:grid-cols-2;
+  }
+  #about code {
+    @apply rounded bg-secondary px-1 py-0.5 font-mono text-xs text-foreground;
+  }
+  #about pre {
+    @apply overflow-x-auto rounded border border-border bg-card p-3 font-mono text-xs;
+  }
+  #about pre code {
+    @apply bg-transparent p-0;
+  }
+  #about a {
+    @apply text-primary underline-offset-2 hover:underline;
+  }
+  #about footer {
+    @apply flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-4;
+  }
+}
