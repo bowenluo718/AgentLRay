@@ -3,6 +3,8 @@
 const argv = process.argv.slice(2);
 if (['inspect', 'evidence'].includes(argv[0])) {
   void require('./inspect').main(argv.slice(1), argv[0]);
+} else if (argv[0] === 'sessions') {
+  void require('./sessions').main(argv.slice(1), argv[0]);
 } else {
   let port = process.env.PORT;
   let host = process.env.HOST;
@@ -22,6 +24,7 @@ if (['inspect', 'evidence'].includes(argv[0])) {
       console.log('Usage: agentlray [--port <port>] [--host <host>] [--version]');
       console.log('Offline evidence: agentlray inspect --help');
       console.log('Explicit raw evidence: agentlray evidence --help');
+      console.log('Session queries/resume: agentlray sessions --help');
       process.exit(0);
     } else {
       console.error(`agentlray: unknown option '${arg}'`);

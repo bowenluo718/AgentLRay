@@ -5,7 +5,7 @@
   "main": "server.js",
   "bin": {
     "agentlray": "bin/agentlray.js",
-    "agent-xray": "bin/agentlray.js"
+    "agent-lray": "bin/agentlray.js"
   },
   "files": [
     "server.js",
