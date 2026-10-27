@@ -8,6 +8,7 @@ const {
   STATUS_ORDER,
   STATUS_LABELS,
   RECENT_ACTIVITY_MS,
+  ACTIVE_WORK_CEIL_MS,
   HISTORY_CEIL_MS,
   deriveStatus,
   sortSessionsByStatusGroups,
@@ -68,30 +69,100 @@ test('pending 工具：新鲜 → working（执行中）', () => {
   );
 });
 
-test('pending 工具：过期但在闭口窗口内 → awaiting-input（停等用户）', () => {
+test('pending 工具：超过进行中工作上界、仍在闭口窗口内 → awaiting-input（停等用户）', () => {
   assert.equal(
-    deriveStatus({ pendingToolAt: minAgo(6) }, { lastActivity: minAgo(6) }, NOW),
+    deriveStatus({ pendingToolAt: minAgo(40) }, { lastActivity: minAgo(40) }, NOW),
     STATUS.AWAITING_INPUT
   );
 });
 
 test('pending 工具：超闭口窗口 → stopped（取证上界：中断会话不无限置顶）', () => {
   assert.equal(
-    deriveStatus({ pendingToolAt: minAgo(40) }, { lastActivity: minAgo(40) }, NOW),
+    deriveStatus({ pendingToolAt: minAgo(800) }, { lastActivity: minAgo(800) }, NOW),
     STATUS.STOPPED
   );
 });
 
-test('pending 边界等号：==HISTORY_CEIL → awaiting-input；==RECENT → working', () => {
+test('pending 边界等号：==ACTIVE_WORK_CEIL/==RECENT → working；==HISTORY_CEIL → awaiting-input', () => {
   const atCeil = NOW - HISTORY_CEIL_MS;
+  const atActiveWork = NOW - ACTIVE_WORK_CEIL_MS;
   const atRecent = NOW - RECENT_ACTIVITY_MS;
   assert.equal(
     deriveStatus({ pendingToolAt: atCeil }, { lastActivity: atCeil }, NOW),
     STATUS.AWAITING_INPUT
   );
   assert.equal(
+    deriveStatus({ pendingToolAt: atActiveWork }, { lastActivity: atActiveWork }, NOW),
+    STATUS.WORKING
+  );
+  assert.equal(
     deriveStatus({ pendingToolAt: atRecent }, { lastActivity: atRecent }, NOW),
     STATUS.WORKING
+  );
+});
+
+test('长工具执行/等待输出：pending 超过 2min 仍在进行中工作上界内 → working（回归：原被误判 awaiting-input）', () => {
+  // 6 分钟前发起、尚未返回的工具调用：>RECENT 但 <=ACTIVE_WORK_CEIL → 工作中
+  assert.equal(
+    deriveStatus({ pendingToolAt: minAgo(6) }, { lastActivity: minAgo(6) }, NOW),
+    STATUS.WORKING
+  );
+  // 思考：真实 prompt 待答，10 分钟无新记录落盘 → 工作中
+  assert.equal(
+    deriveStatus(
+      { lastPromptAt: minAgo(10), lastAssistantAt: minAgo(12) },
+      { lastActivity: minAgo(10) },
+      NOW
+    ),
+    STATUS.WORKING
+  );
+});
+
+test('交互类工具（ask）等用户回复：超取证上界仍 awaiting-input（回归：原被误判 stopped）', () => {
+  // 15 小时前发起的 ask，用户一直未答 → 若走普通上界(12h)早已 stopped；
+  // 交互豁免应使其保持"待用户输入"，不得降级成 stopped
+  assert.equal(
+    deriveStatus(
+      { pendingToolAt: minAgo(900), pendingNewestAt: minAgo(900), oldestPendingToolName: 'ask' },
+      { lastActivity: minAgo(900) },
+      NOW
+    ),
+    STATUS.AWAITING_INPUT
+  );
+});
+
+test('交互类工具（ask）进行中工作上界内 → working（与普通工具一致）', () => {
+  assert.equal(
+    deriveStatus(
+      { pendingToolAt: secAgo(30), oldestPendingToolName: 'ask' },
+      { lastActivity: secAgo(30) },
+      NOW
+    ),
+    STATUS.WORKING
+  );
+  assert.equal(
+    deriveStatus(
+      { pendingToolAt: minAgo(12), oldestPendingToolName: 'ask' },
+      { lastActivity: minAgo(12) },
+      NOW
+    ),
+    STATUS.WORKING
+  );
+});
+
+test('非交互工具超取证上界不豁免 → stopped；无工具名信息时回退普通上界逻辑', () => {
+  assert.equal(
+    deriveStatus(
+      { pendingToolAt: minAgo(800), pendingNewestAt: minAgo(800), oldestPendingToolName: 'bash' },
+      { lastActivity: minAgo(800) },
+      NOW
+    ),
+    STATUS.STOPPED
+  );
+  // 无 oldestPendingToolName（如 hermes 近似 pending）：仍按闭口上界
+  assert.equal(
+    deriveStatus({ pendingToolAt: minAgo(800), pendingNewestAt: minAgo(800) }, { lastActivity: minAgo(800) }, NOW),
+    STATUS.STOPPED
   );
 });
 
@@ -106,11 +177,11 @@ test('pendingNewestAt 新近 + 旧残留至超界 → working（防旧锚误判�
   );
 });
 
-test('pending 全部新近但都在窗口内 → awaiting-input（最新锚也过期）', () => {
+test('pending 全部超过进行中工作上界但都在闭口窗口内 → awaiting-input（最新锚也过期）', () => {
   assert.equal(
     deriveStatus(
-      { pendingToolAt: minAgo(6), pendingNewestAt: minAgo(6) },
-      { lastActivity: minAgo(6) },
+      { pendingToolAt: minAgo(40), pendingNewestAt: minAgo(40) },
+      { lastActivity: minAgo(40) },
       NOW
     ),
     STATUS.AWAITING_INPUT
@@ -133,8 +204,8 @@ test('回合完成 endTurnAt 且无更新 prompt → 闭口窗口内 waiting，�
   assert.equal(atCeil, STATUS.WAITING);
 
   const beyond = deriveStatus(
-    { endTurnAt: minAgo(40), lastAssistantAt: minAgo(40) },
-    { lastActivity: minAgo(40) },
+    { endTurnAt: minAgo(800), lastAssistantAt: minAgo(800) },
+    { lastActivity: minAgo(800) },
     NOW
   );
   assert.equal(beyond, STATUS.STOPPED);
@@ -164,13 +235,14 @@ test('真实 prompt 待答（prompt 晚于 assistant 且新鲜）→ working(Pro
   );
 });
 
-test('无标记 idle：闭口窗口内 → waiting，超界 → stopped', () => {
-  assert.equal(deriveStatus({}, { lastActivity: minAgo(8) }, NOW), STATUS.WAITING);
-  assert.equal(deriveStatus({}, { lastActivity: minAgo(40) }, NOW), STATUS.STOPPED);
+test('无标记 idle：进行中工作上界内 → working（消息间隙）；超过上界闭口内 → waiting；超界 → stopped', () => {
+  assert.equal(deriveStatus({}, { lastActivity: minAgo(8) }, NOW), STATUS.WORKING);
+  assert.equal(deriveStatus({}, { lastActivity: minAgo(40) }, NOW), STATUS.WAITING);
+  assert.equal(deriveStatus({}, { lastActivity: minAgo(800) }, NOW), STATUS.STOPPED);
 });
 
-test('中间带：lastActivity 2~30min、无其它证据 → waiting（宽容口径）', () => {
-  assert.equal(deriveStatus({}, { lastActivity: minAgo(4) }, NOW), STATUS.WAITING);
+test('中间带：lastActivity 30min~12h、无其它证据 → waiting（宽容口径）', () => {
+  assert.equal(deriveStatus({}, { lastActivity: minAgo(40) }, NOW), STATUS.WAITING);
 });
 
 // ---- 分组排序 ----
@@ -181,15 +253,15 @@ function session(id, status, timestamp, lastActivity) {
 
 test('sortSessionsByStatusGroups 写回四态 status 并按状态分组、组内 timestamp 降序', () => {
   const sessions = [
-    session('old-idle', null, '2026-10-22T00:00:00.000Z', minAgo(100)),
-    session('pending-stale', null, '2026-10-23T01:00:00.000Z', minAgo(6)),
+    session('old-idle', null, '2026-10-22T00:00:00.000Z', minAgo(800)),
+    session('pending-stale', null, '2026-10-23T01:00:00.000Z', minAgo(40)),
     session('working-a', null, '2026-10-23T03:00:00.000Z', secAgo(10)),
-    session('waiting-1', null, '2026-10-23T02:00:00.000Z', minAgo(10)),
-    session('waiting-2', null, '2026-10-23T02:30:00.000Z', minAgo(12)),
+    session('waiting-1', null, '2026-10-23T02:00:00.000Z', minAgo(50)),
+    session('waiting-2', null, '2026-10-23T02:30:00.000Z', minAgo(40)),
   ];
   // 注：状态由 tail/meta 推导，这里显式给出 tail 以确定结果
   const withTail = sessions.map((s) => {
-    if (s.id === 'pending-stale') return { ...s, tail: { pendingToolAt: minAgo(6) } };
+    if (s.id === 'pending-stale') return { ...s, tail: { pendingToolAt: minAgo(40) } };
     if (s.id === 'working-a') return { ...s, tail: { pendingToolAt: secAgo(10) } };
     return { ...s, tail: {} };
   });
@@ -213,13 +285,13 @@ test('组内排序可指定 lastActivity（hermes 语义）', () => {
     { id: 'b', tail: {}, timestamp: '2026-10-23T01:00:00.000Z', lastActivity: '2026-10-23T00:40:00.000Z' },
   ];
   sortSessionsByStatusGroups(sessions, { nowMs: NOW, sortBy: 'lastActivity' });
-  // 两组都会是 stopped（远古），组内按 lastActivity 降序 → b 在前
+  // 两组都会是 waiting（3h+ 前活动、仍在 12h 闭口内），组内按 lastActivity 降序 → b 在前
   assert.deepEqual(sessions.map((s) => s.id), ['b', 'a']);
 });
 
 test('脏 status 被 deriveStatus 覆盖（sort 写回真实推导值）', () => {
   const sessions = [
-    { id: 'x', status: 'weird', tail: { pendingToolAt: minAgo(6) }, timestamp: 't', lastActivity: minAgo(6) },
+    { id: 'x', status: 'weird', tail: { pendingToolAt: minAgo(40) }, timestamp: 't', lastActivity: minAgo(40) },
   ];
   sortSessionsByStatusGroups(sessions, { nowMs: NOW });
   assert.equal(sessions[0].status, STATUS.AWAITING_INPUT);

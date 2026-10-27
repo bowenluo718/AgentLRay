@@ -177,6 +177,101 @@ describe('AgentLRay API', () => {
     });
   });
 
+  describe('sessions: multi-platform aggregate', () => {
+    it('lists sessions across comma-separated platforms', async () => {
+      const result = await getJson(srv.base, '/api/sessions?platform=omp,codex');
+      assert.equal(result.all, false);
+      assert.deepEqual(result.platformIds, ['omp', 'codex']);
+      assert.equal(result.platforms.length, 2);
+      const ompBlock = result.platforms.find((p) => p.platform === 'omp');
+      assert.equal(ompBlock.agent, null);
+      assert.equal(ompBlock.total, 2);
+      assert.ok(ompBlock.sessions.some((s) => s.id === OMP1));
+      const codexBlock = result.platforms.find((p) => p.platform === 'codex');
+      assert.ok(codexBlock.total >= 1);
+    });
+
+    it('platform=all returns one block per platform with offset/limit applied per block', async () => {
+      const result = await getJson(srv.base, '/api/sessions?platform=all&limit=2');
+      assert.equal(result.all, true);
+      assert.ok(result.platformIds.includes('openclaw'));
+      assert.ok(result.platformIds.includes('hermes'));
+      const codex = result.platforms.find((p) => p.platform === 'codex');
+      assert.equal(codex.limit, 2);
+      assert.ok(codex.sessions.length <= 2);
+      // total 是过滤后、分页前；每块独立分页
+      assert.ok(codex.total >= codex.sessions.length);
+    });
+
+    it('status/match filters apply per platform block', async () => {
+      const grabbed = await getJson(srv.base, '/api/sessions?platform=omp,codex&status=working');
+      // 夹具会话时间远早于墙钟 → 全部 stopped
+      assert.ok(grabbed.platforms.every((p) => p.total === 0));
+      const byMatch = await getJson(srv.base, '/api/sessions?platform=all&match=fixture');
+      assert.ok(byMatch.total > 0);
+    });
+
+    it('rejects unknown platforms and the result of combining all with others', async () => {
+      const bad = await getJson(srv.base, '/api/sessions?platform=omp,nope', 400);
+      assert.match(bad.error, /Unknown platform/);
+      const mixed = await getJson(srv.base, '/api/sessions?platform=all,omp', 400);
+      assert.match(mixed.error, /cannot be combined/);
+    });
+
+    it('openclaw without agent lists every agent as its own block', async () => {
+      // 夹具 home 无 openclaw agents 目录 → 空；但请求本身合法（不要求 --agent）
+      const result = await getJson(srv.base, '/api/sessions?platform=openclaw');
+      assert.equal(result.all, false);
+      assert.equal(result.platforms.length, 0);
+    });
+
+    it('GET /api/openclaw/sessions 合并全部 agents，详情跨 agent 查找', async () => {
+      const agentsRoot = path.join(srv.home, '.openclaw', 'agents');
+      const mk = async (agent, id) => {
+        const dir = path.join(agentsRoot, agent, 'sessions');
+        await fsp.mkdir(dir, { recursive: true });
+        await fsp.writeFile(
+          path.join(dir, `${id}.jsonl`),
+          `${JSON.stringify({ type: 'session', id, timestamp: '2026-01-10T09:00:00.000Z', cwd: `/workspace/${id}` })}\n` +
+            `${JSON.stringify({
+              type: 'message',
+              timestamp: '2026-01-10T09:00:02.000Z',
+              message: { role: 'user', content: [{ type: 'text', text: `${id} task` }] },
+            })}\n`
+        );
+      };
+      try {
+        await mk('alpha-ag', 'oc-a1');
+        await mk('beta-ag', 'oc-b2');
+
+        // 缺省：全部 agents 合并，每条带来源 agent 与 cwd
+        const merged = await getJson(srv.base, '/api/openclaw/sessions');
+        assert.equal(merged.length, 2);
+        const byId = Object.fromEntries(merged.map((s) => [s.id, s.agent]));
+        assert.equal(byId['oc-a1'], 'alpha-ag');
+        assert.equal(byId['oc-b2'], 'beta-ag');
+        assert.equal(merged.find((s) => s.id === 'oc-a1').cwd, '/workspace/oc-a1');
+
+        // 详情：跨全部 agents 查找并标注归属
+        const detail = await getJson(srv.base, '/api/openclaw/sessions/oc-b2');
+        assert.equal(detail.session.id, 'oc-b2');
+        assert.equal(detail.session.cwd, '/workspace/oc-b2');
+        assert.equal(detail.agent, 'beta-ag');
+
+        // 指定 agent 仍限定单 agent
+        const single = await getJson(srv.base, '/api/openclaw/sessions?agent=alpha-ag');
+        assert.equal(single.length, 1);
+        assert.equal(single[0].id, 'oc-a1');
+
+        // 未命中 → 404
+        await getJson(srv.base, '/api/openclaw/sessions/oc-nope', 404);
+      } finally {
+        await fsp.rm(path.join(agentsRoot, 'alpha-ag'), { recursive: true, force: true });
+        await fsp.rm(path.join(agentsRoot, 'beta-ag'), { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('search', () => {
     it('finds a keyword in one platform', async () => {
       const results = await getJson(srv.base, '/api/search?q=search-needle-alpha&platform=codex');
@@ -490,5 +585,176 @@ describe('csrf guard', () => {
   it('never blocks reads, whatever the origin', async () => {
     const res = await send('GET', { Origin: 'https://evil.example', 'Sec-Fetch-Site': 'cross-site' }, '/api/version');
     assert.equal(res.status, 200);
+  });
+});
+
+describe('ui settings persist (页面持久化平台选择，CLI 缺省 --platform 读取)', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer();
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('GET returns empty defaults before any save', async () => {
+    const ui = await getJson(srv.base, '/api/settings/ui');
+    assert.deepEqual(ui, { platform: null, selectedPlatforms: [] });
+  });
+
+  it('PUT persists platform selection and GET returns it; file lands for the CLI default', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings/ui', {
+      platform: 'omp',
+      selectedPlatforms: ['omp', 'codex'],
+    });
+    assert.deepEqual(saved, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
+    const ui = await getJson(srv.base, '/api/settings/ui');
+    assert.deepEqual(ui, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
+    // CLI（bin/sessions.js）缺省读同一文件
+    const payload = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'ui-settings.json'), 'utf8')
+    );
+    assert.deepEqual(payload.selectedPlatforms, ['omp', 'codex']);
+    assert.equal(payload.platform, 'omp');
+  });
+
+  it('PUT rejects unknown platform and filters invalid selectedPlatforms', async () => {
+    const bad = await sendJson(srv.base, 'PUT', '/api/settings/ui', { platform: 'nope' }, 400);
+    assert.match(bad.error, /platform must be one of/);
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings/ui', {
+      platform: 'codex',
+      selectedPlatforms: ['codex', 'nope', 123],
+    });
+    assert.deepEqual(saved, { platform: 'codex', selectedPlatforms: ['codex'] });
+  });
+});
+
+describe('cli-bins settings persist (web 设置面板写平台 CLI 命令，CLI resume 读取)', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer();
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('GET returns default command names before any save', async () => {
+    const bins = await getJson(srv.base, '/api/settings/cli-bins');
+    assert.deepEqual(bins, {
+      codex: { bin: 'codex', configured: false, default: 'codex' },
+      'claude-code': { bin: 'claude', configured: false, default: 'claude' },
+      omp: { bin: 'omp', configured: false, default: 'omp' },
+    });
+  });
+
+  it('PUT persists configured bins and GET/file reflect them; clearing falls back to default', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings/cli-bins', {
+      codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
+      'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
+      omp: '',
+    });
+    assert.equal(saved.codex.bin, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
+    assert.equal(saved.codex.configured, true);
+    assert.equal(saved['claude-code'].bin, '/home/u/.nvm/versions/node/v22.19.0/bin/claude');
+    // omp 空串 = 清除 → 回退默认
+    assert.equal(saved.omp.bin, 'omp');
+    assert.equal(saved.omp.configured, false);
+
+    const bins = await getJson(srv.base, '/api/settings/cli-bins');
+    assert.equal(bins.codex.bin, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
+    assert.equal(bins.omp.bin, 'omp');
+
+    // CLI（bin/sessions.js resume --run）读同一文件；只存白名单 key
+    const payload = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'cli-bins.json'), 'utf8')
+    );
+    assert.deepEqual(Object.keys(payload).sort(), ['claude-code', 'codex', 'updatedAt']);
+    assert.equal(payload.codex, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
+  });
+
+  it('PUT ignores non-whitelisted and non-string values', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings/cli-bins', {
+      codex: 'codex',
+      hermes: '/tmp/hermes', // 非 resume 平台，忽略
+      omp: 123, // 非字符串，忽略
+    });
+    assert.deepEqual(Object.keys(saved).sort(), ['claude-code', 'codex', 'omp']);
+    assert.equal(saved.codex.bin, 'codex');
+    assert.equal(saved.omp.bin, 'omp');
+  });
+});
+
+describe('cli-bins GET 反映环境变量（P1：前端复制命令与后端 spawn 一致）', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer({ AGENTLRAY_CODEX_BIN: '/env/bin/codex' });
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('GET bin 优先取环境变量，即使文件未配置', async () => {
+    const bins = await getJson(srv.base, '/api/settings/cli-bins');
+    // codex 走环境变量；claude-code/omp 无 env → 默认名
+    assert.equal(bins.codex.bin, '/env/bin/codex');
+    assert.equal(bins.codex.configured, false);
+    assert.equal(bins.codex.default, 'codex');
+    assert.equal(bins['claude-code'].bin, 'claude');
+    assert.equal(bins.omp.bin, 'omp');
+  });
+
+  it('PUT 后 GET bin 仍反映环境变量优先（env > 文件）', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings/cli-bins', {
+      codex: '/file/bin/codex',
+    });
+    // 文件配置了 codex，但环境变量仍优先
+    assert.equal(saved.codex.bin, '/env/bin/codex');
+    assert.equal(saved.codex.configured, true);
+    assert.equal(saved.codex.default, 'codex');
+    const bins = await getJson(srv.base, '/api/settings/cli-bins');
+    assert.equal(bins.codex.bin, '/env/bin/codex');
+  });
+});
+
+describe('status-config settings persist (web 设置面板写状态时间配置，注入 lib/status)', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer();
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('GET returns default time windows before any save', async () => {
+    const cfg = await getJson(srv.base, '/api/settings/status');
+    assert.deepEqual(cfg, {
+      recentActivityMs: { value: 120000, configured: false, default: 120000 },
+      activeWorkCeilMs: { value: 1800000, configured: false, default: 1800000 },
+      historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
+    });
+  });
+
+  it('PUT persists and GET/file reflect; invalid values cleared to default', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings/status', {
+      recentActivityMs: 5 * 60 * 1000,
+      activeWorkCeilMs: 0, // 非正数 → 清除
+      historyCeilMs: 48 * 60 * 60 * 1000,
+    });
+    assert.equal(saved.recentActivityMs.value, 5 * 60 * 1000);
+    assert.equal(saved.recentActivityMs.configured, true);
+    // activeWorkCeilMs 被清除 → 回退默认
+    assert.equal(saved.activeWorkCeilMs.value, 1800000);
+    assert.equal(saved.activeWorkCeilMs.configured, false);
+    assert.equal(saved.historyCeilMs.value, 48 * 60 * 60 * 1000);
+
+    const bins = await getJson(srv.base, '/api/settings/status');
+    assert.equal(bins.recentActivityMs.value, 5 * 60 * 1000);
+    assert.equal(bins.historyCeilMs.value, 48 * 60 * 60 * 1000);
+
+    const onDisk = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'status-config.json'), 'utf8')
+    );
+    assert.deepEqual(Object.keys(onDisk).sort(), ['historyCeilMs', 'recentActivityMs', 'updatedAt']);
+    assert.equal(onDisk.recentActivityMs, 5 * 60 * 1000);
   });
 });

@@ -110,7 +110,7 @@ Open http://localhost:3800
 ### Basic Workflow
 
 1. **Select a platform** — Click `OpenClaw`, `Codex`, `Claude Code`, `Hermes`, `OMP`, `DeepSeek Harness`, or `Gemini CLI` in the top bar
-2. **Pick an agent** — For OpenClaw, choose an agent from the dropdown (e.g. `xiaot`, `mimo`)
+2. **Pick an agent** — For OpenClaw, the list defaults to **all agents merged** (grouped per agent); use the dropdown to narrow to a single agent (e.g. `xiaot`, `mimo`)
 3. **Browse sessions** — Sessions are sorted by date, newest first. Each card shows:
    - Timestamp and status (`active` / `archived`)
    - Message counts: 👤 User, 🤖 Assistant, 🔧 Tool calls
@@ -139,7 +139,6 @@ Click the **Prompts** tab (next to Sessions / Insights) to see every real human 
 ### Filtering & Search
 
 - **Search box** — Filter sessions by ID or content
-- **Include archived** — Toggle to show/hide archived (`.reset.*` / `.deleted.*`) sessions
 - **Auto-refresh** — Automatically poll for new sessions and messages
 - **Auto-scroll** — Scroll to the latest message when new content arrives
 
@@ -178,7 +177,32 @@ npm start
 
 **Via API:** Pass `?dir=/absolute/path` query parameter to any API endpoint.
 
----
+### Platform CLI commands
+
+`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/cli-bins.json`) > default command name**.
+
+**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp. Saved to server-side `~/.agentlray/cli-bins.json`; both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
+
+**Via environment variables (highest priority):**
+
+```bash
+AGENTLRAY_CODEX_BIN=/path/to/codex \
+AGENTLRAY_CLAUDE_CODE_BIN=/home/0668000603/.nvm/versions/node/v22.19.0/bin/claude \
+AGENTLRAY_OMP_BIN=/path/to/omp \
+npm start
+```
+
+Unset variables and platforms not configured in the panel fall back to the default command name.
+
+### Status time configuration
+
+Session status (awaiting-input / working / waiting / stopped) depends on three time windows, defaulting to 2 min / 30 min / 12 h. Configure them under "Status time configuration" in the settings panel (units: minutes / hours); saving writes server-side `~/.agentlray/status-config.json` and takes effect for subsequent status evaluation. Terminal `agentlray sessions list` and the web dashboard share the same config.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Recent activity freshness | 2 min | Within this freshness after a completed turn → working |
+| Active work ceiling | 30 min | Long tool runs / deep thinking stay working within this bound, then degrade |
+| History ceiling | 12 h | Sessions without an end marker older than this → stopped; upper bound for awaiting-input / waiting |
 
 ## API
 
@@ -205,6 +229,8 @@ npm start
 | `GET /api/prompts/analyze` | Template clustering + attribution + Claude suggestions (`?refresh=1` to recompute, `?skipLlm=1` for clustering only) |
 | `POST /api/prompts/rewrite` | Rewrite a single prompt via the configured LLM backend (`{ "text": "..." }`; 503 with guidance when no backend is available) |
 | `GET/PUT /api/settings/llm` | LLM backend config: OpenAI-compatible `baseUrl`/`model`/`apiKey`, persisted in `~/.agentlray/llm.json` (key never echoed back) |
+| `GET/PUT /api/settings/cli-bins` | Platform CLI command config (resume spawn target): executable commands for codex/claude-code/omp, persisted in `~/.agentlray/cli-bins.json`; GET returns `bin`/`configured`/`default`, empty string clears (fall back to default) |
+| `GET/PUT /api/settings/status` | Session status time config (four-state evaluation windows): `recentActivityMs`/`activeWorkCeilMs`/`historyCeilMs`, persisted in `~/.agentlray/status-config.json`; GET returns `value`/`configured`/`default`, saving takes effect immediately |
 | `GET /api/search` | Full-text search across sessions (`?platform=all` searches every platform at once, multi-keyword AND) |
 | `GET /api/omp/sessions/:id/children` | List sub-agents spawned by an OMP session |
 | `GET /api/omp/sessions/:id/children/:name` | Get a spawned sub-agent's messages |
@@ -246,7 +272,7 @@ All list/detail endpoints accept an optional `?dir=` parameter to override the d
 
 dsh's `.jsonl.zstd` logs are a concatenation of independent Zstandard frames (one per append batch); AgentLRay scans the frame boundaries and decompresses every frame, tolerating a torn trailing frame after a crash. The durable log is versioned: a session dir keeps a legacy `session.jsonl[.zstd]` (format 0) next to the frozen `session.v3.jsonl.zstd` / current `session.v4.jsonl.zstd`; AgentLRay reads the highest format version present, so the current log supersedes stale legacy copies. Reading compressed dsh logs requires Node.js ≥ 22.15 (built-in zstd); plain `session.jsonl` logs work on any supported Node.
 
-Archived sessions (`.jsonl.reset.*`, `.jsonl.deleted.*`) are shown for OpenClaw when "Include archived" is enabled; the other adapters list active `.jsonl` files only.
+Archived OpenClaw sessions (`.jsonl.reset.*`, `.jsonl.deleted.*`) are excluded from the web dashboard list by default (the dashboard exposes no toggle for them). The list/aggregate APIs still accept an `include_archived=true` parameter to include them for other consumers; the other adapters list active `.jsonl` files only.
 
 ---
 

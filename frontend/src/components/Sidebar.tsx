@@ -1,96 +1,26 @@
-// Left sidebar: header/settings + session search (type = filter, Enter = ⌘K
-// global search), OpenClaw agent nav, archived/auto-refresh/auto-scroll
-// toggles, and the (virtualized) session list.
+// Left sidebar（精简）：标题 + 会话文本过滤 + 会话列表。筛选/分组/agent/开关等
+// 配置全部收进「会话筛选与分组」弹框（SessionFiltersDialog）与设置弹框。
 
-import { useQuery } from '@tanstack/react-query';
-import { Settings } from 'lucide-react';
+import { Settings, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { getAgents } from '@/api/client';
 import { PLATFORM_LABELS } from '@/api/types';
+import { SessionFiltersDialog } from '@/components/SessionFiltersDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useAppStore } from '@/store';
 import { CmdkDialog } from '@/views/sessions/CmdkDialog';
 import { SessionList } from '@/views/sessions/SessionList';
 
-function ToggleRow({
-  label,
-  title,
-  checked,
-  onChange,
-}: {
-  label: string;
-  title: string;
-  checked: boolean;
-  onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted-foreground" title={title}>
-      <Checkbox checked={checked} onCheckedChange={(v) => onChange(v === true)} className="h-3.5 w-3.5" />
-      {label}
-    </label>
-  );
-}
-
-// OpenClaw stores sessions per agent (~/.openclaw/agents/<name>/sessions)
-function AgentNav() {
-  const settings = useAppStore((s) => s.settings);
-  const selectedAgent = useAppStore((s) => s.selectedAgent);
-  const setSelectedAgent = useAppStore((s) => s.setSelectedAgent);
-  const { data: agents } = useQuery({
-    queryKey: ['agents', settings.openclawDir],
-    queryFn: () => getAgents(settings.openclawDir || undefined),
-  });
-
-  // Legacy loadAgents: default to the first agent
-  useEffect(() => {
-    if (agents?.length && !useAppStore.getState().selectedAgent) setSelectedAgent(agents[0]);
-  }, [agents, setSelectedAgent]);
-
-  if (!agents?.length) {
-    return (
-      <div className="text-[11px] text-muted-foreground">
-        未检测到 OpenClaw agent（~/.openclaw/agents 不存在或为空）
-      </div>
-    );
-  }
-  return (
-    <Select value={selectedAgent || undefined} onValueChange={setSelectedAgent}>
-      <SelectTrigger className="h-8 text-xs" title="选择要浏览哪个 OpenClaw agent 的会话">
-        <SelectValue placeholder="选择 agent" />
-      </SelectTrigger>
-      <SelectContent>
-        {agents.map((agent) => (
-          <SelectItem key={agent} value={agent} className="text-xs">
-            {agent}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const platform = useAppStore((s) => s.platform);
-  const includeArchived = useAppStore((s) => s.includeArchived);
-  const setIncludeArchived = useAppStore((s) => s.setIncludeArchived);
-  const autoRefresh = useAppStore((s) => s.autoRefresh);
-  const setAutoRefresh = useAppStore((s) => s.setAutoRefresh);
-  const autoScroll = useAppStore((s) => s.autoScroll);
-  const setAutoScroll = useAppStore((s) => s.setAutoScroll);
+  const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterTerm, setFilterTerm] = useState('');
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [cmdkSeed, setCmdkSeed] = useState('');
+  const multi = selectedPlatforms.length > 0;
 
   // Global ⌘K / Ctrl+K toggle (legacy document keydown)
   useEffect(() => {
@@ -110,11 +40,24 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold tracking-wide">AgentLRay</h1>
-          <div className="text-xs text-muted-foreground">{PLATFORM_LABELS[platform]} sessions</div>
+          <div className="text-xs text-muted-foreground">
+            {multi ? `全部平台（${selectedPlatforms.length}）` : PLATFORM_LABELS[platform]} sessions
+          </div>
         </div>
-        <Button variant="outline" size="icon" title="Settings" onClick={() => setSettingsOpen(true)}>
-          <Settings className="h-4 w-4" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="icon"
+            title="会话筛选与分组"
+            aria-label="会话筛选与分组"
+            onClick={() => setFiltersOpen(true)}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="icon" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+            <Settings className="h-4 w-4" />
+          </Button>
+        </div>
       </div>
       <div className="relative">
         <Input
@@ -146,30 +89,8 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           ⌘K
         </button>
       </div>
-      {platform === 'openclaw' && <AgentNav />}
-      <div className="flex flex-wrap items-center gap-3">
-        {platform === 'openclaw' && (
-          <ToggleRow
-            label="Include archived"
-            title="同时列出已归档的会话"
-            checked={includeArchived}
-            onChange={setIncludeArchived}
-          />
-        )}
-        <ToggleRow
-          label="Auto-refresh"
-          title="每 5 秒刷新列表；当前会话通过 SSE 实时追加"
-          checked={autoRefresh}
-          onChange={setAutoRefresh}
-        />
-        <ToggleRow
-          label="Auto-scroll"
-          title="新消息到达时自动滚到最新"
-          checked={autoScroll}
-          onChange={setAutoScroll}
-        />
-      </div>
       <SessionList filterTerm={filterTerm} onNavigate={onNavigate} />
+      <SessionFiltersDialog open={filtersOpen} onOpenChange={setFiltersOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <CmdkDialog open={cmdkOpen} onOpenChange={setCmdkOpen} seedQuery={cmdkSeed} onNavigate={onNavigate} />
     </aside>

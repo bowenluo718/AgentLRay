@@ -3,8 +3,10 @@
 // child-agent chips, resume-command copy, export menu — legacy renderSummary.
 
 import { useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SessionDetail } from '@/api/types';
+import { getCliBins } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
@@ -52,9 +54,9 @@ const ACTION_BTN =
   'rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground';
 
 function ExportMenu({ detail }: { detail: SessionDetail }) {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
-  const selectedAgent = useAppStore((s) => s.selectedAgent);
+  const selectedAgent = useAppStore((s) => s.detailAgent);
   const settings = useAppStore((s) => s.settings);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -113,10 +115,17 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
 }
 
 function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const [copied, setCopied] = useState(false);
-  const cmd = resumeCommand(platform, selectedSessionId, cwd);
+  // 读取平台 CLI 命令配置（GET /api/settings/cli-bins，未配置回退默认命令名），
+  // 与后端 bin/sessions.js resume 使用同一命令，保证复制即所见即所得。
+  const cliBins = useQuery({ queryKey: ['cli-bins'], queryFn: getCliBins });
+  const bin =
+    platform === 'codex' || platform === 'claude-code' || platform === 'omp'
+      ? cliBins.data?.[platform]?.bin
+      : undefined;
+  const cmd = resumeCommand(platform, selectedSessionId, cwd, bin);
   if (!cmd) return null;
   return (
     <button

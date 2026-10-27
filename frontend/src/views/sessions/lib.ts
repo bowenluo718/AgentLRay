@@ -297,12 +297,83 @@ export function filterSessionList(sessions: SessionSummary[], term: string): Ses
   );
 }
 
-/** Terminal command that resumes a session (legacy resumeCmdBtn); null when unsupported. */
-export function resumeCommand(platform: Platform, id: string, cwd: string | null | undefined): string | null {
+/** 无 cwd 会话的项目显示值（cwd 缺失 → 未知项目）。 */
+export const UNKNOWN_PROJECT = '未知项目';
+
+/** cwd 末路径段；无 cwd 或根路径返回空串。 */
+function cwdBase(cwd: string | null | undefined): string {
+  const value = (cwd || '').trim();
+  if (!value) return '';
+  const parts = value.replace(/[\\/]+$/, '').split(/[\\/]/);
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+}
+
+/**
+ * 为当前数据集解析每个会话的项目显示值：默认 cwd 末段；当同一末段出现在
+ * 多个不同 cwd 下（末段重复）时，这些会话全部升级为完整 cwd 显示以消歧
+ * （保证同名 cwd 的会话仍归一组）；无 cwd → UNKNOWN_PROJECT。
+ * 返回以会话对象引用为键的映射（避免跨平台会话 id 撞名）。
+ */
+export function resolveProjectValues(sessions: SessionSummary[]): Map<SessionSummary, string> {
+  const baseBySession = new Map<SessionSummary, string>();
+  const baseToCwds = new Map<string, Set<string>>();
+  for (const s of sessions) {
+    const base = cwdBase(s.cwd);
+    baseBySession.set(s, base);
+    if (!base) continue;
+    const set = baseToCwds.get(base) ?? new Set<string>();
+    set.add(s.cwd || '');
+    baseToCwds.set(base, set);
+  }
+  const result = new Map<SessionSummary, string>();
+  for (const s of sessions) {
+    const base = baseBySession.get(s) || '';
+    if (!base) {
+      result.set(s, UNKNOWN_PROJECT);
+    } else if ((baseToCwds.get(base)?.size ?? 0) > 1) {
+      result.set(s, s.cwd || UNKNOWN_PROJECT);
+    } else {
+      result.set(s, base);
+    }
+  }
+  return result;
+}
+
+/**
+ * 汇总数据集的项目选项（显示值 → 会话数），按计数降序、再按名升序（确定性）。
+ * projects 缺省时自行推导，但调用方应传与 sessions 同源的一次推导结果保一致性。
+ */
+export function buildProjectOptions(
+  projects: Map<SessionSummary, string> | undefined,
+  sessions: SessionSummary[]
+): { value: string; count: number }[] {
+  const map = projects ?? resolveProjectValues(sessions);
+  const counts = new Map<string, number>();
+  for (const s of sessions) {
+    const value = map.get(s) ?? UNKNOWN_PROJECT;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => ({ value, count }))
+    .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
+}
+
+/**
+ * Terminal command that resumes a session (legacy resumeCmdBtn); null when
+ * unsupported. `bin` is the platform's configured CLI command (from
+ * GET /api/settings/cli-bins); when omitted, falls back to the default
+ * command name. args shape stays in sync with bin/sessions.js RESUME_BINS.
+ */
+export function resumeCommand(
+  platform: Platform,
+  id: string,
+  cwd: string | null | undefined,
+  bin?: string
+): string | null {
   let cmd = '';
-  if (platform === 'codex') cmd = `codex resume ${id} --yolo`;
-  else if (platform === 'claude-code') cmd = `claude --dangerously-skip-permissions --resume ${id}`;
-  else if (platform === 'omp') cmd = `omp --auto-approve --resume=${id}`;
+  if (platform === 'codex') cmd = `${bin || 'codex'} resume ${id} --yolo`;
+  else if (platform === 'claude-code') cmd = `${bin || 'claude'} --dangerously-skip-permissions --resume ${id}`;
+  else if (platform === 'omp') cmd = `${bin || 'omp'} --auto-approve --resume=${id}`;
   else return null;
   return cwd ? `cd ${cwd} && ${cmd}` : cmd;
 }

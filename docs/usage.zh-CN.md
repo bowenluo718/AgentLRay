@@ -105,7 +105,7 @@ npm start
 ### 基本流程
 
 1. **选择平台** — 点击顶部 `OpenClaw`、`Codex`、`Claude Code`、`Hermes`、`OMP`、`DeepSeek Harness` 或 `Gemini CLI`
-2. **选择 Agent** — OpenClaw 平台下，从下拉菜单选择 Agent（如 `xiaot`、`mimo`）
+2. **选择 Agent** — OpenClaw 平台下默认展示**全部 agent 合并**的会话（按 agent 分组），可从下拉菜单改选单个 Agent（如 `xiaot`、`mimo`）
 3. **浏览会话** — 会话默认按状态分组排序：待用户输入 → 工作中 → 等待中 → 已停止（组内按开始时间新→旧），每张卡片显示：
    - 时间戳与四态状态徽标（`待用户输入` / `工作中` / `等待中` / `已停止`；归档会话带 📦）
    - 消息计数：👤 用户、🤖 助手、🔧 工具调用
@@ -171,6 +171,33 @@ npm start
 
 **通过 API：** 在任意 API 请求后附加 `?dir=/absolute/path` 参数。
 
+### 平台 CLI 命令
+
+`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/cli-bins.json`）> 默认命令名**。
+
+**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp 填写可执行命令（绝对路径）。保存后写服务端 `~/.agentlray/cli-bins.json`；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
+
+**通过环境变量（优先级最高）：**
+
+```bash
+AGENTLRAY_CODEX_BIN=/path/to/codex \
+AGENTLRAY_CLAUDE_CODE_BIN=/home/0668000603/.nvm/versions/node/v22.19.0/bin/claude \
+AGENTLRAY_OMP_BIN=/path/to/omp \
+npm start
+```
+
+未设置的环境变量与未在面板配置的平台回退到默认命令名。
+
+### 状态时间配置
+
+会话四态（awaiting-input / working / waiting / stopped）的判定依赖三个时间窗口，默认值 2 分钟 / 30 分钟 / 12 小时。可在 web 设置面板「状态时间配置」分区调整（单位：分钟 / 小时），保存即写服务端 `~/.agentlray/status-config.json` 并对后续状态判定生效；终端 `agentlray sessions list` 与 web 看板共用同一配置。
+
+| 配置项 | 默认 | 说明 |
+|--------|------|------|
+| 最近活动新鲜度 | 2 分钟 | 回合完成 / 无进行中证据的短鲜度内判 working |
+| 进行中工作上界 | 30 分钟 | 长工具执行 / 深思考在界内一律 working，超过才降级 |
+| 取证闭口窗口 | 12 小时 | 无结束标记会话证据超过此界判 stopped；awaiting-input / waiting 的上界 |
+
 ## API
 
 | 接口 | 说明 |
@@ -196,6 +223,8 @@ npm start
 | `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |
 | `POST /api/prompts/rewrite` | 通过配置的 LLM 后端改写单条 prompt（`{ "text": "..." }`；无可用后端时返回 503 及配置指引） |
 | `GET/PUT /api/settings/llm` | LLM 后端配置：OpenAI 兼容 `baseUrl`/`model`/`apiKey`,持久化在 `~/.agentlray/llm.json`（key 不回显） |
+| `GET/PUT /api/settings/cli-bins` | 平台 CLI 命令配置（resume 续跑 spawn 目标）：codex/claude-code/omp 的可执行命令，持久化在 `~/.agentlray/cli-bins.json`；GET 含 `bin`/`configured`/`default`，空串 = 清除回退默认 |
+| `GET/PUT /api/settings/status` | 会话状态时间配置（四态判定窗口）：`recentActivityMs`/`activeWorkCeilMs`/`historyCeilMs`，持久化在 `~/.agentlray/status-config.json`；GET 含 `value`/`configured`/`default`，保存即注入生效 |
 | `GET /api/search` | 会话全文搜索（`?platform=all` 一次搜索全部平台，多关键词 AND） |
 | `GET /api/omp/sessions/:id/children` | 获取该 OMP 会话派生的子 Agent 列表 |
 | `GET /api/omp/sessions/:id/children/:name` | 获取指定子 Agent 的消息详情 |
@@ -233,7 +262,7 @@ npm start
 
 dsh 的 `.jsonl.zstd` 日志是多个独立 Zstandard 帧的串联（每次持久化批次一帧）；AgentLRay 会扫描帧边界并逐帧解压，崩溃残留的尾部不完整帧会被容忍丢弃。持久日志是版本化的：会话目录可能同时保有一份遗留的 `session.jsonl[.zstd]`（格式 0）与固化后的 `session.v3.jsonl.zstd` / 当前 `session.v4.jsonl.zstd`；AgentLRay 读取目录内最高格式版本，保证用当前日志取代陈旧的遗留副本。读取压缩日志需要 Node.js ≥ 22.15（内置 zstd）；未压缩的 `session.jsonl` 在任何受支持的 Node 上都能读。
 
-启用「包含已归档」后，OpenClaw 还会显示 `.jsonl.reset.*` 和 `.jsonl.deleted.*` 的归档会话；其他适配器只列出活跃的 `.jsonl` 文件。
+OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳入 web 看板列表（看板不再提供该开关）；列表/聚合 API 仍接受 `include_archived=true` 参数供其他消费方包含归档会话。其他适配器只列出活跃的 `.jsonl` 文件。
 
 ## 开发
 

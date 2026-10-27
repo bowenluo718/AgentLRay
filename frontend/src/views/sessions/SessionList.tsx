@@ -1,15 +1,20 @@
 // Sidebar session list: cards, >200-item virtualization, ↑↓ keyboard nav,
 // auto-select-first — ported from legacy renderSessions/sessionCardHtml.
-// 服务端已按状态分组排序；此处把四态作为可见分组头（header 行）渲染，
-// 组内顺序即服务端"组内默认排序"。
+// 列表支持两级分组：外层按平台/按项目（组头可折叠），组内保留四态状态子组头
+// （可折叠），组内按状态优先级 + 最后活动时间倒序排序。「不分组」= 当前扁平的
+// 状态组头。聚合视图（多平台）跨平台归并，来源由卡片平台徽标标识。
+// 项目 = cwd 推导显示值（末段；末段重复显完整 cwd 消歧；无 cwd → 未知项目）。
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { SessionSummary } from '@/api/types';
+import { PLATFORM_LABELS, PLATFORMS } from '@/api/types';
+import type { Platform } from '@/api/types';
 import { formatDurationCompact, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store';
-import { filterSessionList, formatDate } from './lib';
+import type { GroupBy } from '@/store';
+import { UNKNOWN_PROJECT, filterSessionList, formatDate, resolveProjectValues } from './lib';
 import { useSessionsList } from './queries';
 
 const VIRT_THRESHOLD = 200; // below this many sessions, render everything
@@ -59,42 +64,219 @@ function useServerStatusLabels(): void {
   }, []);
 }
 
-/** 展示行：组头（header）或会话卡片（session）。 */
-type SessionRow = { kind: 'header'; status: string; count: number } | { kind: 'session'; session: SessionSummary };
+// 聚合视图跨平台归并时用到的状态展示顺序（与服务端 STATUS_ORDER 一致）。
+const STATUS_ORDER = ['awaiting-input', 'working', 'waiting', 'stopped'];
 
-/** 将（已按状态分组的）会话列表展开为"组头 + 卡片"行数组；同一状态只产生一个组头（首个会话前插入），组头带计数。 */
-function groupRows(sessions: SessionSummary[]): SessionRow[] {
-  const counts = new Map<string, number>();
-  for (const s of sessions) {
+/** 展示行：外层组头 / 状态子组头 / 会话卡片。name 带 kind 前缀作稳定 key（含折叠态）。 */
+type SessionRow =
+  | { kind: 'group'; name: string; label: string; count: number; collapsed: boolean; key: string }
+  | { kind: 'header'; name: string; status: string; count: number; collapsed: boolean; key: string }
+  | { kind: 'session'; session: SessionSummary; key: string };
+
+/** lastActivity（缺省回退 timestamp）毫秒，无法解析返回 0（排最后）。 */
+function lastActiveMs(s: SessionSummary): number {
+  return parseTimestampMs(s.lastActivity) ?? parseTimestampMs(s.timestamp) ?? 0;
+}
+
+function statusPriority(status: string | null | undefined): number {
+  const i = STATUS_ORDER.indexOf(status || 'stopped');
+  return i === -1 ? STATUS_ORDER.length : i;
+}
+
+/** 把一个组的会话按状态子组头 + 卡片展开为行；状态头折叠时不展开卡片。
+ *  key 带 groupKey 前缀保证跨组唯一（扁平/虚拟化都要求 key 唯一）；折叠名 name
+ *  保持 `status:` 共享——折叠一个组的该状态即折叠全部组的该状态。 */
+function appendStatusRows(
+  rows: SessionRow[],
+  list: SessionSummary[],
+  collapsed: string[],
+  groupKey?: string
+): void {
+  const buckets = new Map<string, SessionSummary[]>();
+  for (const s of list) {
     const status = s.status || 'stopped';
-    counts.set(status, (counts.get(status) || 0) + 1);
+    const bucket = buckets.get(status) ?? [];
+    bucket.push(s);
+    buckets.set(status, bucket);
   }
-  const seen = new Set<string>();
-  const rows: SessionRow[] = [];
-  for (const s of sessions) {
-    const status = s.status || 'stopped';
-    if (!seen.has(status)) {
-      seen.add(status);
-      rows.push({ kind: 'header', status, count: counts.get(status) || 0 });
+  const ordered = [...buckets.entries()].sort((a, b) => statusPriority(a[0]) - statusPriority(b[0]));
+  for (const [status, bucket] of ordered) {
+    bucket.sort((a, b) => lastActiveMs(b) - lastActiveMs(a));
+    const name = `status:${status}`;
+    const key = groupKey ? `${groupKey}:${name}` : name;
+    const collapsedStatus = collapsed.includes(name);
+    rows.push({ kind: 'header', name, status, count: bucket.length, collapsed: collapsedStatus, key });
+    if (collapsedStatus) continue;
+    for (const s of bucket) rows.push({ kind: 'session', session: s, key: s.id });
+  }
+}
+
+/** 平台分组外层键顺序：PLATFORMS 顺序，未标注平台垫底。 */
+function platformGroupOrder(buckets: Map<string, SessionSummary[]>): string[] {
+  const known = PLATFORMS.filter((p) => buckets.has(p));
+  const rest = [...buckets.keys()].filter((k) => !PLATFORMS.includes(k as Platform));
+  return [...known, ...rest];
+}
+
+/** 项目分组外层键顺序：组内最优状态优先（待用户输入/工作中置顶），再按组内最新活动倒序。 */
+function projectGroupOrder(buckets: Map<string, SessionSummary[]>): string[] {
+  const score = (list: SessionSummary[]) => {
+    let best = STATUS_ORDER.length;
+    let newest = -1;
+    for (const s of list) {
+      const p = statusPriority(s.status);
+      if (p < best) best = p;
+      const m = lastActiveMs(s);
+      if (m > newest) newest = m;
     }
-    rows.push({ kind: 'session', session: s });
+    return { best, newest };
+  };
+  return [...buckets.keys()].sort((a, b) => {
+    const sa = score(buckets.get(a) || []);
+    const sb = score(buckets.get(b) || []);
+    return sa.best - sb.best || sb.newest - sa.newest || a.localeCompare(b);
+  });
+}
+
+/**
+ * 将（已按平台/项目筛选、文本筛选后的）会话列表展开为展示行数组。
+ * - 不分组：与旧行为一致（聚合视图跨平台按状态归并；单平台原序插状态头），仅新增状态头折叠。
+ * - 按平台 / 按项目：外层组头（可折叠）+ 组内四态状态子组头（可折叠）+ 卡片。
+ * 空组头不产生行（组头只出现在有可见子内容的组）。
+ */
+function buildRows(
+  sessions: SessionSummary[],
+  groupBy: GroupBy,
+  collapsed: string[],
+  projectValues: Map<SessionSummary, string>
+): SessionRow[] {
+  // 单选平台数据无 platform 标记：按平台分组退化为原生状态分组（含单选平台时的
+  // groupBy='platform' 残留，避免渲染一个「未标注」空桶）。
+  if (groupBy === 'none' || (groupBy === 'platform' && sessions.length > 0 && !sessions[0].platform)) {
+    const rows: SessionRow[] = [];
+    if (sessions.length > 0 && sessions[0].platform) {
+      appendStatusRows(rows, sessions, collapsed);
+      return rows;
+    }
+    // 单平台：保持服务端分组序，逐组插头（组头 only-if-有卡片）。
+    const counts = new Map<string, number>();
+    for (const s of sessions) {
+      const status = s.status || 'stopped';
+      counts.set(status, (counts.get(status) || 0) + 1);
+    }
+    const seen = new Set<string>();
+    for (const s of sessions) {
+      const status = s.status || 'stopped';
+      if (!seen.has(status)) {
+        seen.add(status);
+        const name = `status:${status}`;
+        rows.push({
+          kind: 'header',
+          name,
+          status,
+          count: counts.get(status) || 0,
+          collapsed: collapsed.includes(name),
+          key: name,
+        });
+      }
+      rows.push({ kind: 'session', session: s, key: s.id });
+    }
+    return rows;
+  }
+
+  const buckets = new Map<string, SessionSummary[]>();
+  for (const s of sessions) {
+    const key =
+      groupBy === 'platform' ? (s.platform || '未标注') : (projectValues.get(s) ?? UNKNOWN_PROJECT);
+    const bucket = buckets.get(key) ?? [];
+    bucket.push(s);
+    buckets.set(key, bucket);
+  }
+  const order = groupBy === 'platform' ? platformGroupOrder(buckets) : projectGroupOrder(buckets);
+  const rows: SessionRow[] = [];
+  for (const key of order) {
+    const list = buckets.get(key) || [];
+    const name = `group:${key}`;
+    const collapsedGroup = collapsed.includes(name);
+    const label = groupBy === 'platform' ? (PLATFORM_LABELS[key as Platform] || key) : key;
+    rows.push({ kind: 'group', name, label, count: list.length, collapsed: collapsedGroup, key: name });
+    if (collapsedGroup) continue;
+    appendStatusRows(rows, list, collapsed, name);
   }
   return rows;
 }
 
-function SessionRowHeader({ status, count }: { status: string; count: number }) {
-  const meta = statusMetaFor(status) || { label: status, badgeClass: 'text-muted-foreground' };
+/** 可折叠组头：▸/▾ + 标签 + 数量。用于外层组头与状态子组头；状态子组头缩进以示层级。 */
+function CollapseHeader({
+  label,
+  count,
+  collapsed,
+  onToggle,
+  className,
+  dataAttr,
+  labelClass,
+  indent = false,
+}: {
+  label: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+  className?: string;
+  dataAttr?: string;
+  labelClass?: string;
+  indent?: boolean;
+}) {
   return (
     <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={!collapsed}
+      data-header-name={dataAttr}
+      onClick={onToggle}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onToggle();
+        }
+      }}
       className={cn(
-        'flex items-center gap-1.5 px-1 pb-1 pt-2.5 text-[10px] font-medium tracking-wide',
-        meta.badgeClass || 'text-muted-foreground'
+        'flex cursor-pointer select-none items-center gap-1.5 px-1 pb-1 pt-2.5 text-[10px] font-medium tracking-wide',
+        indent && 'pl-4',
+        className
       )}
-      data-status-header={status}
     >
-      <span>{meta.label}</span>
+      <span className="inline-block w-2 shrink-0 text-muted-foreground/70">{collapsed ? '▸' : '▾'}</span>
+      <span className={cn('truncate', labelClass)}>{label}</span>
       <span className="text-muted-foreground/60">{count}</span>
     </div>
+  );
+}
+
+function SessionRowHeader({
+  status,
+  count,
+  collapsed,
+  onToggle,
+  indent = false,
+}: {
+  status: string;
+  count: number;
+  collapsed: boolean;
+  onToggle: () => void;
+  indent?: boolean;
+}) {
+  const meta = statusMetaFor(status) || { label: status, badgeClass: 'text-muted-foreground' };
+  return (
+    <CollapseHeader
+      label={meta.label}
+      count={count}
+      collapsed={collapsed}
+      onToggle={onToggle}
+      dataAttr={status}
+      indent={indent}
+      className={meta.badgeClass || 'text-muted-foreground'}
+      labelClass={cn('rounded border px-1 py-px text-[10px]', meta.badgeClass || 'text-muted-foreground')}
+    />
   );
 }
 
@@ -124,7 +306,17 @@ function chipTexts(session: SessionSummary): string[] {
   return chips;
 }
 
-function SessionCard({ session, active, onClick }: { session: SessionSummary; active: boolean; onClick: () => void }) {
+function SessionCard({
+  session,
+  active,
+  project,
+  onClick,
+}: {
+  session: SessionSummary;
+  active: boolean;
+  project: string;
+  onClick: () => void;
+}) {
   const preview = session.firstUserMessage
     ? session.firstUserMessage.length > 80
       ? session.firstUserMessage.slice(0, 80) + '…'
@@ -152,8 +344,19 @@ function SessionCard({ session, active, onClick }: { session: SessionSummary; ac
       )}
     >
       <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-        <span>{formatDate(session.timestamp)}</span>
-        <span className="flex items-center gap-1">
+        <span className="flex min-w-0 items-center gap-1.5">
+          {session.platform ? (
+            <span
+              className="shrink-0 rounded border border-border/60 px-1 py-px text-[10px] text-primary/90"
+              title={`来源平台${session.agent ? ` / ${session.agent}` : ''}`}
+            >
+              {PLATFORM_LABELS[session.platform]}
+              {session.agent ? ` / ${session.agent}` : ''}
+            </span>
+          ) : null}
+          <span className="truncate">{formatDate(session.timestamp)}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
           {session.archived ? (
             <span className="rounded border border-dashed border-border px-1 py-px text-[10px]" title="归档会话">
               📦
@@ -174,6 +377,7 @@ function SessionCard({ session, active, onClick }: { session: SessionSummary; ac
         ))}
       </div>
       <div className="mt-1 truncate font-medium text-foreground">{session.title || session.id}</div>
+      {project ? <div className="mt-0.5 truncate text-[10px] text-muted-foreground/70">📁 {project}</div> : null}
       {preview ? <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">{preview}</div> : null}
     </div>
   );
@@ -182,18 +386,51 @@ function SessionCard({ session, active, onClick }: { session: SessionSummary; ac
 export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; onNavigate?: () => void }) {
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
+  const groupBy = useAppStore((s) => s.groupBy);
+  const projectFilter = useAppStore((s) => s.projectFilter);
+  const collapsedGroups = useAppStore((s) => s.collapsedGroups);
+  const toggleGroupCollapsed = useAppStore((s) => s.toggleGroupCollapsed);
+  const multiView = useAppStore((s) => s.selectedPlatforms.length > 0);
   const { data, isLoading, error } = useSessionsList();
-  const sessions = data ?? [];
-  const filtered = filterSessionList(sessions, filterTerm);
-  const rows = groupRows(filtered);
+  const raw = data ?? [];
+  const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
+  // 单选平台时按平台分组无意义：退化为平铺状态分组（不依赖会话是否带 platform 标记）。
+  const effectiveGroupBy = groupBy === 'platform' && !multiView ? 'none' : groupBy;
+  const collapsed = collapsedGroups[effectiveGroupBy] ?? [];
+  const filtered = useMemo(() => {
+    const byProject = projectFilter.length
+      ? raw.filter((s) => projectFilter.includes(projectValues.get(s) ?? UNKNOWN_PROJECT))
+      : raw;
+    return filterSessionList(byProject, filterTerm);
+  }, [raw, projectValues, projectFilter, filterTerm]);
+  const rows = useMemo(
+    () => buildRows(filtered, effectiveGroupBy, collapsed, projectValues),
+    [filtered, effectiveGroupBy, collapsed, projectValues]
+  );
+  const visibleSessions = useMemo(
+    () => rows.filter((r): r is Extract<SessionRow, { kind: 'session' }> => r.kind === 'session').map((r) => r.session),
+    [rows]
+  );
   const virtualized = filtered.length > VIRT_THRESHOLD;
   useServerStatusLabels();
 
   const parentRef = useRef<HTMLDivElement>(null);
-  const selectSession = (id: string) => {
-    setSelectedSessionId(id);
-    onNavigate?.();
-  };
+  // 聚合视图：点击会话只更新「详情上下文 + 选中会话」，不改动筛选（platform/
+  // selectedPlatforms/分组/项目筛选原样保留）；详情按会话来源平台/agent 加载。
+  // 单平台视图：仅选中（详情上下文与筛选一致）。
+  const selectSession = useCallback(
+    (session: SessionSummary) => {
+      const store = useAppStore.getState();
+      if (session.platform && store.selectedPlatforms.length > 0) {
+        store.setDetailContext(session.platform, session.agent || '');
+        store.setSelectedSessionId(session.id);
+      } else {
+        setSelectedSessionId(session.id);
+      }
+      onNavigate?.();
+    },
+    [onNavigate, setSelectedSessionId]
+  );
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
@@ -204,16 +441,19 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
     useAnimationFrameWithResizeObserver: true,
   });
 
-  // Auto-select first session when nothing valid is selected (legacy loadSessions)
+  // Auto-select first session when nothing valid is selected (legacy loadSessions)。
+  // 已有显式选中（含 URL 路由恢复、跨筛选的详情）绝不覆盖；聚合视图不自动选中：
+  // 跳转需要用户明确点击某个平台的会话。
   useEffect(() => {
-    if (!data) return;
-    if (!data.some((s) => s.id === useAppStore.getState().selectedSessionId)) {
-      setSelectedSessionId(data[0]?.id || '');
+    if (!data || multiView) return;
+    if (!useAppStore.getState().selectedSessionId) {
+      setSelectedSessionId(visibleSessions[0]?.id || '');
     }
-  }, [data, setSelectedSessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, multiView, setSelectedSessionId]);
 
-  // ↑↓ keyboard navigation over the filtered session list (legacy document keydown)。
-  // 组头行不参与导航：索引基于 filtered（纯会话数组），天然跳过 header。
+  // ↑↓ keyboard navigation over the visible session rows (legacy document keydown) —
+  // 折叠隐藏的行不参与导航；组头行天然不在 visibleSessions 内。
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement;
@@ -221,18 +461,19 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
       if (!parentRef.current?.getClientRects().length) return;
       if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
       const state = useAppStore.getState();
-      if (state.view !== 'sessions' || !filtered.length) return;
-      const index = filtered.findIndex((item) => item.id === state.selectedSessionId);
+      if (state.view !== 'sessions' || !visibleSessions.length) return;
+      const index = visibleSessions.findIndex((item) => item.id === state.selectedSessionId);
       const nextIndex =
-        event.key === 'ArrowDown' ? Math.min(index + 1, filtered.length - 1) : Math.max(index - 1, 0);
-      const next = filtered[nextIndex];
+        event.key === 'ArrowDown' ? Math.min(index + 1, visibleSessions.length - 1) : Math.max(index - 1, 0);
+      const next = visibleSessions[nextIndex];
       if (!next || next.id === state.selectedSessionId) return;
       event.preventDefault();
-      setSelectedSessionId(next.id);
+      selectSession(next);
     };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [filtered, setSelectedSessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleSessions, selectSession]);
 
   // Keep the selected card visible (legacy scrollSessionIntoView) — also covers
   // ⌘K jumps landing on a card far outside the rendered window. 基于展示行下标定位。
@@ -250,7 +491,7 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
         ?.scrollIntoView({ block: 'nearest' });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedSessionId, virtualized]);
+  }, [selectedSessionId, virtualized, rows]);
 
   if (isLoading) {
     return <div className="p-2 text-xs text-muted-foreground">Loading sessions…</div>;
@@ -262,6 +503,8 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
     return <div className="p-2 text-xs text-muted-foreground">No sessions match this filter.</div>;
   }
 
+  const toggleCollapsed = (name: string) => toggleGroupCollapsed(groupBy, name);
+
   return (
     <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto pr-1" data-testid="session-list">
       {virtualized ? (
@@ -270,19 +513,35 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
             const dataRow = rows[row.index];
             return (
               <div
-                key={dataRow.kind === 'session' ? dataRow.session.id : `hdr-${dataRow.status}`}
+                key={dataRow.key}
                 ref={virtualizer.measureElement}
                 data-index={row.index}
                 className={cn('absolute left-0 top-0 w-full', dataRow.kind === 'session' && 'pb-2')}
                 style={{ transform: `translateY(${row.start}px)` }}
               >
-                {dataRow.kind === 'header' ? (
-                  <SessionRowHeader status={dataRow.status} count={dataRow.count} />
-                ) : (
+                {dataRow.kind === 'session' ? (
                   <SessionCard
                     session={dataRow.session}
                     active={dataRow.session.id === selectedSessionId}
-                    onClick={() => selectSession(dataRow.session.id)}
+                    project={projectValues.get(dataRow.session) ?? ''}
+                    onClick={() => selectSession(dataRow.session)}
+                  />
+                ) : dataRow.kind === 'group' ? (
+                  <CollapseHeader
+                    label={dataRow.label}
+                    count={dataRow.count}
+                    collapsed={dataRow.collapsed}
+                    onToggle={() => toggleCollapsed(dataRow.name)}
+                    className="text-foreground"
+                    dataAttr={dataRow.label}
+                  />
+                ) : (
+                  <SessionRowHeader
+                    status={dataRow.status}
+                    count={dataRow.count}
+                    collapsed={dataRow.collapsed}
+                    onToggle={() => toggleCollapsed(dataRow.name)}
+                    indent
                   />
                 )}
               </div>
@@ -292,16 +551,34 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
       ) : (
         <div className="flex flex-col">
           {rows.map((row) =>
-            row.kind === 'header' ? (
-              <SessionRowHeader key={`hdr-${row.status}`} status={row.status} count={row.count} />
-            ) : (
-              <div key={row.session.id} className="pb-2">
+            row.kind === 'session' ? (
+              <div key={row.key} className="pb-2">
                 <SessionCard
                   session={row.session}
                   active={row.session.id === selectedSessionId}
-                  onClick={() => selectSession(row.session.id)}
+                  project={projectValues.get(row.session) ?? ''}
+                  onClick={() => selectSession(row.session)}
                 />
               </div>
+            ) : row.kind === 'group' ? (
+              <CollapseHeader
+                key={row.key}
+                label={row.label}
+                count={row.count}
+                collapsed={row.collapsed}
+                onToggle={() => toggleCollapsed(row.name)}
+                className="text-foreground"
+                dataAttr={row.label}
+              />
+            ) : (
+              <SessionRowHeader
+                key={row.key}
+                status={row.status}
+                count={row.count}
+                collapsed={row.collapsed}
+                onToggle={() => toggleCollapsed(row.name)}
+                indent
+              />
             )
           )}
         </div>

@@ -103,7 +103,7 @@ function TurnCard({
 }
 
 export function TraceView() {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const viewingChildAgent = useAppStore((s) => s.viewingChildAgent);
   const setViewingChildAgent = useAppStore((s) => s.setViewingChildAgent);
   const detail = useActiveSessionDetail();

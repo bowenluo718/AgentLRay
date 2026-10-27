@@ -44,7 +44,31 @@ export interface SessionSummary {
   model?: string | null;
   source?: string | null;
   spawnCount?: number | null;
+  archived?: boolean | null;
+  /** 聚合视图（/api/sessions platform=all）注入的来源平台与 openclaw agent，单平台列表不带 */
+  platform?: Platform;
+  agent?: string | null;
   [key: string]: unknown;
+}
+
+/** Block of GET /api/sessions?platform=a,b|all — one per platform (openclaw per agent). */
+export interface PlatformSessionsBlock {
+  platform: Platform;
+  agent: string | null;
+  total: number;
+  offset: number;
+  limit: number | null;
+  sessions: SessionSummary[];
+}
+
+/** Response of GET /api/sessions?platform=a,b|all. */
+export interface SessionsListResponse {
+  all: boolean;
+  platformIds: Platform[];
+  total: number;
+  offset: number;
+  limit: number | null;
+  platforms: PlatformSessionsBlock[];
 }
 
 /** One entry of a normalized message's `content` array. */

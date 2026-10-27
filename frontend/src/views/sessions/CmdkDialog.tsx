@@ -146,11 +146,11 @@ export function CmdkDialog({
     const store = useAppStore.getState();
     const plat = row.result.platform as Platform;
     const agent = row.result.agent || '';
-    if (plat !== store.platform) store.setPlatform(plat);
-    if (agent && agent !== useAppStore.getState().selectedAgent) store.setSelectedAgent(agent);
+    // 只更新详情上下文，不改动筛选/分组配置。
+    store.setDetailContext(plat, agent);
     store.setView('sessions');
     try {
-      const scope = { platform: plat, agent, includeArchived: store.includeArchived, settings: store.settings };
+      const scope = { platform: plat, agent, settings: store.settings };
       const list = await queryClient.fetchQuery(sessionsListOptions(scope));
       const found = list.find((s) => s.id === row.result.sessionId);
       if (!found) {

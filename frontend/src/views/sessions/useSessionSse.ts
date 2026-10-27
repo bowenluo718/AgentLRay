@@ -16,9 +16,9 @@ export type SseStatus = 'off' | 'connecting' | 'live' | 'error';
  * cache; `onNewMessages(count)` lets the caller expand pagination / auto-scroll.
  */
 export function useSessionSse(onNewMessages: (count: number) => void): SseStatus {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
-  const agent = useAppStore((s) => s.selectedAgent);
+  const agent = useAppStore((s) => s.detailAgent);
   const settings = useAppStore((s) => s.settings);
   const autoRefresh = useAppStore((s) => s.autoRefresh);
   const viewingChildAgent = useAppStore((s) => s.viewingChildAgent);

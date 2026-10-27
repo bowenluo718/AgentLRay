@@ -22,7 +22,7 @@ export function childAgentLabel(c: ChildAgentSummary, platform: Platform): strin
 
 /** Subagent list of the selected session. Legacy swallows fetch errors → empty list. */
 export function useChildrenQuery(): UseQueryResult<ChildAgentSummary[]> {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const settings = useAppStore((s) => s.settings);
   const dir = dirForPlatform(settings, platform) || undefined;
@@ -38,9 +38,9 @@ export function useChildrenQuery(): UseQueryResult<ChildAgentSummary[]> {
 
 /** The selected (parent) session detail — same key ViewSessions uses, cache is shared. */
 export function useSessionDetailQuery(): UseQueryResult<SessionDetail> {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
-  const agent = useAppStore((s) => s.selectedAgent);
+  const agent = useAppStore((s) => s.detailAgent);
   const settings = useAppStore((s) => s.settings);
   const dir = dirForPlatform(settings, platform) || undefined;
   return useQuery({
@@ -52,7 +52,7 @@ export function useSessionDetailQuery(): UseQueryResult<SessionDetail> {
 
 /** Transcript of the child agent being viewed (viewingChildAgent). */
 export function useChildSessionQuery(): UseQueryResult<SessionDetail> {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const child = useAppStore((s) => s.viewingChildAgent);
   const settings = useAppStore((s) => s.settings);

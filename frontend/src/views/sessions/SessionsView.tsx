@@ -132,7 +132,7 @@ function revealAndFlash(el: HTMLElement, color = '#58a6ff') {
 }
 
 export function SessionsView() {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const sessionView = useAppStore((s) => s.sessionView);
   const setSessionView = useAppStore((s) => s.setSessionView);
@@ -143,6 +143,7 @@ export function SessionsView() {
   const parentQuery = useSessionDetail(); // summary always shows the parent
   const activeQuery = useActiveSessionDetail(); // messages area: parent or child transcript
   const probe = usePlatformProbe(); // all-empty guided state (#13); cache shared with PlatformBar
+  const detailAgent = useAppStore((s) => s.detailAgent);
 
   const [msgFilter, setMsgFilter] = useState<MsgFilter>(null);
   const [visibleUnitCount, setVisibleUnitCount] = useState<number>(MSG_BATCH_SIZE);
@@ -152,9 +153,8 @@ export function SessionsView() {
   const paginatedKeyRef = useRef('');
 
   const activeKey = `${platform}:${selectedSessionId}:${viewingChildAgent ?? ''}`;
-  const reviewDirectory = useAppStore((state) => dirForPlatform(state.settings, state.platform));
-  const selectedAgent = useAppStore((state) => state.selectedAgent);
-  const reviewScope = JSON.stringify([platform, reviewDirectory, selectedSessionId, viewingChildAgent, platform === 'openclaw' ? selectedAgent : '']);
+  const reviewDirectory = useAppStore((state) => dirForPlatform(state.settings, state.detailPlatform));
+  const reviewScope = JSON.stringify([platform, reviewDirectory, selectedSessionId, viewingChildAgent, platform === 'openclaw' ? detailAgent : '']);
   const activeDetail = activeQuery.data;
   const timing = buildTimingAnalysis(activeDetail?.messages);
 

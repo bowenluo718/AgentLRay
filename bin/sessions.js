@@ -1,8 +1,8 @@
 'use strict';
 // agentlray sessions — 终端会话查询与续跑工具。
 //
-//   list   按条件查询会话列表（全部平台；openclaw 需 --agent）
-//   show   查看单个会话详细信息（会话元信息 + 消息时间线）
+//   list   按条件查询会话列表（全部平台；openclaw 缺省 --agent = 合并全部 agents）
+//   show   查看单个会话详细信息（会话元信息 + 消息时间线；openclaw 缺省 --agent 跨 agent 查找）
 //   resume 生成并（可选）执行续跑命令（仅 codex / claude-code / omp 有原生续跑）
 //
 // 与 inspect.js 相同的输出约定：--json 输出 {schemaVersion:1,…}，错误为
@@ -11,39 +11,59 @@
 
 const fs = require('fs');
 const path = require('path');
-const { randomBytes } = require('crypto');
 const { spawn } = require('child_process');
 const { PLATFORMS } = require('../lib/platforms');
 const { resolveDir } = require('../lib/config');
-const { listSessionsForAgent } = require('../lib/platforms/openclaw');
+const { resolveCliBin } = require('../lib/cli-bins');
+const { setStatusConfig } = require('../lib/status');
+const { loadStatusConfig } = require('../lib/status-config');
 const { findOmpSessionFile } = require('../lib/platforms/omp');
+const { loadUiSettings } = require('../lib/ui-settings');
 const { STATUS, STATUS_LABELS } = require('../lib/status');
+const { getSessionAcrossAgents } = require('../lib/platforms/openclaw');
+const {
+  parsePlatformSelection,
+  listSessionsBySelection,
+  listOpenclawSessionsFlat,
+  filterAndPage,
+} = require('../lib/session-list');
 
 const HELP = `Usage:
-  agentlray sessions list   --platform <p> [--agent NAME] [--dir PATH]
+  agentlray sessions list   [--platform <p|p1,p2|all>] [--agent NAME] [--dir PATH]
                             [--status <s,...>] [--match TEXT]
                             [--since ISO] [--until ISO] [--limit N] [--offset N] [--json]
-  agentlray sessions show   --platform <p> --id <SESSION_ID> [--agent NAME] [--dir PATH]
+  agentlray sessions show   [--platform <p>] --id <SESSION_ID> [--agent NAME] [--dir PATH]
                             [--tail N] [--full] [--json]
-  agentlray sessions resume --platform <codex|claude-code|omp> --id <SESSION_ID>
+  agentlray sessions resume [--platform <codex|claude-code|omp>] --id <SESSION_ID>
                             [--dir PATH] [--cwd PATH] [--message TEXT] [--run] [--json]
 
-list:   按条件查询会话列表（openclaw/codex/claude-code/hermes/omp/dsh/gemini；
-        openclaw 必须传 --agent）。结果按各平台既有分组排序（状态组内时间降序）；
-        每条含 firstUserMessage 首条用户消息与 lastMessage（最后一条 user/assistant 内容）。
-show:   查看单个会话的元信息与归一化消息时间线。
+list:   按条件查询会话列表，支持一次查多个平台：--platform 逗号分隔多值（omp,codex）
+        或 all（全部 7 平台）。openclaw 未传 --agent 时默认查询该平台全部 agents 的
+        合并会话（单平台展平为一段、每条带 agent 来源；多平台聚合每个 agent 一段）。
+        结果按各平台既有分组排序（状态组内时间降序）；每条含 firstUserMessage 首条
+        用户消息与 lastMessage（最后一条 user/assistant 内容）。JSON：单平台输出
+        {platform,agent,total,offset,limit,sessions}；多平台输出 {platform,all,
+        platformIds,total,offset,limit,platforms:[{platform,agent,total,offset,limit,
+        sessions}]}，纯文本以 "== platform [/agent] ==" 分段。
+show:   查看单个会话的元信息与归一化消息时间线（openclaw 未传 --agent 时跨全部
+        agents 查找该 id，JSON 含 agent 归属）。
 resume: 生成该会话在原 CLI 中的续跑命令（codex resume / claude --resume /
         omp --resume=），默认只打印命令不执行；加 --run 才真正 spawn 平台 CLI
         执行并透传 stdin/stdout 与退出码。统一语义：**同 id 续跑、不接受派生**——
-        codex/claude 原生同 id 续写；omp 目标会话若仍打开（尾部无 session_exit），
-        --run 会先追加 session_exit 收尾再以原 id 原地续跑（不再派生）。仅这三
-        平台有原生续跑契约，其余平台 resume 报错。
+        codex/claude 原生同 id 续写；omp 目标若正被运行中的 omp 实例以 --resume
+        持有（会话非空闲，续跑必派生），--run 会拒绝并在提示中给出持有进程 pid，
+        请先结束该实例（退出其终端令会话 dispose）再续跑。仅这三平台有原生续跑
+        契约，其余平台 resume 报错。
 
 公共参数：
-  --platform <p>  平台 id（list/show 为全部 7 平台；resume 仅 codex|claude-code|omp）
+  --platform <p>  可选。list/show 支持逗号分隔多平台或 all（全部平台）；resume 仅
+                  codex|claude-code|omp。缺省使用页面持久化的平台数据（看板 /api/settings/ui
+                  落盘的 ~/.agentlray/ui-settings.json）：list 用持久化的多选集合（单平台模式用
+                  platform，未持久化或全选时 = all）；show/resume 用持久化的单平台，无该数据则
+                  报错要求显式指定。
   --id <ID>       会话 id（show/resume）
-  --agent <name>  openclaw 下的 agent 名（该平台必填；其他平台忽略）
-  --dir <path>    覆盖该平台默认数据目录（绝对路径）
+  --agent <name>  openclaw 下的 agent 名（缺省 = 该平台全部 agents 的合并会话；其他平台忽略）
+  --dir <path>    覆盖平台默认数据目录（仅单平台查询有效；多平台各自用默认目录）
   --status <s,…>  按状态过滤 list：awaiting-input|working|waiting|stopped，可逗号多值
   --match <text>  按 title / 首条用户消息 / 最后一条消息 / 会话 id 子串匹配（忽略大小写）
   --since <ISO>   list 只保留 lastActivity（缺省回退 timestamp）≥ 该时刻的会话
@@ -108,10 +128,31 @@ function resolvePlatform(id) {
   return platform;
 }
 
-function tsMs(value) {
-  if (value === null || value === undefined || value === '') return null;
-  const ms = typeof value === 'number' ? value : Date.parse(value);
-  return Number.isFinite(ms) ? ms : null;
+// --platform 缺省时，用页面持久化的平台数据（web 看板在 /api/settings/ui 落盘的
+// ~/.agentlray/ui-settings.json）推导默认选择。list 接受多选/全部；show/resume 需单平台。
+async function resolveDefaultPlatform(command) {
+  const ui = await loadUiSettings();
+  if (command === 'list') {
+    // 页面持久化优先：selectedPlatforms 非空 → 按该集合查询（全选 → all）；
+    // 单平台模式（selectedPlatforms 空）→ 用 platform；无持久化 → all（与前端默认一致）。
+    if (ui && Array.isArray(ui.selectedPlatforms) && ui.selectedPlatforms.length > 0) {
+      const picked = ui.selectedPlatforms.filter((name) => PLATFORMS[name]);
+      if (picked.length === 0) return 'all';
+      return picked.length === Object.keys(PLATFORMS).length ? 'all' : picked.join(',');
+    }
+    if (ui && PLATFORMS[ui.platform]) return ui.platform;
+    return 'all';
+  }
+  const def = ui && PLATFORMS[ui.platform] ? ui.platform : null;
+  if (!def) {
+    const e = new Error(
+      `未提供 --platform，且没有页面持久化的平台数据（~/.agentlray/ui-settings.json）。` +
+        `请先在看板页面选择平台，或显式传 --platform。`
+    );
+    e.usage = true;
+    throw e;
+  }
+  return def;
 }
 
 function sanitizeNonNegInt(value, flag) {
@@ -138,55 +179,31 @@ function labelFor(status) {
   return STATUS_LABELS[status] || status;
 }
 
-// 只读 JSONL 尾部最后一条非空记录（避免整文件读取）。解析失败返回 null。
-function tailRecord(filePath, bytes = 65536) {
-  let fd;
+// 检测目标 omp 会话是否正被"运行中的 omp 实例"持有（`omp --resume <path|id>`）。
+// 这类会话在 OMP 中处于"非空闲"，新续跑会触发派生（二进制内置 requireIdle→fork 逻辑），
+// 与文件尾是否有 session_exit 无关（早前"先追加 session_exit 收尾"方案已实证无效）。
+// 返回持有进程的 pid，未检测到返回 null。排除本工具自身进程树（cmdline 含 agentlray）。
+function liveOmpPidForSession(sessionFilePath, sessionId) {
+  let entries;
   try {
-    fd = fs.openSync(filePath, 'r');
-    const size = fs.fstatSync(fd).size;
-    const len = Math.min(size, bytes);
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, size - len);
-    const text = buf.toString('utf8').trimEnd();
-    const idx = text.lastIndexOf('\n');
-    const last = idx === -1 ? text : text.slice(idx + 1);
-    if (!last.trim()) return null;
-    return JSON.parse(last);
+    entries = fs.readdirSync('/proc');
   } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
+    return null; // 非 Linux：尽力而为，不阻塞
   }
-}
-
-// OMP 18.8.4 实测（2026-10-26）：对"已结束（尾部 session_exit）"的会话续跑是原地续写；
-// 对"仍打开（无 session_exit）"的会话会新建带 parentSession 的派生会话。统一语义：
-// 不接受派生——同 id 续跑；目标未结束时先追加 session_exit 收尾再续跑。
-// 返回 { ended: true|false|null, finalized, willFork, note }。
-function ompResumeState(filePath) {
-  if (!filePath) return { ended: null, finalized: false, willFork: null, note: null };
-  const last = tailRecord(filePath);
-  if (!last) return { ended: null, finalized: false, willFork: null, note: null };
-  const ended = last.type === 'custom' && last.customType === 'session_exit';
-  return { ended, last, finalized: false, willFork: false, note: null };
-}
-
-const OMP_FINALIZE_REASON = 'agentlray-resume-finalize';
-
-// 在目标 omp 会话文件尾部追加 session_exit 标记（"先结束"），随后同 id 续跑即为原地续写。
-// 仅在确认会话"仍打开"时调用；返回追加的 record。
-function finalizeOmpSession(filePath, lastRecord) {
-  const ts = new Date().toISOString();
-  const record = {
-    type: 'custom',
-    customType: 'session_exit',
-    data: { reason: OMP_FINALIZE_REASON, kind: 'normal', recordedAt: ts },
-    id: randomBytes(4).toString('hex'),
-    parentId: (lastRecord && lastRecord.id) || null,
-    timestamp: ts,
-  };
-  fs.appendFileSync(filePath, `\n${JSON.stringify(record)}\n`);
-  return record;
+  for (const raw of entries) {
+    if (!/^\d+$/.test(raw)) continue;
+    let cmd;
+    try {
+      cmd = fs.readFileSync(`/proc/${raw}/cmdline`, 'utf8');
+    } catch {
+      continue; // 进程瞬时退出
+    }
+    if (!cmd.includes('omp') || !cmd.includes('--resume')) continue;
+    // 排除本工具自身进程（node .../bin/agentlray.js 或 agent-lray 垫片）
+    if (cmd.includes('bin/agentlray.js') || cmd.includes('agent-lray')) continue;
+    if (cmd.includes(sessionFilePath) || cmd.includes(sessionId)) return Number(raw);
+  }
+  return null;
 }
 
 // 收尾续跑后，在 slug 目录里找本次运行期间新建、且 parentSession 指向目标 id 的派生会话。
@@ -218,88 +235,85 @@ function findOmpFork(slugDir, targetId, filesBefore) {
   return null;
 }
 
+// 忙等：CLI 进程内同步睡眠（不引入额外依赖）。
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// 自动结束"以 --resume 持有目标 omp 会话"的运行中实例，以便安全地同 id 续跑。
+// 优先 SIGTERM（让 OMP 有机会收尾、写 session_exit），等待退出；超时 SIGKILL 兜底。
+// 返回是否已确认进程不再存活。
+function terminateOmpHolder(pid, { termWaitMs = 8000, killWaitMs = 3000 } = {}) {
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return false;
+    }
+    // 僵尸：已终止、仅待父进程回收，不持有会话资源，视为已退出。
+    // stat 格式 `pid (comm) state …`；state 是 ') ' 后的首字符。
+    try {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const idx = stat.indexOf(') ');
+      if (idx !== -1 && stat[idx + 2] === 'Z') return false;
+    } catch {
+      // 竞态：进程刚好消失
+    }
+    return true;
+  };
+  if (!alive()) return true;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // 竞态：刚好退出；交由下方 alive 判定
+  }
+  const STEP = 200;
+  let waited = 0;
+  while (alive() && waited < termWaitMs) {
+    sleepSync(STEP);
+    waited += STEP;
+  }
+  if (alive()) {
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // 同上，竞态退出
+    }
+    waited = 0;
+    while (alive() && waited < killWaitMs) {
+      sleepSync(STEP);
+      waited += STEP;
+    }
+  }
+  return !alive();
+}
+
 // --- list ---
 
-async function listSessions(opts, json) {
-  const platform = resolvePlatform(opts.platform);
-  let sessions;
-  if (platform.id === 'openclaw') {
-    if (!opts.agent) throw new Error('openclaw 平台需要 --agent <name> 才能列出会话。');
-    const dir = resolveDir(opts.dir, platform.defaultDir());
-    sessions = await listSessionsForAgent(dir, opts.agent, false);
-  } else {
-    if (!platform.list) throw new Error(`Platform '${platform.id}' does not support listing.`);
-    const dir = resolveDir(opts.dir, platform.defaultDir());
-    sessions = await platform.list(dir);
-  }
-
-  let filtered = sessions;
-
-  if (opts.status) {
-    const wanted = new Set(
-      opts.status.split(',').map((s) => s.trim()).filter(Boolean)
-    );
-    for (const s of wanted) {
-      if (!Object.values(STATUS).includes(s)) {
-        throw new Error(`Unknown status '${s}'. Expected: ${Object.values(STATUS).join(', ')}.`);
+// 纯文本表格。header/width/cell 与原单平台实现一致；withAgent 时（openclaw
+// 全 agent 合并视图）在行首加一列 agent 来源。
+function renderSessionsTable(shown, withAgent = false) {
+  const header = withAgent
+    ? ['agent', '状态', '会话 id', '最后活动', '消息数', '标题', '首条用户消息', '最后消息', '目录']
+    : ['状态', '会话 id', '最后活动', '消息数', '标题', '首条用户消息', '最后消息', '目录'];
+  const width = withAgent
+    ? { 0: 18, 1: 6, 2: 6, 3: 10, 4: 5, 5: 6, 6: 14, 7: 14, 8: 6 }
+    : { 0: 6, 1: 6, 2: 10, 3: 5, 4: 6, 5: 14, 6: 14, 7: 6 };
+  function cell(s, i) {
+    if (withAgent) {
+      switch (i) {
+        case 0: return s.agent || '';
+        case 1: return labelFor(s.status);
+        case 2: return s.id || '';
+        case 3: return s.lastActivity || s.timestamp || '';
+        case 4: return String(s.messageCount || 0);
+        case 5: return s.title || s.firstUserMessage || '';
+        case 6: return s.firstUserMessage || '';
+        case 7: return s.lastMessage ? `${s.lastMessage.role}: ${s.lastMessage.text}` : '';
+        case 8: return s.cwd || '';
+        default: return '';
       }
     }
-    filtered = filtered.filter((s) => wanted.has(s.status));
-  }
-
-  if (opts.match) {
-    const needle = String(opts.match).toLowerCase();
-    filtered = filtered.filter((s) =>
-      [s.id, s.title, s.firstUserMessage, s.lastMessage && s.lastMessage.text].some(
-        (v) => v && String(v).toLowerCase().includes(needle)
-      )
-    );
-  }
-
-  const sinceMs = opts.since != null ? tsMs(opts.since) : null;
-  const untilMs = opts.until != null ? tsMs(opts.until) : null;
-  if (opts.since != null && sinceMs === null) throw new Error(`Invalid --since timestamp '${opts.since}'.`);
-  if (opts.until != null && untilMs === null) throw new Error(`Invalid --until timestamp '${opts.until}'.`);
-  if (sinceMs !== null || untilMs !== null) {
-    filtered = filtered.filter((s) => {
-      const activity = tsMs(s.lastActivity) ?? tsMs(s.timestamp);
-      if (activity === null) return false;
-      if (sinceMs !== null && activity < sinceMs) return false;
-      if (untilMs !== null && activity > untilMs) return false;
-      return true;
-    });
-  }
-
-  const offset = opts.offset != null ? sanitizeNonNegInt(opts.offset, '--offset') : 0;
-  const limit = opts.limit != null ? sanitizeNonNegInt(opts.limit, '--limit') : 0;
-  const shown = limit > 0 ? filtered.slice(offset, offset + limit) : filtered.slice(offset);
-
-  if (json) {
-    process.stdout.write(
-      `${JSON.stringify({
-        schemaVersion: 1,
-        kind: 'sessions',
-        platform: platform.id,
-        agent: opts.agent || null,
-        total: filtered.length,
-        offset,
-        limit: limit || null,
-        sessions: shown,
-      })}\n`
-    );
-    return;
-  }
-
-  if (shown.length === 0) {
-    if (offset === 0) {
-      process.stdout.write(`(no sessions for ${platform.id}${opts.agent ? ` / ${opts.agent}` : ''})\n`);
-    }
-    return;
-  }
-
-  const header = ['状态', '会话 id', '最后活动', '消息数', '标题', '首条用户消息', '最后消息', '目录'];
-  const width = { 0: 6, 1: 6, 2: 10, 3: 5, 4: 6, 5: 14, 6: 14, 7: 6 };
-  function cell(s, i) {
     switch (i) {
       case 0: return labelFor(s.status);
       case 1: return s.id || '';
@@ -322,6 +336,101 @@ async function listSessions(opts, json) {
   for (const s of shown) {
     const row = header.map((_, i) => pad(cell(s, i), width[i]));
     process.stdout.write(`${row.join('  ').trimEnd()}\n`);
+  }
+}
+
+async function listSinglePlatform(opts, json, id) {
+  // openclaw 未传 --agent：默认查该平台全部 agents 的合并会话（展平为一份，
+  // 每条带 agent 来源；过滤/分页在合并集上全局生效）。
+  const allAgents = id === 'openclaw' && !opts.agent;
+  let sessions = [];
+  let total = 0;
+  let offset = 0;
+  let limit = null;
+
+  if (allAgents) {
+    // 走共享枚举层（lib/session-list.js）：扁平合并全部 agents，过滤/分页在合并集上全局生效。
+    const all = await listOpenclawSessionsFlat({ dir: opts.dir, includeArchived: false });
+    const paged = filterAndPage(all, opts);
+    sessions = paged.shown;
+    total = paged.total;
+    offset = paged.offset;
+    limit = paged.limit;
+  } else {
+    const result = await listSessionsBySelection({ all: false, ids: [id] }, opts);
+    const entry = result.platforms[0];
+    sessions = entry ? entry.sessions : [];
+    total = result.total;
+    offset = result.offset;
+    limit = result.limit;
+  }
+
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'sessions',
+        platform: id,
+        agent: opts.agent || null,
+        allAgents,
+        total,
+        offset,
+        limit,
+        sessions,
+      })}\n`
+    );
+    return;
+  }
+
+  if (sessions.length === 0) {
+    if (offset === 0) {
+      process.stdout.write(`(no sessions for ${id}${opts.agent ? ` / ${opts.agent}` : ''})\n`);
+    }
+    return;
+  }
+  renderSessionsTable(sessions, allAgents);
+}
+
+async function listMultiPlatforms(opts, json, selection) {
+  if (opts.dir != null) {
+    throw new Error('--dir 仅支持单平台模式；多平台查询各自使用默认数据目录（可用各平台环境变量覆盖）。');
+  }
+  const result = await listSessionsBySelection(selection, opts);
+
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'sessions',
+        platform: selection.all ? 'all' : selection.ids.join(','),
+        all: selection.all,
+        platformIds: selection.ids,
+        total: result.total,
+        offset: result.offset,
+        limit: result.limit,
+        platforms: result.platforms,
+      })}\n`
+    );
+    return;
+  }
+
+  result.platforms.forEach((g, i) => {
+    if (i > 0) process.stdout.write('\n');
+    process.stdout.write(`== ${g.platform}${g.agent ? ` / ${g.agent}` : ''} ==\n`);
+    if (g.sessions.length === 0) {
+      process.stdout.write(`(no sessions for ${g.platform}${g.agent ? ` / ${g.agent}` : ''})\n`);
+      return;
+    }
+    renderSessionsTable(g.sessions);
+  });
+}
+
+async function listSessions(opts, json) {
+  const selection = parsePlatformSelection(opts.platform);
+  if (selection.all || selection.ids.length > 1) {
+    await listMultiPlatforms(opts, json, selection);
+  } else {
+    await listSinglePlatform(opts, json, selection.ids[0]);
   }
 }
 
@@ -368,11 +477,24 @@ async function showSession(opts, json) {
   const platform = resolvePlatform(opts.platform);
   if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
   const dir = resolveDir(opts.dir, platform.defaultDir());
-  const payload = platform.needsAgent
-    ? opts.agent
-      ? await platform.getSession(dir, opts.id, { agent: opts.agent })
-      : (() => { throw new Error(`openclaw 平台需要 --agent <name>。`); })()
-    : await platform.getSession(dir, opts.id);
+  let payload;
+  let foundAgent = null;
+  if (platform.needsAgent) {
+    if (opts.agent) {
+      payload = await platform.getSession(dir, opts.id, { agent: opts.agent });
+      foundAgent = opts.agent;
+    } else {
+      const across = await getSessionAcrossAgents(dir, opts.id);
+      if (across) {
+        payload = { session: across.session, messages: across.messages };
+        foundAgent = across.agent;
+      } else {
+        payload = null;
+      }
+    }
+  } else {
+    payload = await platform.getSession(dir, opts.id);
+  }
   if (!payload) throw new Error(`Session '${opts.id}' not found on platform '${platform.id}'.`);
 
   const session = payload.session || {};
@@ -386,6 +508,7 @@ async function showSession(opts, json) {
         schemaVersion: 1,
         kind: 'session',
         platform: platform.id,
+        agent: platform.needsAgent ? foundAgent : null,
         session,
         messages: opts.tail != null ? messages.slice(-Math.max(0, opts.tail)) : messages,
       })}\n`
@@ -393,7 +516,7 @@ async function showSession(opts, json) {
     return;
   }
 
-  const header = `# Session ${session.id || opts.id} (${platform.id})`;
+  const header = `# Session ${session.id || opts.id} (${platform.id}${foundAgent ? ` / ${foundAgent}` : ''})`;
   process.stdout.write(`${header}\n`);
   for (const [key, value] of Object.entries(session)) {
     if (value === null || value === undefined || value === '' || Array.isArray(value)) continue;
@@ -417,10 +540,13 @@ async function showSession(opts, json) {
 
 // --- resume ---
 
+// 各平台 resume 的原生续跑参数生成器。实际可执行命令（bin）由
+// resolveCliBin() 在运行时解析：环境变量 → ~/.agentlray/cli-bins.json（web
+// 设置面板）→ 默认命令名，见 lib/cli-bins.js。
 const RESUME_BINS = {
-  codex: { bin: 'codex', args: (id) => ['resume', id, '--yolo'] },
-  'claude-code': { bin: 'claude', args: (id) => ['--dangerously-skip-permissions', '--resume', id] },
-  omp: { bin: 'omp', args: (id) => ['--auto-approve', `--resume=${id}`] },
+  codex: { args: (id) => ['resume', id, '--yolo'] },
+  'claude-code': { args: (id) => ['--dangerously-skip-permissions', '--resume', id] },
+  omp: { args: (id) => ['--auto-approve', `--resume=${id}`] },
 };
 
 function runChild(bin, args, cwd) {
@@ -443,34 +569,45 @@ async function resumeSession(opts, json) {
       `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp are supported.`
     );
   }
+  // 可执行命令：环境变量 → ~/.agentlray/cli-bins.json（web 设置面板）→ 默认名。
+  const bin = await resolveCliBin(platform.id);
   if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
 
   const dir = resolveDir(opts.dir, platform.defaultDir());
   const payload = await platform.getSession(dir, opts.id);
   if (!payload) throw new Error(`Session '${opts.id}' not found on platform '${platform.id}'.`);
   const cwd = opts.cwd != null ? opts.cwd : payload.session?.cwd || null;
+  if (opts.run && cwd && !fs.existsSync(cwd)) {
+    throw new Error(`Session cwd 不存在：${cwd}（目录已被移除或未在会话记录中保留），无法在该目录续跑。`);
+  }
 
-  // 统一语义：同 id 续跑、不接受派生。OMP 目标未结束时，--run 先追加 session_exit
-  // 收尾（"先结束再续跑"），从而让 OMP 原地续写而非派生。
-  let willFork = null;
+  // 统一语义：同 id 续跑、不接受派生。OMP 目标若正被"运行中的 omp 实例"以
+  // --resume 持有（会话非空闲），OMP 续跑必然派生；--run 直接拒绝并提示先结束
+  // 该实例。早前"先追加 session_exit 收尾"方案已实证无效（非空闲是进程级状态）。
   let note = null;
-  let finalized = false;
+  let livePid = null;
+  let terminated = false;
   let slugDir = null;
   let filesBefore = null;
   let ompFile = null;
   if (platform.id === 'omp') {
     ompFile = await findOmpSessionFile(dir, opts.id);
-    const state = ompResumeState(ompFile);
-    willFork = state.willFork;
-    if (state.ended === false) {
+    livePid = ompFile ? liveOmpPidForSession(ompFile, opts.id) : null;
+    if (livePid) {
       if (opts.run) {
-        finalizeOmpSession(ompFile, state.last);
-        finalized = true;
-        note = `目标 omp 会话未结束，已先追加 session_exit（${OMP_FINALIZE_REASON}）收尾，再以原 id 原地续跑（本工具不接受派生）。`;
-        process.stderr.write(`agentlray sessions: ${note}\n`);
+        // 统一语义：同 id 续跑、不接受派生。持有者在则不派生地续跑——先自动
+        // 终止该实例（SIGTERM→SIGKILL 兜底），确认其退出后再续跑。
+        terminated = terminateOmpHolder(livePid);
+        const still = ompFile ? liveOmpPidForSession(ompFile, opts.id) : null;
+        if (!terminated || still) {
+          throw new Error(
+            `无法自动终止运行中的 omp 实例（pid=${livePid}），目标会话仍被持有，不能安全地同 id 续跑（避免 OMP 派生新会话）。请手动结束该实例后再试。`
+          );
+        }
+        note = `已自动终止运行中的 omp 实例（pid=${livePid}），继续同 id 续跑。`;
       } else {
-        note = '目标 omp 会话未结束：--run 会先追加 session_exit 收尾，再以原 id 原地续跑（不做派生）。';
-        process.stderr.write(`agentlray sessions: ${note}\n`);
+        note = `目标 omp 会话正被运行中的 omp 实例（pid=${livePid}）以 --resume 持有：--run 将自动终止该实例后再同 id 续跑（不接受派生）。`;
+        process.stderr.write(`agentlray sessions: 注意：${note}\n`);
       }
     }
     if (opts.run && ompFile) {
@@ -481,7 +618,7 @@ async function resumeSession(opts, json) {
 
   const args = spec.args(opts.id);
   if (opts.message != null) args.push(String(opts.message));
-  const command = `${cwd ? `cd ${shellQuote(cwd)} && ` : ''}${spec.bin} ${args.map(shellToken).join(' ')}`;
+  const command = `${cwd ? `cd ${shellQuote(cwd)} && ` : ''}${bin} ${args.map(shellToken).join(' ')}`;
 
   if (!opts.run) {
     if (json) {
@@ -492,12 +629,12 @@ async function resumeSession(opts, json) {
           platform: platform.id,
           id: opts.id,
           cwd,
-          bin: spec.bin,
+          bin,
           args,
           command,
-          willFork,
-          finalized,
+          livePid,
           note,
+          terminated: false,
           executed: false,
         })}\n`
       );
@@ -507,10 +644,10 @@ async function resumeSession(opts, json) {
     return;
   }
 
-  const result = await runChild(spec.bin, args, cwd);
-  if (result.error) throw new Error(`Failed to run '${spec.bin}': ${result.error.message}`);
+  const result = await runChild(bin, args, cwd);
+  if (result.error) throw new Error(`Failed to run '${bin}': ${result.error.message}`);
 
-  // 收尾后若 OMP 仍派生新会话（并发写入等极端情况），如实提醒，不掩盖。
+  // 兜底：即便检测到非持有、放行续跑，若 OMP 仍派生了新会话（并发等极端情况），如实提醒。
   let forked = null;
   if (platform.id === 'omp' && slugDir) {
     forked = findOmpFork(slugDir, opts.id, filesBefore);
@@ -529,12 +666,12 @@ async function resumeSession(opts, json) {
         platform: platform.id,
         id: opts.id,
         cwd,
-        bin: spec.bin,
+        bin,
         args,
         command,
-        willFork,
-        finalized,
+        livePid,
         note,
+        terminated,
         forked,
         executed: true,
         exitCode: result.code,
@@ -582,6 +719,17 @@ async function main(args, _mode = 'sessions') {
     }
     const opts = parseOptions(rest, OPTION_DEFS);
     json = Boolean(opts.json);
+    // --platform 非必填：缺省使用页面持久化的平台数据（看板 /api/settings/ui 落盘的文件）。
+    if (opts.platform == null) opts.platform = await resolveDefaultPlatform(command);
+    // list 依赖状态判定；启动即加载页面持久化的状态时间配置（无则默认），
+    // 保证终端与 web 看板视角一致。
+    if (command === 'list') {
+      try {
+        setStatusConfig(await loadStatusConfig());
+      } catch {
+        // 配置损坏/缺失回退默认窗口。
+      }
+    }
     if (command === 'list') await listSessions(opts, json);
     else if (command === 'show') await showSession(opts, json);
     else await resumeSession(opts, json);

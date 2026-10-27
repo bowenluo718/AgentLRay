@@ -8,7 +8,7 @@ import { childAgentLabel, hasChildAgents, useChildrenQuery } from './childAgents
 
 /** Summary block: one chip per spawned subagent. Hidden when the platform has no children API or the list is empty. */
 export function ChildAgentsSection() {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const setViewingChildAgent = useAppStore((s) => s.setViewingChildAgent);
   const childrenQuery = useChildrenQuery();
   const children = childrenQuery.data ?? [];
@@ -47,7 +47,7 @@ export function ChildAgentsSection() {
 
 /** Banner above the messages list while a child transcript is loaded. */
 export function ChildAgentBanner() {
-  const platform = useAppStore((s) => s.platform);
+  const platform = useAppStore((s) => s.detailPlatform);
   const viewingChildAgent = useAppStore((s) => s.viewingChildAgent);
   const setViewingChildAgent = useAppStore((s) => s.setViewingChildAgent);
   const childrenQuery = useChildrenQuery();

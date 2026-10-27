@@ -60,7 +60,6 @@ export function GlobalInsights() {
   const platform = useAppStore((s) => s.platform);
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const settings = useAppStore((s) => s.settings);
-  const setPlatform = useAppStore((s) => s.setPlatform);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
   const setView = useAppStore((s) => s.setView);
   const requestScrollToMessage = useAppStore((s) => s.requestScrollToMessage);
@@ -76,7 +75,7 @@ export function GlobalInsights() {
   // Examples belong to the platform this insights payload was fetched for
   // (/api/insights is platform-scoped); switch back if the store moved on.
   const openExample = (e: ErrorClusterExample) => {
-    if (useAppStore.getState().platform !== platform) setPlatform(platform);
+    useAppStore.getState().setDetailContext(platform, '');
     setSelectedSessionId(e.sessionId);
     if (e.messageId) requestScrollToMessage(e.messageId);
     else setView('sessions');

@@ -522,7 +522,8 @@ function renderAgents() {
     const label =
       '<div class="agent-nav-label" title="OpenClaw 按 agent 分目录存储会话（~/.openclaw/agents/<名字>/sessions），先选 agent 再浏览其会话">OpenClaw Agent ⓘ</div>';
     agentNav.innerHTML = state.agents.length
-      ? `${label}<select class="agent-select" id="agentSelect" title="选择要浏览哪个 OpenClaw agent 的会话">
+      ? `${label}<select class="agent-select" id="agentSelect" title="选择要浏览哪个 OpenClaw agent 的会话（默认全部 agent）">
+              <option value=""${state.selectedAgent === '' ? ' selected' : ''}>全部 agent</option>
               ${state.agents
                 .map(
                   (agent) =>
@@ -2795,6 +2796,10 @@ async function loadStatusLabels() {
 function sessionCardHtml(session) {
   const activeClass = session.id === state.selectedSessionId ? 'active' : '';
   const chips = [];
+  // openclaw 全部 agent 合并视图：每条卡片标注来源 agent
+  if (state.platform === 'openclaw' && !state.selectedAgent && session.agent) {
+    chips.push(`<span class="stat-chip agent">🤖 ${escapeHtml(session.agent)}</span>`);
+  }
   if (session.userCount) chips.push(`<span class="stat-chip user">👤 ${session.userCount}</span>`);
   if (session.assistantCount) chips.push(`<span class="stat-chip">🤖 ${session.assistantCount}</span>`);
   if (session.toolCallCount) chips.push(`<span class="stat-chip tool">🔧 ${session.toolCallCount}</span>`);
@@ -3453,10 +3458,19 @@ function renderSummary() {
   if (resumeCmdBtn) {
     resumeCmdBtn.addEventListener('click', async () => {
       const id = state.selectedSessionId;
+      // 读取平台 CLI 命令配置（服务端 ~/.agentlray/cli-bins.json，未配置回退默认名），
+      // 与后端 bin/sessions.js resume 使用同一命令。
+      let bin;
+      try {
+        const cliBins = await fetchJson('/api/settings/cli-bins');
+        bin = cliBins?.[state.platform]?.bin;
+      } catch {
+        // 读取失败回退默认命令名。
+      }
       let cmd = '';
-      if (state.platform === 'codex') cmd = `codex resume ${id} --yolo`;
-      else if (state.platform === 'claude-code') cmd = `claude --dangerously-skip-permissions --resume ${id}`;
-      else if (state.platform === 'omp') cmd = `omp --auto-approve --resume=${id}`;
+      if (state.platform === 'codex') cmd = `${bin || 'codex'} resume ${id} --yolo`;
+      else if (state.platform === 'claude-code') cmd = `${bin || 'claude'} --dangerously-skip-permissions --resume ${id}`;
+      else if (state.platform === 'omp') cmd = `${bin || 'omp'} --auto-approve --resume=${id}`;
       const cwd = state.sessionData.session?.cwd;
       if (cwd) cmd = `cd ${cwd} && ${cmd}`;
       try {
@@ -4221,7 +4235,7 @@ function renderBreadcrumb() {
     html += '<span class="breadcrumb-sep">→</span>';
   });
 
-  html += `<span class="breadcrumb-item current">${escapeHtml(state.selectedAgent)}</span>`;
+  html += `<span class="breadcrumb-item current">${escapeHtml(state.selectedAgent || '全部 agent')}</span>`;
 
   breadcrumbEl.innerHTML = html;
 
@@ -4239,9 +4253,7 @@ async function loadAgents() {
   try {
     if (state.platform === 'openclaw') {
       state.agents = await fetchJson('/api/agents' + dp);
-      if (!state.selectedAgent && state.agents.length) {
-        state.selectedAgent = state.agents[0];
-      }
+      // 默认 selectedAgent='' = 全部 agent 合并视图；不再自动选第一个。
     } else {
       state.agents = [];
       state.selectedAgent = '';
@@ -4257,9 +4269,11 @@ async function loadSessions(preserveSelection) {
   const dp = dirParam();
   const dirAmp = dp ? dp.replace('?', '&') : '';
   if (state.platform === 'openclaw') {
-    if (!state.selectedAgent) return;
+    // 未选 agent → 默认全部 agents 合并（/api/openclaw/sessions）
     state.sessions = await fetchJson(
-      `/api/agents/${encodeURIComponent(state.selectedAgent)}/sessions?include_archived=${state.includeArchived}${dirAmp}`
+      state.selectedAgent
+        ? `/api/agents/${encodeURIComponent(state.selectedAgent)}/sessions?include_archived=${state.includeArchived}${dirAmp}`
+        : `/api/openclaw/sessions?include_archived=${state.includeArchived}${dirAmp}`
     );
   } else if (state.platform === 'codex') {
     state.sessions = await fetchJson('/api/codex/sessions' + dp);
@@ -4297,9 +4311,11 @@ async function loadSession() {
   let payload;
   const dp = dirParam();
   if (state.platform === 'openclaw') {
+    // 未选 agent → 跨全部 agents 查找（/api/openclaw/sessions/:id）
     payload = await fetchJson(
-      `/api/agents/${encodeURIComponent(state.selectedAgent)}/sessions/${encodeURIComponent(state.selectedSessionId)}` +
-        dp
+      state.selectedAgent
+        ? `/api/agents/${encodeURIComponent(state.selectedAgent)}/sessions/${encodeURIComponent(state.selectedSessionId)}${dp}`
+        : `/api/openclaw/sessions/${encodeURIComponent(state.selectedSessionId)}${dp}`
     );
   } else if (state.platform === 'codex') {
     payload = await fetchJson(`/api/codex/sessions/${encodeURIComponent(state.selectedSessionId)}` + dp);
@@ -4708,6 +4724,7 @@ sessionList.addEventListener('click', async (event) => {
     const item = spawnLink.closest('.session-item');
     if (item) {
       state.selectedSessionId = item.dataset.sessionId;
+      focusSessionAgentIfNeeded();
       renderSessions();
       await refreshAll(true);
       if (currentView === 'insights') await loadInsights();
@@ -4720,10 +4737,22 @@ sessionList.addEventListener('click', async (event) => {
   const item = event.target.closest('.session-item');
   if (!item) return;
   state.selectedSessionId = item.dataset.sessionId;
+  focusSessionAgentIfNeeded();
   renderSessions();
   await refreshAll(true);
   if (currentView === 'insights') await loadInsights();
 });
+
+// openclaw 全部 agent 合并视图：点击会话即聚焦其来源 agent（与 React 前端一致），
+// 使 SSE watch / 导出等按 agent 的路径可用；未选 agent 时无操作。
+function focusSessionAgentIfNeeded() {
+  if (state.platform !== 'openclaw' || state.selectedAgent) return;
+  const clicked = state.sessions.find((s) => s.id === state.selectedSessionId);
+  if (clicked && clicked.agent) {
+    state.selectedAgent = clicked.agent;
+    renderAgents();
+  }
+}
 
 sessionSearch.addEventListener('input', () => {
   if (!sessionSearch.value.trim()) closeSearchResults();

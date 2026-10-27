@@ -1,7 +1,6 @@
 import { ArrowLeft, Copy, PanelLeft } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { PlatformBar } from '@/components/PlatformBar';
 import { Sidebar } from '@/components/Sidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -118,7 +117,6 @@ export default function App() {
             ) : null}
           </div>
         ) : null}
-        <PlatformBar />
         <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1 md:hidden">
           <span className="text-sm font-semibold">AgentLRay</span>
           <button ref={navigationToggle} type="button" aria-expanded={navigationOpen} aria-controls="session-navigation"

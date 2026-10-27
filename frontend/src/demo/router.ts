@@ -118,6 +118,21 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
     return ok(parts.length === 2 ? [] : []);
   }
 
+  // Multi-platform aggregate: GET /api/sessions?platform=all|a,b
+  if (parsed.pathname === '/api/sessions') {
+    const platforms = data.sessions ?? {};
+    const platformIds = Object.keys(platforms).filter((p) => Array.isArray(platforms[p]) && platforms[p].length);
+    const total = platformIds.reduce((n, p) => n + (platforms[p]?.length || 0), 0);
+    return ok({
+      all: true,
+      platformIds,
+      total,
+      offset: 0,
+      limit: null,
+      platforms: platformIds.map((p) => ({ platform: p, agent: null, total: platforms[p]?.length || 0, offset: 0, limit: null, sessions: platforms[p] ?? [] })),
+    });
+  }
+
   if (parsed.pathname === '/api/insights') {
     const platform = parsed.searchParams.get('platform') || 'openclaw';
     return ok(data.insights[platform] ?? emptyInsights());
@@ -138,6 +153,22 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   }
   if (parsed.pathname === '/api/settings/llm') {
     return ok({ baseUrl: '', model: '', hasApiKey: false, backend: null });
+  }
+  if (parsed.pathname === '/api/settings/cli-bins') {
+    if (init?.method === 'PUT') return ok({});
+    return ok({
+      codex: { bin: 'codex', configured: false, default: 'codex' },
+      'claude-code': { bin: 'claude', configured: false, default: 'claude' },
+      omp: { bin: 'omp', configured: false, default: 'omp' },
+    });
+  }
+  if (parsed.pathname === '/api/settings/status') {
+    if (init?.method === 'PUT') return ok({});
+    return ok({
+      recentActivityMs: { value: 120000, configured: false, default: 120000 },
+      activeWorkCeilMs: { value: 1800000, configured: false, default: 1800000 },
+      historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
+    });
   }
 
   // /api/:platform/sessions[/:id[/children[/:name]]]

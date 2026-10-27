@@ -11,6 +11,11 @@ const mountLibraryRoutes = require('./lib/routes/library');
 const mountBackupRoutes = require('./lib/routes/backup');
 const mountWatchRoutes = require('./lib/routes/watch');
 const mountLlmRoutes = require('./lib/routes/llm');
+const mountUiSettingsRoutes = require('./lib/routes/ui-settings');
+const mountCliBinsRoutes = require('./lib/routes/cli-bins');
+const mountStatusConfigRoutes = require('./lib/routes/status-config');
+const { setStatusConfig } = require('./lib/status');
+const { loadStatusConfig } = require('./lib/status-config');
 const { csrfGuard } = require('./lib/csrf');
 
 const app = express();
@@ -62,6 +67,9 @@ mountLibraryRoutes(app);
 mountBackupRoutes(app);
 mountWatchRoutes(app);
 mountLlmRoutes(app);
+mountUiSettingsRoutes(app);
+mountCliBinsRoutes(app);
+mountStatusConfigRoutes(app, { status: { setStatusConfig } });
 
 // SPA fallback: unknown paths render the appropriate UI shell
 app.get('*', (req, res) => {
@@ -80,4 +88,11 @@ app.listen(PORT, HOST, () => {
   console.log(`  OMP:         ${OMP_DIR}`);
   console.log(`  DeepSeek Harness: ${DSH_DIR}`);
   console.log(`  Gemini CLI:  ${GEMINI_DIR}`);
+  // 启动即加载持久化的状态时间配置并注入 lib/status.js，使各平台状态判定
+  // 使用页面配置的窗口（无配置则默认 2min / 30min / 12h）。
+  loadStatusConfig()
+    .then((cfg) => {
+      setStatusConfig(cfg);
+    })
+    .catch(() => {});
 });

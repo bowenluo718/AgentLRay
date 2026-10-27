@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawnSync, spawn } = require('node:child_process');
 const os = require('node:os');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -15,11 +15,11 @@ async function makeTmpHome() {
 }
 
 // openclaw 需要按 agent 名建目录；在临时 HOME 副本里写入夹具会话。
-async function addOpenClawSession(home, agent) {
+async function addOpenClawSession(home, agent, sessionId = 'oc-1111') {
   const sessionsDir = path.join(home, '.openclaw', 'agents', agent, 'sessions');
   await fsp.mkdir(sessionsDir, { recursive: true });
   const records = [
-    { type: 'session', id: 'oc-1111', timestamp: '2026-01-10T09:00:00.000Z', cwd: '/fixtures/project-oc' },
+    { type: 'session', id: sessionId, timestamp: '2026-01-10T09:00:00.000Z', cwd: '/fixtures/project-oc' },
     {
       type: 'message',
       id: 'ocm-1',
@@ -33,7 +33,7 @@ async function addOpenClawSession(home, agent) {
       message: { role: 'assistant', content: [{ type: 'text', text: 'fixture: openclaw done.' }] },
     },
   ];
-  await fsp.writeFile(path.join(sessionsDir, 'oc-1111.jsonl'), records.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  await fsp.writeFile(path.join(sessionsDir, `${sessionId}.jsonl`), records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
 
 function runCli(home, args, extraEnv = {}) {
@@ -52,6 +52,23 @@ async function makeFakeBin(home, bin, exitCode = 0, outFile) {
   return bindir;
 }
 
+// 判定进程仍存活：已消失或已成僵尸（终止待回收）都视为不再运行。
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    const stat = require('node:fs').readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const idx = stat.indexOf(') ');
+    if (idx !== -1 && stat[idx + 2] === 'Z') return false; // 僵尸
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 test('sessions --help 输出 list/show/resume 用法', async () => {
   const home = await makeTmpHome();
   const res = runCli(home, ['sessions', '--help']);
@@ -59,6 +76,78 @@ test('sessions --help 输出 list/show/resume 用法', async () => {
   assert.match(res.stdout, /sessions list/);
   assert.match(res.stdout, /sessions show/);
   assert.match(res.stdout, /sessions resume/);
+});
+
+test('sessions list 同时查询多平台（--platform 逗号多值）', async () => {
+  const home = await makeTmpHome();
+
+  const multi = runCli(home, ['sessions', 'list', '--platform', 'omp,codex', '--json']);
+  assert.equal(multi.status, 0);
+  const multiJson = JSON.parse(multi.stdout);
+  assert.equal(multiJson.schemaVersion, 1);
+  assert.equal(multiJson.kind, 'sessions');
+  assert.equal(multiJson.platform, 'omp,codex');
+  assert.equal(multiJson.all, false);
+  assert.deepEqual(multiJson.platformIds, ['omp', 'codex']);
+  assert.equal(multiJson.platforms.length, 2);
+  const ompBlock = multiJson.platforms.find((p) => p.platform === 'omp');
+  assert.ok(ompBlock);
+  assert.equal(ompBlock.agent, null);
+  assert.equal(ompBlock.total, 2);
+  assert.ok(ompBlock.sessions.some((s) => s.id === '019a0000-0000-7000-8000-00000000aaaa'));
+  const codexBlock = multiJson.platforms.find((p) => p.platform === 'codex');
+  assert.ok(codexBlock);
+  assert.ok(codexBlock.total >= 1);
+  assert.ok(codexBlock.sessions.some((s) => s.id === '01900000-0000-7000-8000-000000000001'));
+
+  // 过滤作用于每个平台块：status/match 各自独立命中
+  const filtered = runCli(home, ['sessions', 'list', '--platform', 'omp,codex', '--status', 'stopped', '--json']);
+  const fJson = JSON.parse(filtered.stdout);
+  assert.equal(fJson.platforms.every((p) => p.total === p.sessions.length), true);
+
+  const bad = runCli(home, ['sessions', 'list', '--platform', 'omp,nope', '--json']);
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /Unknown platform/);
+
+  // all 不能与其他平台混用
+  const mixed = runCli(home, ['sessions', 'list', '--platform', 'all,omp', '--json']);
+  assert.equal(mixed.status, 1);
+  assert.match(mixed.stderr, /cannot be combined/);
+});
+
+test('sessions list 多平台 all 语义：含全部平台、openclaw 遍历 agents', async () => {
+  const home = await makeTmpHome();
+  await addOpenClawSession(home, 'my-agent');
+  await addOpenClawSession(home, 'other-agent');
+
+  const all = runCli(home, ['sessions', 'list', '--platform', 'all', '--json']);
+  assert.equal(all.status, 0);
+  const json = JSON.parse(all.stdout);
+  assert.equal(json.all, true);
+  // 7 平台注册表 id 集合
+  assert.deepEqual(
+    [...new Set(json.platformIds)].sort(),
+    ['claude-code', 'codex', 'dsh', 'gemini', 'hermes', 'omp', 'openclaw'].sort()
+  );
+  // openclaw：未传 --agent → 每个 agent 一段（这里两个 agent 各 1 个会话）
+  const ocBlocks = json.platforms.filter((p) => p.platform === 'openclaw');
+  assert.equal(ocBlocks.length, 2);
+  assert.deepEqual(
+    new Set(ocBlocks.map((p) => p.agent)),
+    new Set(['my-agent', 'other-agent'])
+  );
+  assert.ok(json.platforms.every((p) => Array.isArray(p.sessions)));
+
+  // 纯文本分段标题含平台与 agent
+  const plain = runCli(home, ['sessions', 'list', '--platform', 'omp,codex']);
+  assert.equal(plain.status, 0);
+  assert.match(plain.stdout, /== omp ==/);
+  assert.match(plain.stdout, /== codex ==/);
+
+  // 多平台模式下 --dir 不可用
+  const dirErr = runCli(home, ['sessions', 'list', '--platform', 'omp,codex', '--dir', '/tmp', '--json']);
+  assert.equal(dirErr.status, 1);
+  assert.match(dirErr.stderr, /仅支持单平台模式/);
 });
 
 test('sessions list 列出 omp 会话并按平台/状态过滤', async () => {
@@ -123,20 +212,39 @@ test('sessions list 支持 --match / --since / --limit', async () => {
   assert.equal(untilJson.sessions[0].id, '019a0000-0000-7000-8000-00000000aaaa');
 });
 
-test('sessions list openclaw 需 --agent；未知平台报错', async () => {
+test('sessions list openclaw 缺省合并全部 agents（--agent 下仍限定单 agent）；未知平台报错', async () => {
   const home = await makeTmpHome();
-  await addOpenClawSession(home, 'my-agent');
+  await addOpenClawSession(home, 'my-agent', 'oc-1111');
+  await addOpenClawSession(home, 'other-agent', 'oc-2222');
 
+  // 单 agent：--agent 限定
   const withAgent = runCli(home, ['sessions', 'list', '--platform', 'openclaw', '--agent', 'my-agent', '--json']);
   assert.equal(withAgent.status, 0);
   const json = JSON.parse(withAgent.stdout);
   assert.equal(json.agent, 'my-agent');
   assert.equal(json.total, 1);
   assert.equal(json.sessions[0].id, 'oc-1111');
+  assert.equal(json.sessions[0].agent, 'my-agent');
 
+  // 无 --agent：默认全部 agents 合并（每条带来源 agent）
   const noAgent = runCli(home, ['sessions', 'list', '--platform', 'openclaw', '--json']);
-  assert.equal(noAgent.status, 1);
-  assert.match(noAgent.stderr, /--agent/);
+  assert.equal(noAgent.status, 0);
+  const all = JSON.parse(noAgent.stdout);
+  assert.equal(all.agent, null);
+  assert.equal(all.allAgents, true);
+  assert.equal(all.total, 2);
+  const ids = all.sessions.map((s) => s.id).sort();
+  assert.deepEqual(ids, ['oc-1111', 'oc-2222']);
+  const byAgent = Object.fromEntries(all.sessions.map((s) => [s.id, s.agent]));
+  assert.equal(byAgent['oc-1111'], 'my-agent');
+  assert.equal(byAgent['oc-2222'], 'other-agent');
+
+  // 纯文本合并视图带 agent 列
+  const plain = runCli(home, ['sessions', 'list', '--platform', 'openclaw']);
+  assert.equal(plain.status, 0);
+  assert.match(plain.stdout, /^agent/m);
+  assert.match(plain.stdout, /other-agent/);
+  assert.match(plain.stdout, /my-agent/);
 
   const unknown = runCli(home, ['sessions', 'list', '--platform', 'nope', '--json']);
   assert.equal(unknown.status, 1);
@@ -144,6 +252,25 @@ test('sessions list openclaw 需 --agent；未知平台报错', async () => {
 
   const unknownJson = JSON.parse(unknown.stdout);
   assert.equal(unknownJson.kind, 'error');
+});
+
+test('sessions show openclaw 缺省跨全部 agents 查找并标注 agent', async () => {
+  const home = await makeTmpHome();
+  await addOpenClawSession(home, 'my-agent', 'oc-1111');
+  await addOpenClawSession(home, 'other-agent', 'oc-2222');
+
+  // 无 --agent：跨 agents 找到该 id，并标注归属 agent
+  const found = runCli(home, ['sessions', 'show', '--platform', 'openclaw', '--id', 'oc-2222', '--json']);
+  assert.equal(found.status, 0);
+  const json = JSON.parse(found.stdout);
+  assert.equal(json.kind, 'session');
+  assert.equal(json.agent, 'other-agent');
+  assert.equal(json.session.id, 'oc-2222');
+
+  // 未命中：报错退出 1
+  const missing = runCli(home, ['sessions', 'show', '--platform', 'openclaw', '--id', 'oc-nope', '--json']);
+  assert.equal(missing.status, 1);
+  assert.match(missing.stderr, /not found/);
 });
 
 test('sessions list 纯文本输出含表头与会话行', async () => {
@@ -219,11 +346,10 @@ test('sessions resume 默认只打印命令，含 cwd 前缀与消息转义', as
   assert.equal(ompDoc.kind, 'resume');
   assert.equal(ompDoc.executed, false);
   assert.match(ompDoc.command, /omp --auto-approve --resume=019a0000-0000-7000-8000-00000000aaaa/);
-  // 夹具 omp 会话尾部无 session_exit（仍打开）：统一语义为同 id 续跑，--run 时才收尾
-  assert.equal(ompDoc.willFork, false);
-  assert.equal(ompDoc.finalized, false);
-  assert.match(ompDoc.note, /收尾|原地/);
-  assert.match(ompJson.stderr, /收尾|原地/);
+  // 夹具会话未被运行中 omp 实例持有 → 非派生、直接放行
+  assert.equal(ompDoc.livePid, null);
+  assert.equal(ompDoc.note, null);
+  assert.doesNotMatch(ompJson.stderr, /持有|派生/);
 
   // 无原生续跑的平台明确报错
   const unsupported = runCli(home, ['sessions', 'resume', '--platform', 'hermes', '--id', 'x']);
@@ -233,6 +359,70 @@ test('sessions resume 默认只打印命令，含 cwd 前缀与消息转义', as
   const missing = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', 'missing-session']);
   assert.equal(missing.status, 1);
   assert.match(missing.stderr, /not found/);
+});
+
+test('sessions resume 可用 AGENTLRAY_*_BIN 环境变量覆盖平台 CLI 命令（未设置回退默认名）', async () => {
+  const home = await makeTmpHome();
+
+  // 未设置 → 默认命令名
+  const def = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--json']);
+  const defDoc = JSON.parse(def.stdout);
+  assert.equal(defDoc.bin, 'codex');
+
+  // 三个平台分别用绝对路径覆盖
+  const bins = {
+    codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
+    'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
+    omp: '/home/u/.nvm/versions/node/v22.19.0/bin/omp',
+  };
+  const cases = [
+    ['codex', '01900000-0000-7000-8000-000000000001'],
+    ['claude-code', 'aaaa1111-2222-4333-8444-555566667777'],
+    ['omp', '019a0000-0000-7000-8000-00000000aaaa'],
+  ];
+  for (const [platform, id] of cases) {
+    const res = runCli(home, ['sessions', 'resume', '--platform', platform, '--id', id, '--json'], {
+      AGENTLRAY_CODEX_BIN: bins.codex,
+      AGENTLRAY_CLAUDE_CODE_BIN: bins['claude-code'],
+      AGENTLRAY_OMP_BIN: bins.omp,
+    });
+    assert.equal(res.status, 0, `${platform} resume 应成功`);
+    const doc = JSON.parse(res.stdout);
+    assert.equal(doc.bin, bins[platform], `${platform} bin 应被环境变量覆盖`);
+    assert.match(doc.command, new RegExp(bins[platform].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+});
+
+test('sessions resume 读取 web 设置面板写入的 cli-bins.json（无环境变量时）', async () => {
+  const home = await makeTmpHome();
+  // 模拟 web 设置面板 PUT /api/settings/cli-bins 落盘的配置。
+  await fsp.mkdir(path.join(home, '.agentlray'), { recursive: true });
+  await fsp.writeFile(
+    path.join(home, '.agentlray', 'cli-bins.json'),
+    JSON.stringify({
+      codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
+      'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
+      updatedAt: '2026-10-26T00:00:00.000Z',
+    })
+  );
+
+  // 未设环境变量 → 读配置文件；omp 未配置 → 回退默认名。
+  const codex = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--json']);
+  assert.equal(JSON.parse(codex.stdout).bin, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
+
+  const claude = runCli(home, ['sessions', 'resume', '--platform', 'claude-code', '--id', 'aaaa1111-2222-4333-8444-555566667777', '--json']);
+  assert.equal(JSON.parse(claude.stdout).bin, '/home/u/.nvm/versions/node/v22.19.0/bin/claude');
+
+  const omp = runCli(home, ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--json']);
+  assert.equal(JSON.parse(omp.stdout).bin, 'omp');
+
+  // 环境变量仍优先于配置文件。
+  const env = runCli(
+    home,
+    ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--json'],
+    { AGENTLRAY_CODEX_BIN: '/override/bin/codex' }
+  );
+  assert.equal(JSON.parse(env.stdout).bin, '/override/bin/codex');
 });
 
 test('sessions resume --run 真实 spawn 平台 CLI、透传退出码', async () => {
@@ -274,62 +464,124 @@ test('sessions resume --run 传递平台退出码（非零）', async () => {
 
 test('sessions resume --run 平台 CLI 不存在时报错退出', async () => {
   const home = await makeTmpHome();
-  // HOME 外的 PATH 不包含 codex，且夹具 cwd 目录不存在 → spawn error → 明确报错
-  const res = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--run']);
+  // 有效 cwd（避免先命中"会话 cwd 不存在"校验），但 HOME 外 PATH 不含 codex →
+  // spawn 报 ENOENT → 明确报错
+  const workdir = path.join(home, 'nocli');
+  await fsp.mkdir(workdir, { recursive: true });
+  const res = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--run', '--cwd', workdir]);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /Failed to run/);
 });
 
-test('sessions resume 对已结束的 omp 会话预检为原地续写(willFork=false)', async () => {
+test('sessions resume 对未被持有的 omp 会话放行（livePid=null，非派生）', async () => {
   const home = await makeTmpHome();
-  const file = path.join(
-    home, '.omp', 'agent', 'sessions', '-fixtures-project-gamma',
-    '2026-01-20T08-00-00-000Z_019a0000-0000-7000-8000-00000000aaaa.jsonl'
-  );
-  await fsp.appendFile(file, '\n' + JSON.stringify({
-    type: 'custom', customType: 'session_exit', id: 'sx-1',
-    timestamp: '2026-01-20T09:00:00.000Z', data: { reason: 'dispose', kind: 'normal' },
-  }) + '\n');
-
   const res = runCli(home, ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--json']);
   assert.equal(res.status, 0);
   const doc = JSON.parse(res.stdout);
-  assert.equal(doc.willFork, false);
+  assert.equal(doc.livePid, null);
   assert.equal(doc.note, null);
-  assert.doesNotMatch(res.stderr, /派生/);
+  assert.doesNotMatch(res.stderr, /持有|派生/);
 });
 
-test('sessions resume --run 对未结束 omp 会话先收尾再同 id 续跑（不派生）', async () => {
+test('sessions resume --run 自动终止持有实例后同 id 续跑（不接受派生）', async () => {
   const home = await makeTmpHome();
-  const fakeLog = path.join(home, 'finalize.log');
-  const bindir = await makeFakeBin(home, 'omp', 0, fakeLog);
+  const log = path.join(home, 'fake-kill.log');
+  const bindir = await makeFakeBin(home, 'omp', 0, log);
+  // 伪造一个"正在以 --resume 持有该会话"的运行中 omp 实例：cmdline 含
+  // `omp --resume <途经含目标会话 id 的路径>`（路径不含 agentlray 字样）
+  const fakePath = path.join(os.tmpdir(), `holder-${Date.now()}`, '019a0000-0000-7000-8000-00000000aaaa.jsonl');
+  const holder = spawn('bash', ['-c', `exec -a "omp --resume ${fakePath} fakeholder" sleep 300; exit 0`], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  holder.unref();
+  await new Promise((r) => setTimeout(r, 400));
   const workdir = path.join(home, 'work');
   await fsp.mkdir(workdir, { recursive: true });
-  const res = runCli(
-    home,
-    ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--run', '--cwd', workdir, '--json'],
-    { PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` }
-  );
-  assert.equal(res.status, 0);
-  const doc = JSON.parse(res.stdout);
-  assert.equal(doc.finalized, true);
-  assert.equal(doc.willFork, false);
-  assert.equal(doc.forked, null);
+  try {
+    const res = runCli(
+      home,
+      ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--run', '--cwd', workdir, '--json'],
+      { PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` }
+    );
+    assert.equal(res.status, 0);
+    const doc = JSON.parse(res.stdout);
+    assert.equal(doc.kind, 'resume');
+    assert.equal(doc.executed, true);
+    assert.equal(doc.livePid, holder.pid);
+    assert.equal(doc.terminated, true);
+    assert.match(doc.note, /已自动终止/);
+    // 持有实例已被自动终止（消失或成僵尸）
+    assert.equal(isAlive(holder.pid), false);
+    // 随后确以原 id 续跑（假平台 CLI 被真实调用）
+    const logText = await fsp.readFile(log, 'utf8');
+    assert.match(logText, /arg:--resume=019a0000-0000-7000-8000-00000000aaaa/);
+  } finally {
+    try {
+      process.kill(holder.pid, 'SIGKILL');
+    } catch {}
+  }
+});
 
-  // 会话文件尾部已被追加 session_exit（先结束），随后同 id 续跑
-  const file = path.join(
-    home, '.omp', 'agent', 'sessions', '-fixtures-project-gamma',
-    '2026-01-20T08-00-00-000Z_019a0000-0000-7000-8000-00000000aaaa.jsonl'
-  );
-  const lines = (await fsp.readFile(file, 'utf8')).trimEnd().split('\n').filter(Boolean);
-  const last = JSON.parse(lines[lines.length - 1]);
-  assert.equal(last.customType, 'session_exit');
-  assert.equal(last.data.reason, 'agentlray-resume-finalize');
-  assert.match(res.stderr, /收尾|session_exit/);
+test('sessions resume --run 持有实例忽略 SIGTERM 时 SIGKILL 兜底后续跑', async () => {
+  const home = await makeTmpHome();
+  const log = path.join(home, 'fake-kill2.log');
+  const bindir = await makeFakeBin(home, 'omp', 0, log);
+  const fakePath = path.join(os.tmpdir(), `holder2-${Date.now()}`, '019a0000-0000-7000-8000-00000000aaaa.jsonl');
+  // 该持有实例忽略 SIGTERM，只能靠 SIGKILL 兜底终止（线程在 termWait 后仍存活）
+  const holder = spawn('bash', ['-c', `trap "" TERM; exec -a "omp --resume ${fakePath} fakeholder" sleep 300; exit 0`], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  holder.unref();
+  await new Promise((r) => setTimeout(r, 400));
+  const workdir = path.join(home, 'work2');
+  await fsp.mkdir(workdir, { recursive: true });
+  try {
+    const res = runCli(
+      home,
+      ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--run', '--cwd', workdir, '--json'],
+      { PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` }
+    );
+    assert.equal(res.status, 0);
+    const doc = JSON.parse(res.stdout);
+    assert.equal(doc.terminated, true);
+    assert.equal(doc.livePid, holder.pid);
+    assert.match(doc.note, /已自动终止/);
+    assert.equal(isAlive(holder.pid), false);
+  } finally {
+    try {
+      process.kill(holder.pid, 'SIGKILL');
+    } catch {}
+  }
+});
 
-  // fake omp 确实被执行（仍在原 id 上）
-  const log = await fsp.readFile(fakeLog, 'utf8');
-  assert.match(log, /arg:--resume=019a0000-0000-7000-8000-00000000aaaa/);
+test('sessions resume 打印模式检出持有实例仅提示、不自动终止', async () => {
+  const home = await makeTmpHome();
+  const fakePath = path.join(os.tmpdir(), `holder3-${Date.now()}`, '019a0000-0000-7000-8000-00000000aaaa.jsonl');
+  const holder = spawn('bash', ['-c', `exec -a "omp --resume ${fakePath} fakeholder" sleep 300; exit 0`], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  holder.unref();
+  await new Promise((r) => setTimeout(r, 400));
+  try {
+    const res = runCli(home, [
+      'sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--json',
+    ]);
+    assert.equal(res.status, 0);
+    const doc = JSON.parse(res.stdout);
+    assert.equal(doc.executed, false);
+    assert.equal(doc.terminated, false);
+    assert.equal(doc.livePid, holder.pid);
+    assert.match(doc.note, /--run 将自动终止/);
+    // 打印模式不改动持有实例
+    assert.equal(isAlive(holder.pid), true);
+  } finally {
+    try {
+      process.kill(holder.pid, 'SIGKILL');
+    } catch {}
+  }
 });
 
 test('sessions 未知子命令报错且退出 1', async () => {
@@ -337,4 +589,92 @@ test('sessions 未知子命令报错且退出 1', async () => {
   const res = runCli(home, ['sessions', 'frobnicate']);
   assert.equal(res.status, 1);
   assert.match(res.stderr, /Unknown subcommand/);
+});
+
+// 页面持久化的平台选择（看板 /api/settings/ui 落盘的 ~/.agentlray/ui-settings.json）——
+// CLI 未传 --platform 时的缺省来源。
+async function writeUiSettings(home, data) {
+  const dir = path.join(home, '.agentlray');
+  await fsp.mkdir(dir, { recursive: true });
+  await fsp.writeFile(path.join(dir, 'ui-settings.json'), JSON.stringify(data, null, 2));
+}
+
+test('sessions list 缺省无持久化平台数据时 = all（全部平台）', async () => {
+  const home = await makeTmpHome();
+  const res = runCli(home, ['sessions', 'list', '--json']);
+  assert.equal(res.status, 0);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.all, true);
+  assert.equal(json.platformIds.length, 7);
+});
+
+test('sessions list 缺省用页面持久化的多选平台集合', async () => {
+  const home = await makeTmpHome();
+  await writeUiSettings(home, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
+  const res = runCli(home, ['sessions', 'list', '--json']);
+  assert.equal(res.status, 0);
+  const json = JSON.parse(res.stdout);
+  assert.equal(json.platform, 'omp,codex');
+  assert.deepEqual(json.platformIds, ['omp', 'codex']);
+  assert.equal(json.platforms.length, 2);
+});
+
+test('sessions list 缺省持久化全选 = all；单平台模式（空多选）用持久化 platform', async () => {
+  const home = await makeTmpHome();
+  await writeUiSettings(home, {
+    platform: 'omp',
+    selectedPlatforms: ['openclaw', 'codex', 'claude-code', 'hermes', 'omp', 'dsh', 'gemini'],
+  });
+  const all = runCli(home, ['sessions', 'list', '--json']);
+  assert.equal(JSON.parse(all.stdout).all, true);
+
+  await writeUiSettings(home, { platform: 'omp', selectedPlatforms: [] });
+  const single = runCli(home, ['sessions', 'list', '--json']);
+  assert.equal(single.status, 0);
+  const singleJson = JSON.parse(single.stdout);
+  assert.equal(singleJson.platform, 'omp');
+  // 单平台输出不带 all 字段（仅多平台/ all 有）
+  assert.equal(singleJson.all, undefined);
+});
+
+test('sessions list 缺省多选模式下 --dir 仍不可用', async () => {
+  const home = await makeTmpHome();
+  await writeUiSettings(home, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
+  const res = runCli(home, ['sessions', 'list', '--dir', '/tmp', '--json']);
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /仅支持单平台模式/);
+});
+
+test('sessions show 缺省无持久化数据时报错要求 --platform', async () => {
+  const home = await makeTmpHome();
+  const res = runCli(home, ['sessions', 'show', '--id', 'x', '--json']);
+  assert.equal(res.status, 1);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'error');
+  assert.match(doc.error.message, /--platform/);
+});
+
+test('sessions show 缺省用页面持久化的单平台', async () => {
+  const home = await makeTmpHome();
+  await writeUiSettings(home, { platform: 'codex', selectedPlatforms: [] });
+  const res = runCli(home, ['sessions', 'show', '--id', '01900000-0000-7000-8000-000000000001', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'session');
+  assert.equal(doc.platform, 'codex');
+});
+
+test('sessions resume 缺省用页面持久化的单平台；不支持续跑的平台报错', async () => {
+  const home = await makeTmpHome();
+  await writeUiSettings(home, { platform: 'codex', selectedPlatforms: [] });
+  const res = runCli(home, ['sessions', 'resume', '--id', '01900000-0000-7000-8000-000000000001', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'resume');
+  assert.equal(doc.platform, 'codex');
+
+  await writeUiSettings(home, { platform: 'openclaw', selectedPlatforms: [] });
+  const nope = runCli(home, ['sessions', 'resume', '--id', 'oc-1111', '--json']);
+  assert.equal(nope.status, 1);
+  assert.match(nope.stderr, /no native resume command/);
 });
