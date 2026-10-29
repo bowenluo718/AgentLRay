@@ -150,6 +150,28 @@ test('交互类工具（ask）进行中工作上界内 → working（与普通�
   );
 });
 
+test('发起即待输入工具（AskUserQuestion）未应答、刚刚发起(30s前) → awaiting-input（守护"发起即判"）', () => {
+  assert.equal(
+    deriveStatus(
+      { pendingToolAt: secAgo(30), pendingNewestAt: secAgo(30), oldestPendingToolName: 'AskUserQuestion' },
+      { lastActivity: secAgo(30) },
+      NOW
+    ),
+    STATUS.AWAITING_INPUT
+  );
+});
+
+test('发起即待输入工具（AskUserQuestion）未应答、8.7min前 → awaiting-input（回归 bug：原误判 working）', () => {
+  assert.equal(
+    deriveStatus(
+      { pendingToolAt: minAgo(8.7), pendingNewestAt: minAgo(8.7), oldestPendingToolName: 'AskUserQuestion' },
+      { lastActivity: minAgo(8.7) },
+      NOW
+    ),
+    STATUS.AWAITING_INPUT
+  );
+});
+
 test('非交互工具超取证上界不豁免 → stopped；无工具名信息时回退普通上界逻辑', () => {
   assert.equal(
     deriveStatus(
