@@ -19,6 +19,7 @@ const { setStatusConfig } = require('../lib/status');
 const { loadStatusConfig } = require('../lib/status-config');
 const { findOmpSessionFile } = require('../lib/platforms/omp');
 const { loadUiSettings } = require('../lib/ui-settings');
+const { migrateLegacySettings } = require('../lib/settings');
 const { STATUS, STATUS_LABELS } = require('../lib/status');
 const { getSessionAcrossAgents } = require('../lib/platforms/openclaw');
 const {
@@ -128,8 +129,8 @@ function resolvePlatform(id) {
   return platform;
 }
 
-// --platform 缺省时，用页面持久化的平台数据（web 看板在 /api/settings/ui 落盘的
-// ~/.agentlray/ui-settings.json）推导默认选择。list 接受多选/全部；show/resume 需单平台。
+// --platform 缺省时，用页面持久化的平台数据（web 看板经 GET/PUT /api/settings 落盘的
+// ~/.agentlray/settings.json 的 ui section）推导默认选择。list 接受多选/全部；show/resume 需单平台。
 async function resolveDefaultPlatform(command) {
   const ui = await loadUiSettings();
   if (command === 'list') {
@@ -146,7 +147,7 @@ async function resolveDefaultPlatform(command) {
   const def = ui && PLATFORMS[ui.platform] ? ui.platform : null;
   if (!def) {
     const e = new Error(
-      `未提供 --platform，且没有页面持久化的平台数据（~/.agentlray/ui-settings.json）。` +
+      `未提供 --platform，且没有页面持久化的平台数据（~/.agentlray/settings.json）。` +
         `请先在看板页面选择平台，或显式传 --platform。`
     );
     e.usage = true;
@@ -717,9 +718,12 @@ async function main(args, _mode = 'sessions') {
       e.usage = true;
       throw e;
     }
+    // 入口幂等迁移旧独立设置文件 → ~/.agentlray/settings.json（Q-B：CLI 单独运行时
+    // 升级也能读到页面/旧文件落的配置；settings.json 已存在则无操作）。
+    await migrateLegacySettings();
     const opts = parseOptions(rest, OPTION_DEFS);
     json = Boolean(opts.json);
-    // --platform 非必填：缺省使用页面持久化的平台数据（看板 /api/settings/ui 落盘的文件）。
+    // --platform 非必填：缺省使用页面持久化的平台数据（看板 /api/settings 落盘的文件）。
     if (opts.platform == null) opts.platform = await resolveDefaultPlatform(command);
     // list 依赖状态判定；启动即加载页面持久化的状态时间配置（无则默认），
     // 保证终端与 web 看板视角一致。

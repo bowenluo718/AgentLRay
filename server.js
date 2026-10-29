@@ -10,12 +10,11 @@ const mountExportRoutes = require('./lib/routes/export');
 const mountLibraryRoutes = require('./lib/routes/library');
 const mountBackupRoutes = require('./lib/routes/backup');
 const mountWatchRoutes = require('./lib/routes/watch');
-const mountLlmRoutes = require('./lib/routes/llm');
-const mountUiSettingsRoutes = require('./lib/routes/ui-settings');
 const mountCliBinsRoutes = require('./lib/routes/cli-bins');
-const mountStatusConfigRoutes = require('./lib/routes/status-config');
+const mountSettingsRoutes = require('./lib/routes/settings');
 const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
+const { migrateLegacySettings } = require('./lib/settings');
 const { csrfGuard } = require('./lib/csrf');
 
 const app = express();
@@ -66,10 +65,8 @@ mountSessionRoutes(app);
 mountLibraryRoutes(app);
 mountBackupRoutes(app);
 mountWatchRoutes(app);
-mountLlmRoutes(app);
-mountUiSettingsRoutes(app);
 mountCliBinsRoutes(app);
-mountStatusConfigRoutes(app, { status: { setStatusConfig } });
+mountSettingsRoutes(app, { status: { setStatusConfig } });
 
 // SPA fallback: unknown paths render the appropriate UI shell
 app.get('*', (req, res) => {
@@ -79,20 +76,25 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(HAS_DIST ? DIST_DIR : PUBLIC_DIR, 'index.html'));
 });
 
-app.listen(PORT, HOST, () => {
-  console.log(`AgentLRay listening on http://${HOST}:${PORT}`);
-  console.log(`  OpenClaw:    ${DATA_DIR}`);
-  console.log(`  Codex:       ${CODEX_DIR}`);
-  console.log(`  Claude Code: ${CLAUDE_CODE_DIR}`);
-  console.log(`  Hermes:      ${path.join(HERMES_DIR, 'state.db')}`);
-  console.log(`  OMP:         ${OMP_DIR}`);
-  console.log(`  DeepSeek Harness: ${DSH_DIR}`);
-  console.log(`  Gemini CLI:  ${GEMINI_DIR}`);
-  // 启动即加载持久化的状态时间配置并注入 lib/status.js，使各平台状态判定
-  // 使用页面配置的窗口（无配置则默认 2min / 30min / 12h）。
-  loadStatusConfig()
-    .then((cfg) => {
-      setStatusConfig(cfg);
-    })
-    .catch(() => {});
-});
+// 启动：先做旧独立设置文件的一次性迁移（幂等），再加载状态时间配置注入
+// lib/status.js，最后监听端口。迁移/加载失败不阻塞启动（回退默认窗口）。
+async function boot() {
+  try {
+    await migrateLegacySettings();
+    setStatusConfig(await loadStatusConfig());
+  } catch {
+    // 迁移或配置加载异常 → 维持默认时间窗口，不阻塞服务。
+  }
+  app.listen(PORT, HOST, () => {
+    console.log(`AgentLRay listening on http://${HOST}:${PORT}`);
+    console.log(`  OpenClaw:    ${DATA_DIR}`);
+    console.log(`  Codex:       ${CODEX_DIR}`);
+    console.log(`  Claude Code: ${CLAUDE_CODE_DIR}`);
+    console.log(`  Hermes:      ${path.join(HERMES_DIR, 'state.db')}`);
+    console.log(`  OMP:         ${OMP_DIR}`);
+    console.log(`  DeepSeek Harness: ${DSH_DIR}`);
+    console.log(`  Gemini CLI:  ${GEMINI_DIR}`);
+  });
+}
+
+boot();

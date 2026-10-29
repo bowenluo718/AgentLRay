@@ -588,7 +588,7 @@ describe('csrf guard', () => {
   });
 });
 
-describe('ui settings persist (页面持久化平台选择，CLI 缺省 --platform 读取)', () => {
+describe('GET /api/settings 全量返回各 section 默认形态（单一聚合端点）', () => {
   let srv;
   before(async () => {
     srv = await startServer();
@@ -597,94 +597,108 @@ describe('ui settings persist (页面持久化平台选择，CLI 缺省 --platfo
     await srv.stop();
   });
 
-  it('GET returns empty defaults before any save', async () => {
-    const ui = await getJson(srv.base, '/api/settings/ui');
-    assert.deepEqual(ui, { platform: null, selectedPlatforms: [] });
-  });
-
-  it('PUT persists platform selection and GET returns it; file lands for the CLI default', async () => {
-    const saved = await sendJson(srv.base, 'PUT', '/api/settings/ui', {
-      platform: 'omp',
-      selectedPlatforms: ['omp', 'codex'],
-    });
-    assert.deepEqual(saved, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
-    const ui = await getJson(srv.base, '/api/settings/ui');
-    assert.deepEqual(ui, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
-    // CLI（bin/sessions.js）缺省读同一文件
-    const payload = JSON.parse(
-      await fsp.readFile(path.join(srv.home, '.agentlray', 'ui-settings.json'), 'utf8')
-    );
-    assert.deepEqual(payload.selectedPlatforms, ['omp', 'codex']);
-    assert.equal(payload.platform, 'omp');
-  });
-
-  it('PUT rejects unknown platform and filters invalid selectedPlatforms', async () => {
-    const bad = await sendJson(srv.base, 'PUT', '/api/settings/ui', { platform: 'nope' }, 400);
-    assert.match(bad.error, /platform must be one of/);
-    const saved = await sendJson(srv.base, 'PUT', '/api/settings/ui', {
-      platform: 'codex',
-      selectedPlatforms: ['codex', 'nope', 123],
-    });
-    assert.deepEqual(saved, { platform: 'codex', selectedPlatforms: ['codex'] });
-  });
-});
-
-describe('cli-bins settings persist (web 设置面板写平台 CLI 命令，CLI resume 读取)', () => {
-  let srv;
-  before(async () => {
-    srv = await startServer();
-  });
-  after(async () => {
-    await srv.stop();
-  });
-
-  it('GET returns default command names before any save', async () => {
-    const bins = await getJson(srv.base, '/api/settings/cli-bins');
-    assert.deepEqual(bins, {
+  it('未保存任何配置时返回各 section 默认值；LLM 密钥不明文回传', async () => {
+    const all = await getJson(srv.base, '/api/settings');
+    assert.deepEqual(all.ui, { platform: null, selectedPlatforms: [] });
+    assert.deepEqual(all.cliBins, {
       codex: { bin: 'codex', configured: false, default: 'codex' },
       'claude-code': { bin: 'claude', configured: false, default: 'claude' },
       omp: { bin: 'omp', configured: false, default: 'omp' },
     });
+    assert.deepEqual(all.status, {
+      recentActivityMs: { value: 120000, configured: false, default: 120000 },
+      activeWorkCeilMs: { value: 1800000, configured: false, default: 1800000 },
+      historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
+    });
+    assert.deepEqual(all.kanban, { maxPerStatus: { value: 20, configured: false, default: 20 } });
+    // backend 依赖机器上是否有 claude CLI，不断言具体值；密钥绝不回传。
+    assert.equal('backend' in all.llm, true);
+    assert.equal(all.llm.baseUrl, '');
+    assert.equal(all.llm.model, '');
+    assert.equal(all.llm.hasApiKey, false);
+    assert.equal('apiKey' in all.llm, false);
   });
 
-  it('PUT persists configured bins and GET/file reflect them; clearing falls back to default', async () => {
-    const saved = await sendJson(srv.base, 'PUT', '/api/settings/cli-bins', {
-      codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
-      'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
-      omp: '',
+  it('PUT 只保存请求体提供的 section；未提供者保持服务器原值；落盘单一 settings.json', async () => {
+    // 先写 cliBins + status
+    await sendJson(srv.base, 'PUT', '/api/settings', {
+      cliBins: {
+        codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
+        'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
+        omp: '',
+      },
+      status: { recentActivityMs: 5 * 60 * 1000, activeWorkCeilMs: 0 },
     });
-    assert.equal(saved.codex.bin, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
-    assert.equal(saved.codex.configured, true);
-    assert.equal(saved['claude-code'].bin, '/home/u/.nvm/versions/node/v22.19.0/bin/claude');
-    // omp 空串 = 清除 → 回退默认
-    assert.equal(saved.omp.bin, 'omp');
-    assert.equal(saved.omp.configured, false);
+    // 再写 kanban + llm → 前面 section 不应被清空
+    await sendJson(srv.base, 'PUT', '/api/settings', {
+      kanban: { maxPerStatus: 50 },
+      llm: { baseUrl: 'http://127.0.0.1:9/v1', model: 'test-model' },
+    });
+    const all = await getJson(srv.base, '/api/settings');
+    assert.equal(all.cliBins.codex.bin, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
+    assert.equal(all.cliBins.codex.configured, true);
+    assert.equal(all.cliBins.omp.bin, 'omp'); // 空串 = 清除 → 回退默认
+    assert.equal(all.status.recentActivityMs.value, 5 * 60 * 1000);
+    assert.equal(all.status.activeWorkCeilMs.value, 1800000); // 非正数清除回默认
+    assert.equal(all.kanban.maxPerStatus.value, 50);
+    assert.equal(all.llm.baseUrl, 'http://127.0.0.1:9/v1');
+    assert.equal(all.llm.hasApiKey, false);
 
-    const bins = await getJson(srv.base, '/api/settings/cli-bins');
-    assert.equal(bins.codex.bin, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
-    assert.equal(bins.omp.bin, 'omp');
-
-    // CLI（bin/sessions.js resume --run）读同一文件；只存白名单 key
-    const payload = JSON.parse(
-      await fsp.readFile(path.join(srv.home, '.agentlray', 'cli-bins.json'), 'utf8')
+    const onDisk = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
     );
-    assert.deepEqual(Object.keys(payload).sort(), ['claude-code', 'codex', 'updatedAt']);
-    assert.equal(payload.codex, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
-  });
-
-  it('PUT ignores non-whitelisted and non-string values', async () => {
-    const saved = await sendJson(srv.base, 'PUT', '/api/settings/cli-bins', {
-      codex: 'codex',
-      hermes: '/tmp/hermes', // 非 resume 平台，忽略
-      omp: 123, // 非字符串，忽略
-    });
-    assert.deepEqual(Object.keys(saved).sort(), ['claude-code', 'codex', 'omp']);
-    assert.equal(saved.codex.bin, 'codex');
-    assert.equal(saved.omp.bin, 'omp');
+    assert.deepEqual(Object.keys(onDisk).sort(), ['cliBins', 'kanban', 'llm', 'status', 'updatedAt']);
+    assert.equal(onDisk.cliBins.codex, '/home/u/.nvm/versions/node/v22.19.0/bin/codex');
+    assert.equal(onDisk.kanban.maxPerStatus, 50);
+    assert.equal(onDisk.llm.model, 'test-model');
   });
 });
 
-describe('cli-bins GET 反映环境变量（P1：前端复制命令与后端 spawn 一致）', () => {
+describe('ui / cliBins 平台选择与 CLI 命令（CLI 缺省 --platform 与 resume 读同一文件）', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer();
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('PUT ui section 持久化平台选择，落盘 settings.json 供 CLI 缺省', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
+      ui: { platform: 'omp', selectedPlatforms: ['omp', 'codex'] },
+    });
+    assert.deepEqual(saved.ui, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
+    const payload = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
+    );
+    assert.deepEqual(payload.ui.selectedPlatforms, ['omp', 'codex']);
+    assert.equal(payload.ui.platform, 'omp');
+  });
+
+  it('ui section 拒绝未知平台、过滤非法 selectedPlatforms', async () => {
+    const bad = await sendJson(srv.base, 'PUT', '/api/settings', { ui: { platform: 'nope' } }, 400);
+    assert.match(bad.error, /platform must be one of/);
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
+      ui: { platform: 'codex', selectedPlatforms: ['codex', 'nope', 123] },
+    });
+    assert.deepEqual(saved.ui, { platform: 'codex', selectedPlatforms: ['codex'] });
+  });
+
+  it('cliBins section 只存白名单 key，非字符串忽略', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
+      cliBins: { codex: 'codex', hermes: '/tmp/hermes', omp: 123 },
+    });
+    assert.deepEqual(Object.keys(saved.cliBins).sort(), ['claude-code', 'codex', 'omp']);
+    assert.equal(saved.cliBins.codex.bin, 'codex');
+    assert.equal(saved.cliBins.omp.bin, 'omp');
+    const onDisk = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
+    );
+    assert.deepEqual(Object.keys(onDisk.cliBins).sort(), ['codex']);
+  });
+});
+
+describe('cliBins bin 反映环境变量（P1：前端复制命令与后端 spawn 一致）', () => {
   let srv;
   before(async () => {
     srv = await startServer({ AGENTLRAY_CODEX_BIN: '/env/bin/codex' });
@@ -693,30 +707,26 @@ describe('cli-bins GET 反映环境变量（P1：前端复制命令与后端 spa
     await srv.stop();
   });
 
-  it('GET bin 优先取环境变量，即使文件未配置', async () => {
-    const bins = await getJson(srv.base, '/api/settings/cli-bins');
-    // codex 走环境变量；claude-code/omp 无 env → 默认名
-    assert.equal(bins.codex.bin, '/env/bin/codex');
-    assert.equal(bins.codex.configured, false);
-    assert.equal(bins.codex.default, 'codex');
-    assert.equal(bins['claude-code'].bin, 'claude');
-    assert.equal(bins.omp.bin, 'omp');
+  it('GET /api/settings 的 cliBins bin 优先取环境变量', async () => {
+    const all = await getJson(srv.base, '/api/settings');
+    assert.equal(all.cliBins.codex.bin, '/env/bin/codex');
+    assert.equal(all.cliBins.codex.configured, false);
+    assert.equal(all.cliBins.codex.default, 'codex');
+    assert.equal(all.cliBins['claude-code'].bin, 'claude');
+    assert.equal(all.cliBins.omp.bin, 'omp');
   });
 
-  it('PUT 后 GET bin 仍反映环境变量优先（env > 文件）', async () => {
-    const saved = await sendJson(srv.base, 'PUT', '/api/settings/cli-bins', {
-      codex: '/file/bin/codex',
-    });
-    // 文件配置了 codex，但环境变量仍优先
-    assert.equal(saved.codex.bin, '/env/bin/codex');
-    assert.equal(saved.codex.configured, true);
-    assert.equal(saved.codex.default, 'codex');
-    const bins = await getJson(srv.base, '/api/settings/cli-bins');
-    assert.equal(bins.codex.bin, '/env/bin/codex');
+  it('文件配置后 env 仍优先（env > 配置）', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', { cliBins: { codex: '/file/bin/codex' } });
+    assert.equal(saved.cliBins.codex.bin, '/env/bin/codex');
+    assert.equal(saved.cliBins.codex.configured, true);
+    assert.equal(saved.cliBins.codex.default, 'codex');
+    const all = await getJson(srv.base, '/api/settings');
+    assert.equal(all.cliBins.codex.bin, '/env/bin/codex');
   });
 });
 
-describe('status-config settings persist (web 设置面板写状态时间配置，注入 lib/status)', () => {
+describe('status 时间配置保存后 GET 读回生效窗口', () => {
   let srv;
   before(async () => {
     srv = await startServer();
@@ -725,36 +735,44 @@ describe('status-config settings persist (web 设置面板写状态时间配置�
     await srv.stop();
   });
 
-  it('GET returns default time windows before any save', async () => {
-    const cfg = await getJson(srv.base, '/api/settings/status');
-    assert.deepEqual(cfg, {
-      recentActivityMs: { value: 120000, configured: false, default: 120000 },
-      activeWorkCeilMs: { value: 1800000, configured: false, default: 1800000 },
-      historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
+  it('PUT status 后 GET 反映新窗口；非法值清除回退默认', async () => {
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
+      status: {
+        recentActivityMs: 5 * 60 * 1000,
+        activeWorkCeilMs: 0,
+        historyCeilMs: 48 * 60 * 60 * 1000,
+      },
     });
-  });
+    assert.equal(saved.status.recentActivityMs.value, 5 * 60 * 1000);
+    assert.equal(saved.status.recentActivityMs.configured, true);
+    assert.equal(saved.status.activeWorkCeilMs.value, 1800000);
+    assert.equal(saved.status.activeWorkCeilMs.configured, false);
+    assert.equal(saved.status.historyCeilMs.value, 48 * 60 * 60 * 1000);
 
-  it('PUT persists and GET/file reflect; invalid values cleared to default', async () => {
-    const saved = await sendJson(srv.base, 'PUT', '/api/settings/status', {
-      recentActivityMs: 5 * 60 * 1000,
-      activeWorkCeilMs: 0, // 非正数 → 清除
-      historyCeilMs: 48 * 60 * 60 * 1000,
-    });
-    assert.equal(saved.recentActivityMs.value, 5 * 60 * 1000);
-    assert.equal(saved.recentActivityMs.configured, true);
-    // activeWorkCeilMs 被清除 → 回退默认
-    assert.equal(saved.activeWorkCeilMs.value, 1800000);
-    assert.equal(saved.activeWorkCeilMs.configured, false);
-    assert.equal(saved.historyCeilMs.value, 48 * 60 * 60 * 1000);
-
-    const bins = await getJson(srv.base, '/api/settings/status');
-    assert.equal(bins.recentActivityMs.value, 5 * 60 * 1000);
-    assert.equal(bins.historyCeilMs.value, 48 * 60 * 60 * 1000);
+    const all = await getJson(srv.base, '/api/settings');
+    assert.equal(all.status.recentActivityMs.value, 5 * 60 * 1000);
+    assert.equal(all.status.historyCeilMs.value, 48 * 60 * 60 * 1000);
 
     const onDisk = JSON.parse(
-      await fsp.readFile(path.join(srv.home, '.agentlray', 'status-config.json'), 'utf8')
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
     );
-    assert.deepEqual(Object.keys(onDisk).sort(), ['historyCeilMs', 'recentActivityMs', 'updatedAt']);
-    assert.equal(onDisk.recentActivityMs, 5 * 60 * 1000);
+    assert.deepEqual(Object.keys(onDisk.status).sort(), ['historyCeilMs', 'recentActivityMs']);
+  });
+});
+
+describe('GET /api/settings/cli-bins 兼容只读端点（legacy 复制恢复命令）', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer();
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('返回与 /api/settings.cliBins 相同的响应结构', async () => {
+    const compat = await getJson(srv.base, '/api/settings/cli-bins');
+    assert.deepEqual(Object.keys(compat).sort(), ['claude-code', 'codex', 'omp']);
+    assert.equal(compat.codex.bin, 'codex');
+    assert.equal(compat.codex.configured, false);
   });
 });

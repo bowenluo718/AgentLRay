@@ -393,15 +393,17 @@ test('sessions resume 可用 AGENTLRAY_*_BIN 环境变量覆盖平台 CLI 命令
   }
 });
 
-test('sessions resume 读取 web 设置面板写入的 cli-bins.json（无环境变量时）', async () => {
+test('sessions resume 读取 web 设置面板写入的 settings.json cliBins（无环境变量时）', async () => {
   const home = await makeTmpHome();
-  // 模拟 web 设置面板 PUT /api/settings/cli-bins 落盘的配置。
+  // 模拟 web 设置面板 PUT /api/settings（cliBins section）落盘的配置。
   await fsp.mkdir(path.join(home, '.agentlray'), { recursive: true });
   await fsp.writeFile(
-    path.join(home, '.agentlray', 'cli-bins.json'),
+    path.join(home, '.agentlray', 'settings.json'),
     JSON.stringify({
-      codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
-      'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
+      cliBins: {
+        codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
+        'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
+      },
       updatedAt: '2026-10-26T00:00:00.000Z',
     })
   );
@@ -591,13 +593,55 @@ test('sessions 未知子命令报错且退出 1', async () => {
   assert.match(res.stderr, /Unknown subcommand/);
 });
 
-// 页面持久化的平台选择（看板 /api/settings/ui 落盘的 ~/.agentlray/ui-settings.json）——
-// CLI 未传 --platform 时的缺省来源。
+// 页面持久化的平台选择（看板 /api/settings 落盘的 ~/.agentlray/settings.json 的
+// ui section）——CLI 未传 --platform 时的缺省来源。
 async function writeUiSettings(home, data) {
   const dir = path.join(home, '.agentlray');
   await fsp.mkdir(dir, { recursive: true });
-  await fsp.writeFile(path.join(dir, 'ui-settings.json'), JSON.stringify(data, null, 2));
+  const file = path.join(dir, 'settings.json');
+  let settings = {};
+  try {
+    settings = JSON.parse(await fsp.readFile(file, 'utf8'));
+  } catch {
+    /* 首次写入 */
+  }
+  settings.ui = data;
+  await fsp.writeFile(file, JSON.stringify(settings, null, 2));
 }
+
+test('CLI 入口幂等迁移旧独立设置文件 → settings.json 后按新文件读取', async () => {
+  const home = await makeTmpHome();
+  // 模拟升级前的旧文件布局（ui-settings.json + cli-bins.json）。
+  await fsp.mkdir(path.join(home, '.agentlray'), { recursive: true });
+  await fsp.writeFile(
+    path.join(home, '.agentlray', 'ui-settings.json'),
+    JSON.stringify({ platform: 'omp', selectedPlatforms: ['omp', 'codex'] })
+  );
+  await fsp.writeFile(
+    path.join(home, '.agentlray', 'cli-bins.json'),
+    JSON.stringify({ codex: '/legacy/bin/codex' })
+  );
+
+  // 迁移后 list 缺省平台沿用旧 ui-settings；resume 读取迁移后的 cliBins。
+  const list = runCli(home, ['sessions', 'list', '--json']);
+  assert.equal(list.status, 0);
+  assert.deepEqual(JSON.parse(list.stdout).platformIds, ['omp', 'codex']);
+
+  const res = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--json']);
+  assert.equal(JSON.parse(res.stdout).bin, '/legacy/bin/codex');
+
+  // settings.json 已生成，旧文件已删除。
+  const settings = JSON.parse(await fsp.readFile(path.join(home, '.agentlray', 'settings.json'), 'utf8'));
+  assert.deepEqual(settings.ui, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
+  assert.equal(settings.cliBins.codex, '/legacy/bin/codex');
+  await assert.rejects(fsp.access(path.join(home, '.agentlray', 'ui-settings.json')));
+  await assert.rejects(fsp.access(path.join(home, '.agentlray', 'cli-bins.json')));
+
+  // 再跑一次（此时 settings.json 已存在）→ 迁移幂等，不重建旧文件、不改 settings.json。
+  const again = runCli(home, ['sessions', 'list', '--json']);
+  assert.equal(again.status, 0);
+  assert.deepEqual(JSON.parse(again.stdout).platformIds, ['omp', 'codex']);
+});
 
 test('sessions list 缺省无持久化平台数据时 = all（全部平台）', async () => {
   const home = await makeTmpHome();

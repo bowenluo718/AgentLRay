@@ -2,6 +2,8 @@
 // path, and the explicit no-backend error. The claude CLI is disabled in
 // every test via AGENTLRAY_CLAUDE_BIN pointing at a nonexistent binary, so
 // results don't depend on the machine running the suite.
+//
+// 设置走单一 GET/PUT /api/settings 的 llm section（密钥永不明文回传）。
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -35,15 +37,24 @@ function startMockOpenAi(replyContent) {
   });
 }
 
+async function getLlm(base) {
+  return (await getJson(base, '/api/settings')).llm;
+}
+
+async function putLlm(base, body, expectedStatus = 200) {
+  const all = await sendJson(base, 'PUT', '/api/settings', { llm: body }, expectedStatus);
+  return all && all.llm;
+}
+
 test('LLM settings API: defaults, save, key redaction and validation', async () => {
   const { base, stop } = await startServer(NO_CLI);
   try {
     // Fresh home: nothing configured, no claude CLI → backend null
-    const initial = await getJson(base, '/api/settings/llm');
+    const initial = await getLlm(base);
     assert.deepEqual(initial, { baseUrl: '', model: '', hasApiKey: false, backend: null });
 
     // Save an endpoint; the key must never be echoed back
-    const saved = await sendJson(base, 'PUT', '/api/settings/llm', {
+    const saved = await putLlm(base, {
       baseUrl: 'http://127.0.0.1:9/v1',
       model: 'test-model',
       apiKey: 'sk-secret',
@@ -55,18 +66,18 @@ test('LLM settings API: defaults, save, key redaction and validation', async () 
     assert.equal('apiKey' in saved, false);
 
     // Omitted apiKey keeps the stored key
-    const kept = await sendJson(base, 'PUT', '/api/settings/llm', {
+    const kept = await putLlm(base, {
       baseUrl: 'http://127.0.0.1:9/v1',
       model: 'other-model',
     });
     assert.equal(kept.hasApiKey, true);
 
     // Validation: baseUrl without model, non-http baseUrl
-    await sendJson(base, 'PUT', '/api/settings/llm', { baseUrl: 'http://x', model: '' }, 400);
-    await sendJson(base, 'PUT', '/api/settings/llm', { baseUrl: 'ftp://x', model: 'm' }, 400);
+    await putLlm(base, { baseUrl: 'http://x', model: '' }, 400);
+    await putLlm(base, { baseUrl: 'ftp://x', model: 'm' }, 400);
 
     // Clearing baseUrl also clears the stored key
-    const cleared = await sendJson(base, 'PUT', '/api/settings/llm', { baseUrl: '', model: '' });
+    const cleared = await putLlm(base, { baseUrl: '', model: '' });
     assert.deepEqual(cleared, { baseUrl: '', model: '', hasApiKey: false, backend: null });
   } finally {
     await stop();
@@ -78,10 +89,8 @@ test('rewrite goes through a configured OpenAI-compatible endpoint', async () =>
   const mock = await startMockOpenAi(reply);
   const { base, stop } = await startServer(NO_CLI);
   try {
-    await sendJson(base, 'PUT', '/api/settings/llm', {
-      baseUrl: `${mock.base}/v1`,
-      model: 'mock-model',
-      apiKey: 'sk-mock',
+    await sendJson(base, 'PUT', '/api/settings', {
+      llm: { baseUrl: `${mock.base}/v1`, model: 'mock-model', apiKey: 'sk-mock' },
     });
 
     const result = await sendJson(base, 'POST', '/api/prompts/rewrite', { text: 'fix the login bug' });
@@ -105,7 +114,7 @@ test('suggest-name uses the endpoint and shapes the reply into a library name', 
   const mock = await startMockOpenAi('Fix Login Bug\n');
   const { base, stop } = await startServer(NO_CLI);
   try {
-    await sendJson(base, 'PUT', '/api/settings/llm', { baseUrl: mock.base, model: 'mock-model' });
+    await sendJson(base, 'PUT', '/api/settings', { llm: { baseUrl: mock.base, model: 'mock-model' } });
     const result = await sendJson(base, 'POST', '/api/library/suggest-name', { text: 'please fix login' });
     assert.equal(result.name, 'fix-login-bug');
     // No apiKey configured → no Authorization header sent

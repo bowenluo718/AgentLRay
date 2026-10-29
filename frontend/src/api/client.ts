@@ -397,9 +397,10 @@ export function getVersion(): Promise<VersionInfo> {
   return fetchJson('/api/version');
 }
 
-// ---------- LLM backend settings (#14) ----------
-
-/** GET/PUT /api/settings/llm — OpenAI-compatible endpoint config, persisted server-side. */
+// ---------- 统一设置端点 ----------
+// 所有服务端设置聚合到单一 GET/PUT /api/settings（落盘 ~/.agentlray/settings.json，
+// 各 section 白名单/校验在对应 lib 模块）。GET 全量返回；PUT 只保存请求体提供的
+// section（ui / cliBins / status / kanban / llm），原子写入。LLM 密钥永不明文回传。
 export interface LlmSettings {
   baseUrl: string;
   model: string;
@@ -409,23 +410,10 @@ export interface LlmSettings {
   backend: 'openai' | 'claude-cli' | null;
 }
 
-export function getLlmSettings(): Promise<LlmSettings> {
-  return fetchJson('/api/settings/llm');
-}
-
-/** apiKey semantics: undefined = keep the stored key, '' = clear it, else replace. */
-export function saveLlmSettings(body: {
-  baseUrl: string;
-  model: string;
-  apiKey?: string;
-}): Promise<LlmSettings> {
-  return requestJson('/api/settings/llm', 'PUT', body);
-}
-
-// ---------- 平台 CLI 命令配置（resume 续跑 spawn 的目标） ----------
-// GET/PUT /api/settings/cli-bins — 存服务端 ~/.agentlray/cli-bins.json。CLI
-// （bin/sessions.js resume --run）与 web 后端都按「环境变量 → 配置文件 → 默认名」
-// 解析，页面保存后终端续跑即生效。空串 = 清除（回退默认命令名）。
+/** 平台 CLI 命令配置（key = 平台 id）。GET 目前只回传内置三平台
+ *  （codex / claude-code / omp）；自定义平台 id 的 bin 由后端 resolveCliBin 从
+ *  `~/.agentlray/settings.json` 的 cliBins section 手工配置键读取。 */
+export type CliBins = Partial<Record<string, CliBinSetting>>;
 
 export interface CliBinSetting {
   /** 当前生效的可执行命令（配置值或默认名） */
@@ -435,23 +423,6 @@ export interface CliBinSetting {
   /** 默认命令名（未配置时的回退） */
   default: string;
 }
-
-/** 仅 resume 平台（codex / claude-code / omp）可配置。 */
-export type CliBins = Partial<Record<'codex' | 'claude-code' | 'omp', CliBinSetting>>;
-
-export function getCliBins(): Promise<CliBins> {
-  return fetchJson('/api/settings/cli-bins');
-}
-
-/** 空串 = 清除该平台配置（回退默认命令名）。 */
-export function saveCliBins(body: Partial<Record<'codex' | 'claude-code' | 'omp', string>>): Promise<CliBins> {
-  return requestJson('/api/settings/cli-bins', 'PUT', body);
-}
-
-// ---------- 会话状态时间配置 ----------
-// GET/PUT /api/settings/status — 存服务端 ~/.agentlray/status-config.json，并在
-// 保存时经 lib/status.js setStatusConfig 注入，使各平台状态判定（awaiting-input /
-// working / waiting / stopped）使用页面配置的时间窗口。单位为毫秒。
 
 export interface StatusConfigSetting {
   /** 当前生效的时间窗口（毫秒，配置值或默认值） */
@@ -464,28 +435,63 @@ export interface StatusConfigSetting {
 
 export type StatusConfig = Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', StatusConfigSetting>>;
 
-export function getStatusConfig(): Promise<StatusConfig> {
-  return fetchJson('/api/settings/status');
+export interface KanbanSetting {
+  /** 当前生效的每列最多条数（配置值或默认值） */
+  value: number;
+  /** 是否已在设置面板显式配置（false = 回退默认） */
+  configured: boolean;
+  /** 默认值（20） */
+  default: number;
 }
 
-/** 传入毫秒；空/非正数 = 清除该 key（回退默认）。 */
-export function saveStatusConfig(body: Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', number>>): Promise<StatusConfig> {
-  return requestJson('/api/settings/status', 'PUT', body);
-}
-
-// ---------- 页面持久化 UI 偏好（平台选择） ----------
-// GET/PUT /api/settings/ui — 前端把 localStorage「agent-xray-settings」里的平台
-// 选择（单平台 platform / 多平台集合 selectedPlatforms）同步到服务端
-// ~/.agentlray/ui-settings.json；CLI（bin/sessions.js）未传 --platform 时读同一
-// 文件作为默认，保证终端命令与页面视角一致。
+export type KanbanConfig = Partial<{ maxPerStatus: KanbanSetting }>;
 
 export interface UiSettings {
   platform: Platform | null;
   selectedPlatforms: Platform[];
 }
 
-export function saveUiSettings(body: { platform: Platform; selectedPlatforms: Platform[] }): Promise<UiSettings> {
-  return requestJson('/api/settings/ui', 'PUT', body);
+/** GET /api/settings 全量响应（web 设置面板一次读齐所有 section）。 */
+export interface AllSettings {
+  ui: UiSettings;
+  cliBins: CliBins;
+  status: StatusConfig;
+  kanban: KanbanConfig;
+  llm: LlmSettings;
+}
+
+export function getSettings(): Promise<AllSettings> {
+  return fetchJson('/api/settings');
+}
+
+/** PUT /api/settings 可选项：只含已编辑的 section，未提供者原样保留。 */
+export type SettingsPatch = {
+  ui?: { platform: Platform; selectedPlatforms: Platform[] };
+  cliBins?: Partial<Record<string, string>>;
+  status?: Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', number>>;
+  kanban?: { maxPerStatus?: number };
+  llm?: { baseUrl: string; model: string; apiKey?: string };
+};
+
+/** 空串 = 清除该平台配置（回退默认命令名）。 */
+export function saveSettings(body: SettingsPatch): Promise<AllSettings> {
+  return requestJson('/api/settings', 'PUT', body);
+}
+
+/** 平台 CLI 命令配置（视图/复制恢复命令用）：从统一设置端点切片。 */
+export async function getCliBins(): Promise<CliBins> {
+  return (await getSettings()).cliBins;
+}
+
+/** 任务看板每列条数（视图截断用）：从统一设置端点切片。 */
+export async function getKanbanConfig(): Promise<KanbanConfig> {
+  return (await getSettings()).kanban;
+}
+
+/** 平台选择同步（store 在平台选择变化时调用）：写服务端 ui section，
+ *  CLI（bin/sessions.js）未传 --platform 时读同一 section 作为默认。 */
+export function saveUiSettings(body: { platform: Platform; selectedPlatforms: Platform[] }): Promise<AllSettings> {
+  return requestJson('/api/settings', 'PUT', { ui: body });
 }
 
 /** URL for the server-side session export (Markdown / standalone HTML download). */

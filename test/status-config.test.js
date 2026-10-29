@@ -1,6 +1,6 @@
 'use strict';
-// 状态时间配置：~/.agentlray/status-config.json 持久化 + setStatusConfig 注入对
-// deriveStatus 判定的影响（web 设置面板 / CLI 启动注入）。
+// 状态时间配置：~/.agentlray/settings.json 的 status section 持久化 + setStatusConfig
+// 注入对 deriveStatus 判定的影响（web 设置面板 / CLI 启动注入）。
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -20,7 +20,7 @@ const {
   resetStatusConfig,
 } = require('../lib/status');
 
-// status-config.js 的 STATUS_CONFIG_FILE 在 require 时基于 HOME 求值 → 先设临时 HOME。
+// settings.json 在 require 时基于 HOME 求值 → 先设临时 HOME。
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'status-config-test-'));
 process.env.HOME = tmpHome;
 const {
@@ -61,10 +61,10 @@ test('saveStatusConfig 落盘并白名单过滤；非法值清除回退默认', 
   });
   assert.deepEqual(saved, { recentActivityMs: 5 * 60 * 1000 });
 
-  // 磁盘文件只含白名单 + updatedAt
-  const onDisk = JSON.parse(await fsp.readFile(path.join(tmpHome, '.agentlray', 'status-config.json'), 'utf8'));
-  assert.deepEqual(Object.keys(onDisk).sort(), ['recentActivityMs', 'updatedAt']);
-  assert.equal(onDisk.recentActivityMs, 5 * 60 * 1000);
+  // 磁盘 settings.json 的 status section 只含白名单
+  const onDisk = JSON.parse(await fsp.readFile(path.join(tmpHome, '.agentlray', 'settings.json'), 'utf8'));
+  assert.deepEqual(Object.keys(onDisk.status).sort(), ['recentActivityMs']);
+  assert.equal(onDisk.status.recentActivityMs, 5 * 60 * 1000);
 
   // 重新 load 读回
   assert.deepEqual(await loadStatusConfig(), { recentActivityMs: 5 * 60 * 1000 });
