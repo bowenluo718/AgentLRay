@@ -173,9 +173,9 @@ npm start
 
 ### 平台 CLI 命令
 
-`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/cli-bins.json`）> 默认命令名**。
+`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/settings.json` 的 `cliBins` section）> 默认命令名**。
 
-**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp 填写可执行命令（绝对路径）。保存后写服务端 `~/.agentlray/cli-bins.json`；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
+**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp 填写可执行命令（绝对路径）。经对话框底部统一 Save 提交后写服务端 `~/.agentlray/settings.json`（`cliBins` section）；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
 
 **通过环境变量（优先级最高）：**
 
@@ -190,13 +190,49 @@ npm start
 
 ### 状态时间配置
 
-会话四态（awaiting-input / working / waiting / stopped）的判定依赖三个时间窗口，默认值 2 分钟 / 30 分钟 / 12 小时。可在 web 设置面板「状态时间配置」分区调整（单位：分钟 / 小时），保存即写服务端 `~/.agentlray/status-config.json` 并对后续状态判定生效；终端 `agentlray sessions list` 与 web 看板共用同一配置。
+会话四态（awaiting-input / working / waiting / stopped）的判定依赖三个时间窗口，默认值 2 分钟 / 30 分钟 / 12 小时。可在 web 设置面板「状态时间配置」分区调整（单位：分钟 / 小时），保存即写服务端 `~/.agentlray/settings.json`（`status` section）并对后续状态判定生效；终端 `agentlray sessions list` 与 web 看板共用同一配置。
 
 | 配置项 | 默认 | 说明 |
 |--------|------|------|
 | 最近活动新鲜度 | 2 分钟 | 回合完成 / 无进行中证据的短鲜度内判 working |
 | 进行中工作上界 | 30 分钟 | 长工具执行 / 深思考在界内一律 working，超过才降级 |
 | 取证闭口窗口 | 12 小时 | 无结束标记会话证据超过此界判 stopped；awaiting-input / waiting 的上界 |
+
+## 自定义平台（Custom platforms）
+
+AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配器**放进 `~/.agentlray/platforms/`，启动时加载器逐文件校验并把合法适配器并入平台注册表；所有 generic 表面（会话路由 / search / prompts / tool-audit / watch / export / CLI）按**能力位**自动接入。校验失败或 id 冲突的文件标记 **broken**（页面与 `agentlray platform list` 可见），绝不拖垮启动。
+
+**启用 / 禁用：** 文件在 `~/.agentlray/platforms/*.js` 即启用，删除/移走即禁用，无 per-platform 开关。按文件名字母序加载；`id` 与内置（如 `codex`）或先前自定义冲突 → 该文件 broken。`AGENTLRAY_NO_PLUGINS=1` 为全局逃生（跳过全部加载）。
+
+**必需契约**（加载器校验）：`id`（正则 `^[a-z0-9][a-z0-9-]*$`）、`label`（字符串）、`defaultDir()` → 会话根目录、`parse(file)` → `{ session, messages }`、`getSession(dir, id)` → `{ session, messages } | null`；`list(dir)` → 最新在前的 `SessionSummary[]`（加载器对 `list: null` 宽容，与 openclaw 一致，但要列会话的平台必须提供）。
+
+**可选能力位** — 缺谁谁缺位、不报错：
+
+| 字段 | 启用 |
+|---|---|
+| `find(dir, id, opts?)` | watch 实时尾随 与 OTLP 导出 |
+| `collectFiles(dir, opts?)` | search / prompts / tool-audit 批量扫描 |
+| `watchParse(rec, line?)` | SSE 实时尾随（需与 `find` 一起；缺位时 `/api/watch` 返回 400） |
+| `needsAgent` | openclaw 式按 agent 平台（详情/列表需 `agent`，不进入 OTLP） |
+| `resume = { bin, args(id, opts) }` | 该平台的 CLI `sessions resume` |
+| `version` | 契约版本（自 1 起） |
+
+**CLI：**
+
+```bash
+agentlray platform list                 # 内置 + 自定义 + broken，与 GET /api/platforms 同源
+agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与加载器同一套校验，dry-run
+```
+
+`platform validate` 复用加载器自己的校验，随后真的调用适配器 `list(defaultDir())` 报告会话计数与首条 id——通过即代表该平台可实际列出会话。`list --json` 输出 `{schemaVersion:1, kind:"platforms", platforms:[…]}`；`validate --json` 成功输出 `{schemaVersion:1, kind:"platform-validate", ok:true, platform:{id,label}, sessionCount, firstId, note}`。
+
+**Web 前端：** React 与 legacy 两套 UI 都经 `GET /api/platforms` 展示内置 + 自定义平台；加载失败的自定义平台显示 broken 徽标（含错误），不参与查询。
+
+**resume 保持 opt-in：** 自定义平台仅当适配器声明 `resume = { bin, args(id, opts) }` 时 `sessions resume` 可用，否则报「无原生续跑」。spawn 的可执行名解析：环境变量 `AGENTLRAY_<平台id>_BIN` > `~/.agentlray/settings.json` 的 `cliBins` `<id>` 键 > 适配器默认 `bin`。
+
+**信任边界：** 适配器以你的用户全权限执行任意代码（等同自己手动跑脚本）。只投递可信文件，必要时用 `AGENTLRAY_NO_PLUGINS=1` 逃生。`defaultDir()` 由适配器自行定义、可读自身 env；通用 `?dir=` / `--dir` 覆盖仍然生效。
+
+完整可运行、带注释的样例适配器（扁平 JSONL 平台，含 `find` / `collectFiles` / `watchParse` / `needsAgent` / resume 示例块）见 [docs/.local/custom-platform-example.zh-CN.md](.local/custom-platform-example.zh-CN.md)。
 
 ## API
 
@@ -217,14 +253,14 @@ npm start
 | `GET /api/dsh/sessions/:id` | 获取 DeepSeek Harness 会话消息详情 |
 | `GET /api/gemini/sessions` | 获取 Gemini CLI 会话列表 |
 | `GET /api/gemini/sessions/:id` | 获取 Gemini CLI 会话消息详情 |
+| `GET /api/platforms` | 列出全部平台（内置 + 自定义 + broken）：含能力位、label 与加载错误 |
 | `GET /api/spawn-map` | 获取 Agent spawn 关系图 |
 | `GET /api/insights` | 聚合分析（工具统计、错误聚类、趋势） |
 | `GET /api/prompts` | 按目录分组的各 session 真人 prompt |
 | `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |
 | `POST /api/prompts/rewrite` | 通过配置的 LLM 后端改写单条 prompt（`{ "text": "..." }`；无可用后端时返回 503 及配置指引） |
-| `GET/PUT /api/settings/llm` | LLM 后端配置：OpenAI 兼容 `baseUrl`/`model`/`apiKey`,持久化在 `~/.agentlray/llm.json`（key 不回显） |
-| `GET/PUT /api/settings/cli-bins` | 平台 CLI 命令配置（resume 续跑 spawn 目标）：codex/claude-code/omp 的可执行命令，持久化在 `~/.agentlray/cli-bins.json`；GET 含 `bin`/`configured`/`default`，空串 = 清除回退默认 |
-| `GET/PUT /api/settings/status` | 会话状态时间配置（四态判定窗口）：`recentActivityMs`/`activeWorkCeilMs`/`historyCeilMs`，持久化在 `~/.agentlray/status-config.json`；GET 含 `value`/`configured`/`default`，保存即注入生效 |
+| `GET/PUT /api/settings` | 统一设置端点：所有服务端设置聚合在 `~/.agentlray/settings.json`（旧 `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` 首启幂等迁移）。PUT 只保存请求体提供的 section（`ui`/`cliBins`/`status`/`kanban`/`llm`），未提供者保持原值。`cliBins` 返回 `bin`/`configured`/`default`，空串 = 清除回退默认；`status`/`kanban` 返回 `value`/`configured`/`default`，保存即生效；`llm` 返回 `baseUrl`/`model`/`hasApiKey`（key 不回显） |
+| `GET /api/settings/cli-bins` | 只读兼容端点（legacy 冻结快照 `/legacy` 的「复制恢复命令」按钮用）；与 `/api/settings` 的 `cliBins` 同构 |
 | `GET /api/search` | 会话全文搜索（`?platform=all` 一次搜索全部平台，多关键词 AND） |
 | `GET /api/omp/sessions/:id/children` | 获取该 OMP 会话派生的子 Agent 列表 |
 | `GET /api/omp/sessions/:id/children/:name` | 获取指定子 Agent 的消息详情 |
@@ -268,7 +304,7 @@ OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳�
 
 测试代码位于 `test/`，使用 Node 内置的测试运行器，无需额外依赖。先执行一次 `npm ci`，然后运行 `npm test`（即 `node --test test/*.test.js`）。测试会在随机端口上启动自己的服务实例，并把 `HOME` 及各平台目录都指向 `test/fixtures/home` 的临时副本，因此不会读取或修改你的真实会话日志。CI（`.github/workflows/test.yml`）在每次向 `master` 的 push 和 pull request 上以 Node 22 执行四个步骤：`npm ci`（其 `prepare` 脚本会构建 Web UI 并重新生成 `public/js/pure.js`）、漂移检查（`git diff --exit-code public/js/pure.js lib/generated/diagnostics.cjs`）、`npx biome check .` 和 `npm test`。
 
-**新增平台只需两个文件**：在 `lib/platforms/<name>.js` 写一个适配器（针对该日志格式的 list / find / parse / normalize，`lib/platforms/shared.js` 提供元数据缓存、归一化消息工厂和会话排序），再到 `lib/platforms/index.js` 的 `PLATFORMS` 注册表登记一条。通用会话路由、搜索、watch（SSE 实时跟踪）、洞察、Prompt 提取、工具体检、OTLP 与 Markdown/HTML 导出全部通过该注册表解析平台，无需改动其他文件。
+**新增平台只需两个文件**：在 `lib/platforms/<name>.js` 写一个适配器（针对该日志格式的 list / find / parse / normalize，`lib/platforms/shared.js` 提供元数据缓存、归一化消息工厂和会话排序），再到 `lib/platforms/index.js` 的 `PLATFORMS` 注册表登记一条。通用会话路由、搜索、watch（SSE 实时跟踪）、洞察、Prompt 提取、工具体检、OTLP 与 Markdown/HTML 导出全部通过该注册表解析平台，无需改动其他文件。**自定义平台**则完全不用改源码：把适配器放进 `~/.agentlray/platforms/` 即可（见 [自定义平台（Custom platforms）](#自定义平台custom-platforms)）。
 
 ## 常见问题
 

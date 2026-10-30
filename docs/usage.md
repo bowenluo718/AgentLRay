@@ -179,9 +179,9 @@ npm start
 
 ### Platform CLI commands
 
-`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/cli-bins.json`) > default command name**.
+`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/settings.json` `cliBins` section) > default command name**.
 
-**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp. Saved to server-side `~/.agentlray/cli-bins.json`; both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
+**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp. Submitted with the dialog's single Save button, persisted server-side in `~/.agentlray/settings.json` (cliBins section); both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
 
 **Via environment variables (highest priority):**
 
@@ -196,13 +196,49 @@ Unset variables and platforms not configured in the panel fall back to the defau
 
 ### Status time configuration
 
-Session status (awaiting-input / working / waiting / stopped) depends on three time windows, defaulting to 2 min / 30 min / 12 h. Configure them under "Status time configuration" in the settings panel (units: minutes / hours); saving writes server-side `~/.agentlray/status-config.json` and takes effect for subsequent status evaluation. Terminal `agentlray sessions list` and the web dashboard share the same config.
+Session status (awaiting-input / working / waiting / stopped) depends on three time windows, defaulting to 2 min / 30 min / 12 h. Configure them under "Status time configuration" in the settings panel (units: minutes / hours); saving writes server-side `~/.agentlray/settings.json` (status section) and takes effect for subsequent status evaluation. Terminal `agentlray sessions list` and the web dashboard share the same config.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | Recent activity freshness | 2 min | Within this freshness after a completed turn → working |
 | Active work ceiling | 30 min | Long tool runs / deep thinking stay working within this bound, then degrade |
 | History ceiling | 12 h | Sessions without an end marker older than this → stopped; upper bound for awaiting-input / waiting |
+
+## Custom platforms
+
+AgentLRay lets you plug in extra platforms without changing the source: write a JavaScript **platform adapter** and drop it into `~/.agentlray/platforms/`. On startup the loader validates each file and merges valid adapters into the platform registry; every generic surface (session routes, search, prompts, tool audit, watch, export, CLI) then resolves the new platform by capability bit. Invalid or conflicting files are marked **broken** (visible in the UI and on `platform list`) and never break startup.
+
+**Enable / disable:** a file present in `~/.agentlray/platforms/*.js` is enabled; remove or move it to disable. There is no per-platform switch. Files load in alphabetical order. An `id` that collides with a built-in or an earlier custom adapter marks that file broken. Set `AGENTLRAY_NO_PLUGINS=1` to skip loading entirely as an escape hatch.
+
+**Required contract** (validated by the loader): `id` (`^[a-z0-9][a-z0-9-]*$`), `label` (string), `defaultDir()` → session root, `parse(file)` → `{ session, messages }`, `getSession(dir, id)` → `{ session, messages } | null`; `list(dir)` → newest-first `SessionSummary[]` (the loader tolerates `list: null` like OpenClaw, but a listing platform needs it).
+
+**Optional capability bits** — a missing bit just silences that surface, no error:
+
+| Field | Enables |
+|---|---|
+| `find(dir, id, opts?)` | watch tailing and OTLP export |
+| `collectFiles(dir, opts?)` | search / prompts / tool-audit bulk scans |
+| `watchParse(rec, line?)` | live SSE tail (needs `find` too; without it `/api/watch` returns 400) |
+| `needsAgent` | OpenClaw-style per-agent platform (detail/list need `agent`; excluded from OTLP) |
+| `resume = { bin, args(id, opts) }` | CLI `sessions resume` for this platform |
+| `version` | contract version (starts at 1) |
+
+**CLI:**
+
+```bash
+agentlray platform list                 # built-in + custom + broken, same source as GET /api/platforms
+agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # same checks as the loader, dry-run
+```
+
+`platform validate` reuses the loader's own validation, then calls the adapter's real `list(defaultDir())` and reports the session count and the first session id — passing it means the platform is actually listable. `list --json` prints `{schemaVersion:1, kind:"platforms", platforms:[…]}`; `validate --json` on success prints `{schemaVersion:1, kind:"platform-validate", ok:true, platform:{id,label}, sessionCount, firstId, note}`.
+
+**Web UI:** built-in and custom platforms appear in the same platform bar (both React and legacy UI). A custom platform whose file fails to load shows a broken badge with its error and takes no part in queries.
+
+**Resume stays opt-in:** a custom platform gets CLI `sessions resume` only when the adapter declares `resume = { bin, args(id, opts) }`; without it, resume reports "no native resume command". The spawned binary resolves via env var `AGENTLRAY_<PLATFORM_ID>_BIN` > `~/.agentlray/settings.json`'s `cliBins` `<id>` key > the adapter's default `bin`.
+
+**Trust:** an adapter executes with your full user permissions (equivalent to running a script yourself). Only place trusted files; when in doubt use `AGENTLRAY_NO_PLUGINS=1`. Define `defaultDir()` inside the adapter and read your own env if needed — the generic `?dir=` / `--dir` override still applies.
+
+A complete runnable, annotated sample adapter (flat JSONL platform, with `find` / `collectFiles` / `watchParse` / `needsAgent` and a resume snippet) is in [docs/.local/custom-platform-example.zh-CN.md](.local/custom-platform-example.zh-CN.md).
 
 ## API
 
@@ -223,14 +259,14 @@ Session status (awaiting-input / working / waiting / stopped) depends on three t
 | `GET /api/dsh/sessions/:id` | Get DeepSeek Harness session messages |
 | `GET /api/gemini/sessions` | List Gemini CLI sessions |
 | `GET /api/gemini/sessions/:id` | Get Gemini CLI session messages |
+| `GET /api/platforms` | List all platforms (built-in + custom + broken) with capability bits, labels and load errors |
 | `GET /api/spawn-map` | Build agent spawn relationship map |
 | `GET /api/insights` | Aggregate analytics (tool stats, error clusters, trends) |
 | `GET /api/prompts` | Real human prompts per session, grouped by directory |
 | `GET /api/prompts/analyze` | Template clustering + attribution + Claude suggestions (`?refresh=1` to recompute, `?skipLlm=1` for clustering only) |
 | `POST /api/prompts/rewrite` | Rewrite a single prompt via the configured LLM backend (`{ "text": "..." }`; 503 with guidance when no backend is available) |
-| `GET/PUT /api/settings/llm` | LLM backend config: OpenAI-compatible `baseUrl`/`model`/`apiKey`, persisted in `~/.agentlray/llm.json` (key never echoed back) |
-| `GET/PUT /api/settings/cli-bins` | Platform CLI command config (resume spawn target): executable commands for codex/claude-code/omp, persisted in `~/.agentlray/cli-bins.json`; GET returns `bin`/`configured`/`default`, empty string clears (fall back to default) |
-| `GET/PUT /api/settings/status` | Session status time config (four-state evaluation windows): `recentActivityMs`/`activeWorkCeilMs`/`historyCeilMs`, persisted in `~/.agentlray/status-config.json`; GET returns `value`/`configured`/`default`, saving takes effect immediately |
+| `GET/PUT /api/settings` | Unified settings endpoint: all server-side settings aggregated in `~/.agentlray/settings.json` (legacy `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` migrate in on first start). PUT saves only the sections supplied (`ui`/`cliBins`/`status`/`kanban`/`llm`), others untouched. `cliBins` returns `bin`/`configured`/`default`, empty string clears (fall back to default); `status`/`kanban` return `value`/`configured`/`default`, saving takes effect immediately; `llm` `baseUrl`/`model`/`hasApiKey` (key never echoed back) |
+| `GET /api/settings/cli-bins` | Read-only compat endpoint for the legacy frozen UI (`/legacy` resume-copy button); same `bin`/`configured`/`default` shape as `/api/settings`'s `cliBins` |
 | `GET /api/search` | Full-text search across sessions (`?platform=all` searches every platform at once, multi-keyword AND) |
 | `GET /api/omp/sessions/:id/children` | List sub-agents spawned by an OMP session |
 | `GET /api/omp/sessions/:id/children/:name` | Get a spawned sub-agent's messages |
@@ -280,7 +316,7 @@ Archived OpenClaw sessions (`.jsonl.reset.*`, `.jsonl.deleted.*`) are excluded f
 
 Tests live in `test/` and use Node's built-in test runner — no extra dependencies. Run `npm ci` once, then `npm test` (`node --test test/*.test.js`). The tests start their own server on a random port with `HOME` and every platform directory pointed at a throwaway copy of `test/fixtures/home`, so your real session logs are never read or modified. CI (`.github/workflows/test.yml`) runs on Node 22 for every push and pull request to `master`, in four steps: `npm ci` (whose `prepare` script builds the web UI and regenerates `public/js/pure.js`), a drift check (`git diff --exit-code public/js/pure.js lib/generated/diagnostics.cjs`), `npx biome check .`, and `npm test`.
 
-**Adding a platform** takes two files: write one adapter in `lib/platforms/<name>.js` (list / find / parse / normalize for that log format — `lib/platforms/shared.js` provides the metadata cache, the normalized-message factory and the session sort), then register it in the `PLATFORMS` table in `lib/platforms/index.js`. The generic session routes, search, watch (SSE tail), insights, prompts, tool audit, OTLP and Markdown/HTML export all resolve platforms through that registry — no other file needs to change.
+**Adding a platform** takes two files: write one adapter in `lib/platforms/<name>.js` (list / find / parse / normalize for that log format — `lib/platforms/shared.js` provides the metadata cache, the normalized-message factory and the session sort), then register it in the `PLATFORMS` table in `lib/platforms/index.js`. The generic session routes, search, watch (SSE tail), insights, prompts, tool audit, OTLP and Markdown/HTML export all resolve platforms through that registry — no other file needs to change. For a **custom** platform you do not touch the source at all: drop an adapter into `~/.agentlray/platforms/` (see [Custom platforms](#custom-platforms)).
 
 ---
 
