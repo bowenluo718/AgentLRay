@@ -102,6 +102,15 @@ export const SUMMARY_COLLAPSED_KEY = 'axr-summary-collapsed';
 export const HIDE_TRIVIAL_KEY = 'axr-hide-trivial';
 export const LIB_SORT_KEY = 'axr-lib-sort';
 
+/** 无持久化偏好时的初始主题：跟随系统深浅色一次（此后由用户手动切换固定）。 */
+function systemTheme(): Theme {
+  try {
+    return window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
 export function loadStoredFlag(key: string, fallback = true): boolean {
   try {
     const raw = localStorage.getItem(key);
@@ -162,6 +171,7 @@ function loadPersisted(): {
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   view: MainView;
+  theme: Theme;
 } {
   // Demo build ships claude-code/codex fixtures only — land on a populated tab.
   const defaultPlatform: Platform = DEMO ? 'claude-code' : 'openclaw';
@@ -176,6 +186,7 @@ function loadPersisted(): {
     sidebarCollapsed: boolean;
     sidebarWidth: number;
     view: MainView;
+    theme: Theme;
   } = {
     settings: { ...EMPTY_SETTINGS },
     platform: defaultPlatform,
@@ -189,6 +200,8 @@ function loadPersisted(): {
     sidebarCollapsed: false,
     sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     view: 'sessions',
+    // 无持久化偏好时跟随系统深浅色（与 index.html 的防闪烁脚本一致）。
+    theme: systemTheme(),
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -237,6 +250,10 @@ function loadPersisted(): {
       if (isMainView(parsed.view)) {
         result.view = parsed.view;
       }
+      // 主题（旧存储无该键 → 默认由 useTheme 首启跟随系统决定）。只接受亮/暗两值。
+      if (parsed.theme === 'light' || parsed.theme === 'dark') {
+        result.theme = parsed.theme;
+      }
     }
   } catch {
     /* corrupted storage — fall back to defaults */
@@ -244,6 +261,8 @@ function loadPersisted(): {
   return result;
 }
 
+/** 界面主题：亮色 / 暗色（两态手动切换，首启跟随系统一次后固定）。 */
+export type Theme = 'light' | 'dark';
 export type MainView = 'sessions' | 'insights' | 'prompts' | 'library' | 'kanban';
 /** 右侧视图页签值校验（URL 参数 / localStorage 解析共用；非法值一律回退默认）。 */
 export function isMainView(v: unknown): v is MainView {
@@ -341,6 +360,7 @@ function persistState(): void {
         sidebarCollapsed: st.sidebarCollapsed,
         sidebarWidth: st.sidebarWidth,
         view: st.view,
+        theme: st.theme,
       })
     );
   } catch {
@@ -401,6 +421,8 @@ interface AppState {
   selectedSessionId: string;
   settings: DirSettings;
   view: MainView;
+  /** 界面主题：亮色 / 暗色（首启由 useTheme 跟随系统决定并回写）。 */
+  theme: Theme;
   /** null = not entered 分析 yet; auto-picked on first entry, then sticky */
   insightsScope: InsightsScope | null;
   sessionView: SessionView;
@@ -443,6 +465,8 @@ interface AppState {
   setSelectedAgent: (agent: string) => void;
   setSelectedSessionId: (id: string) => void;
   saveSettings: (settings: DirSettings) => void;
+  /** 设置主题（亮/暗）并持久化；切换后由 useTheme 同步 html.dark 类。 */
+  setTheme: (theme: Theme) => void;
   setView: (view: MainView) => void;
   setInsightsScope: (scope: InsightsScope) => void;
   setSessionView: (view: SessionView) => void;
@@ -477,6 +501,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedSessionId: urlDetail.selectedSessionId ?? '',
   settings: initial.settings,
   view: urlView ?? initial.view,
+  theme: initial.theme,
   insightsScope: null,
   sessionView: 'messages',
   viewingChildAgent: null,
@@ -642,6 +667,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     // 右侧视图页签切换 → 持久化 localStorage + URL（URL 写入由订阅 syncSessionUrl 统一处理）。
     if (get().view === view) return;
     set({ view });
+    persistState();
+  },
+  setTheme: (theme) => {
+    if (get().theme === theme) return;
+    set({ theme });
     persistState();
   },
   setInsightsScope: (scope) => set({ insightsScope: scope }),

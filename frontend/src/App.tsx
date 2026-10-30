@@ -1,10 +1,11 @@
-import { ArrowLeft, Copy, PanelLeft } from 'lucide-react';
+import { ArrowLeft, Copy, Moon, PanelLeft, Sun } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Sidebar } from '@/components/Sidebar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useTheme } from '@/hooks/useTheme';
 import { useVersionPoller } from '@/hooks/useVersionPoller';
 import { DEMO } from '@/demo/flag';
 import { useAppStore } from '@/store';
@@ -28,6 +29,7 @@ const TABS: { view: MainView; label: string; title: string }[] = [
 export default function App() {
   usePlatforms(); // 服务端平台列表驱动（结果写入 store）
   useVersionPoller();
+  const { theme, setTheme } = useTheme();
   const view = useAppStore((s) => s.view);
   const setView = useAppStore((s) => s.setView);
   const platform = useAppStore((state) => state.platform);
@@ -81,7 +83,7 @@ export default function App() {
           <div className="flex max-h-[24dvh] shrink-0 flex-wrap items-center justify-center gap-2 overflow-y-auto border-b border-[#e3b341]/40 bg-[#e3b341]/15 px-3 py-1.5 text-center text-xs text-[#e3b341] md:max-h-none [@media(max-height:500px)]:max-h-10">
             <span>🧪 Demo — synthetic data, not real sessions.</span>
             <button type="button"
-              className="min-h-9 rounded border border-[#e3b341]/60 bg-black/20 px-2 py-1 font-medium hover:bg-black/40"
+              className="min-h-9 rounded border border-[#e3b341]/60 bg-foreground/10 px-2 py-1 font-medium hover:bg-foreground/20"
               onClick={() => {
                 const store = useAppStore.getState();
                 store.setPlatform('omp');
@@ -101,7 +103,7 @@ export default function App() {
                   () => toast.error('Copy failed')
                 );
               }}
-              className="inline-flex items-center gap-1 rounded border border-[#e3b341]/50 bg-black/20 px-1.5 py-0.5 font-mono text-[11px] hover:border-[#e3b341] hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded border border-[#e3b341]/50 bg-foreground/10 px-1.5 py-0.5 font-mono text-[11px] hover:border-[#e3b341] hover:text-foreground"
             >
               npx @bowenluo718/agent-lray
               <Copy className="h-3 w-3" />
@@ -127,12 +129,23 @@ export default function App() {
         ) : null}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1 md:hidden">
           <span className="text-sm font-semibold">AgentLRay</span>
-          <button ref={navigationToggle} type="button" aria-expanded={navigationOpen} aria-controls="session-navigation"
-            className="inline-flex min-h-11 items-center gap-2 rounded px-2 text-sm text-primary focus-visible:outline"
-            onClick={() => navigationOpen ? returnToContent() : setNavigationOpen(true)}>
-            {navigationOpen ? <ArrowLeft className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
-            {navigationOpen ? '返回内容' : '会话列表'}
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              title={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
+              aria-label={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
+              className="inline-flex min-h-11 items-center justify-center rounded px-2 text-muted-foreground hover:text-foreground focus-visible:outline"
+              onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            >
+              {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            </button>
+            <button ref={navigationToggle} type="button" aria-expanded={navigationOpen} aria-controls="session-navigation"
+              className="inline-flex min-h-11 items-center gap-2 rounded px-2 text-sm text-primary focus-visible:outline"
+              onClick={() => navigationOpen ? returnToContent() : setNavigationOpen(true)}>
+              {navigationOpen ? <ArrowLeft className="h-4 w-4" /> : <PanelLeft className="h-4 w-4" />}
+              {navigationOpen ? '返回内容' : '会话列表'}
+            </button>
+          </div>
         </div>
         <div
           className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] md:grid-cols-[var(--sidebar-cols)]"

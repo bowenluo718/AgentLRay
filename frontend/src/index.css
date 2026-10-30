@@ -3,12 +3,51 @@
 @tailwind utilities;
 
 /*
- * Dark theme is the one and only theme — token values ported from the legacy
- * palette in public/css/app.css (:root). Both :root and .dark carry the same
- * values so shadcn components work with or without the .dark class.
+ * Two themes, selected by the `.dark` class on <html>:
+ *   - :root carries the light (day) palette — shadcn default is light.
+ *   - .dark carries the dark (night) palette, ported from the legacy
+ *     palette in public/css/app.css (:root).
+ * All components consume hsl(var(--...)), so no per-component changes needed.
+ * The theme is toggled by useTheme() (frontend/src/hooks/useTheme.ts).
  */
 @layer base {
-  :root,
+  :root {
+    /* light background — light gray */
+    --background: 210 20% 98%;
+    /* legacy --text #c9d1d9 inverted → near-black gray */
+    --foreground: 215 25% 15%;
+    /* light panels — white */
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 15%;
+    /* legacy --user #1f6feb (kept, slightly deepened for contrast on light) */
+    --primary: 212 85% 48%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 16% 92%;
+    --secondary-foreground: 215 25% 20%;
+    --muted: 214 16% 92%;
+    /* legacy --muted #8b949e → mid gray */
+    --muted-foreground: 215 12% 42%;
+    --accent: 213 18% 88%;
+    --accent-foreground: 215 25% 18%;
+    /* legacy --danger #f85149 */
+    --destructive: 3 80% 56%;
+    --destructive-foreground: 0 0% 100%;
+    /* legacy --border #30363d → light gray */
+    --border: 214 16% 88%;
+    --input: 214 16% 85%;
+    --ring: 212 84% 48%;
+    --radius: 0.5rem;
+
+    /* legacy extras (light) */
+    --panel: 0 0% 100%;
+    --panel-alt: 213 20% 96%;
+    --user: 212 85% 48%;
+    --assistant: 132 60% 30%;
+    --danger: 3 80% 56%;
+  }
+
   .dark {
     /* legacy --bg #0d1117 */
     --background: 216 28% 7%;
@@ -102,12 +141,20 @@
   }
   body {
     @apply text-foreground font-sans antialiased;
-    /* legacy background: two radial glows over --bg */
+    /* legacy background: two radial glows over --bg. Glow opacity varies per
+     * theme (light needs a much subtler tint); the dark values match the
+     * legacy palette. */
+    background:
+      radial-gradient(circle at top left, rgba(31, 111, 235, 0.05), transparent 28%),
+      radial-gradient(circle at bottom right, rgba(35, 134, 54, 0.04), transparent 30%),
+      hsl(var(--background));
+    background-attachment: fixed;
+  }
+  .dark body {
     background:
       radial-gradient(circle at top left, rgba(31, 111, 235, 0.14), transparent 28%),
       radial-gradient(circle at bottom right, rgba(35, 134, 54, 0.12), transparent 30%),
       hsl(var(--background));
-    background-attachment: fixed;
   }
 }
 

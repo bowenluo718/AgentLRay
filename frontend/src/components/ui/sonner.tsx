@@ -1,12 +1,14 @@
 import { Toaster as Sonner } from 'sonner';
+import { useAppStore } from '@/store';
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
-// App is dark-only (legacy AgentLRay theme) — no next-themes indirection.
+// Toast 主题跟随界面主题（亮/暗）。
 const Toaster = ({ ...props }: ToasterProps) => {
+  const theme = useAppStore((s) => s.theme);
   return (
     <Sonner
-      theme="dark"
+      theme={theme === 'dark' ? 'dark' : 'light'}
       className="toaster group"
       toastOptions={{
         classNames: {

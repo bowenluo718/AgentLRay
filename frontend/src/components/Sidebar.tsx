@@ -1,13 +1,14 @@
 // Left sidebar（精简）：标题 + 会话文本过滤 + 会话列表。筛选/分组/agent/开关等
 // 配置全部收进「会话筛选与分组」弹框（SessionFiltersDialog）与设置弹框。
 
-import { ChevronsLeft, Settings, SlidersHorizontal } from 'lucide-react';
+import { ChevronsLeft, Moon, Settings, SlidersHorizontal, Sun } from 'lucide-react';
 import type { PointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { SessionFiltersDialog } from '@/components/SessionFiltersDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useTheme } from '@/hooks/useTheme';
 import { platformLabel, useAppStore, SIDEBAR_MIN_WIDTH } from '@/store';
 import { CmdkDialog } from '@/views/sessions/CmdkDialog';
 import { SessionList } from '@/views/sessions/SessionList';
@@ -18,6 +19,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const platforms = useAppStore((s) => s.platforms);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
+  const { theme, setTheme } = useTheme();
   // 拖拽起点：记录边栏初始宽度与指针起始 x，横向位移换算宽度增量。
   const dragStart = useRef<{ x: number; width: number } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -88,6 +90,16 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
           <Button variant="outline" size="icon" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
             <Settings className="h-4 w-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            title={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
+            aria-label={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
+            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+            className="hidden md:inline-flex"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
           <Button
             variant="outline"

@@ -1,7 +1,25 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="dark">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // 防闪烁：首帧前按持久化偏好（agent-xray-settings.theme）或系统深浅色预置
+      // <html> 的 .dark 类，避免 React 挂载前主题跳变。与 store.loadPersisted 同规则。
+      (function () {
+        try {
+          var theme = null;
+          var raw = localStorage.getItem('agent-xray-settings');
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed.theme === 'light' || parsed.theme === 'dark') theme = parsed.theme;
+          }
+          if (!theme) theme = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          if (theme === 'dark') document.documentElement.classList.add('dark');
+        } catch (e) {
+          /* private mode etc. — fall through to default (no class = light) */
+        }
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AgentLRay — AI Agent 会话日志可视化面板 | Session Log Viewer for Claude Code / Codex / OpenClaw</title>
     <meta name="description" content="AgentLRay：多平台 AI agent 会话日志可视化 Web 面板，直接读取 Claude Code、Codex、OpenClaw 落盘日志，零集成查看工具调用与会话回放。" />
