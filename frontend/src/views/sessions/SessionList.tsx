@@ -8,11 +8,9 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
 import type { SessionSummary } from '@/api/types';
-import { PLATFORM_LABELS, PLATFORMS } from '@/api/types';
-import type { Platform } from '@/api/types';
 import { formatDurationCompact, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
-import { useAppStore } from '@/store';
+import { platformLabel, selectablePlatformIds, useAppStore } from '@/store';
 import type { GroupBy } from '@/store';
 import { UNKNOWN_PROJECT, filterSessionList, formatDate, resolveProjectValues } from './lib';
 import { useSessionsList } from './queries';
@@ -111,10 +109,10 @@ function appendStatusRows(
   }
 }
 
-/** 平台分组外层键顺序：PLATFORMS 顺序，未标注平台垫底。 */
-function platformGroupOrder(buckets: Map<string, SessionSummary[]>): string[] {
-  const known = PLATFORMS.filter((p) => buckets.has(p));
-  const rest = [...buckets.keys()].filter((k) => !PLATFORMS.includes(k as Platform));
+/** 平台分组外层键顺序：运行时平台列表（服务端顺序）优先，未标注平台垫底。 */
+function platformGroupOrder(buckets: Map<string, SessionSummary[]>, order: string[]): string[] {
+  const known = order.filter((p) => buckets.has(p));
+  const rest = [...buckets.keys()].filter((k) => !order.includes(k));
   return [...known, ...rest];
 }
 
@@ -148,7 +146,10 @@ function buildRows(
   sessions: SessionSummary[],
   groupBy: GroupBy,
   collapsed: string[],
-  projectValues: Map<SessionSummary, string>
+  projectValues: Map<SessionSummary, string>,
+  /** 运行时平台顺序（服务端顺序）；labelOf 由 store 平台列表派生平台展示名。 */
+  orderIds: string[],
+  labelOf: (id: string) => string
 ): SessionRow[] {
   // 单选平台数据无 platform 标记：按平台分组退化为原生状态分组（含单选平台时的
   // groupBy='platform' 残留，避免渲染一个「未标注」空桶）。
@@ -192,13 +193,13 @@ function buildRows(
     bucket.push(s);
     buckets.set(key, bucket);
   }
-  const order = groupBy === 'platform' ? platformGroupOrder(buckets) : projectGroupOrder(buckets);
+  const order = groupBy === 'platform' ? platformGroupOrder(buckets, orderIds) : projectGroupOrder(buckets);
   const rows: SessionRow[] = [];
   for (const key of order) {
     const list = buckets.get(key) || [];
     const name = `group:${key}`;
     const collapsedGroup = collapsed.includes(name);
-    const label = groupBy === 'platform' ? (PLATFORM_LABELS[key as Platform] || key) : key;
+    const label = groupBy === 'platform' ? labelOf(key) : key;
     rows.push({ kind: 'group', name, label, count: list.length, collapsed: collapsedGroup, key: name });
     if (collapsedGroup) continue;
     appendStatusRows(rows, list, collapsed, name);
@@ -311,11 +312,13 @@ function SessionCard({
   active,
   project,
   onClick,
+  labelOf,
 }: {
   session: SessionSummary;
   active: boolean;
   project: string;
   onClick: () => void;
+  labelOf: (id: string) => string;
 }) {
   const preview = session.firstUserMessage
     ? session.firstUserMessage.length > 80
@@ -350,7 +353,7 @@ function SessionCard({
               className="shrink-0 rounded border border-border/60 px-1 py-px text-[10px] text-primary/90"
               title={`来源平台${session.agent ? ` / ${session.agent}` : ''}`}
             >
-              {PLATFORM_LABELS[session.platform]}
+              {labelOf(session.platform)}
               {session.agent ? ` / ${session.agent}` : ''}
             </span>
           ) : null}
@@ -391,6 +394,10 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
   const collapsedGroups = useAppStore((s) => s.collapsedGroups);
   const toggleGroupCollapsed = useAppStore((s) => s.toggleGroupCollapsed);
   const multiView = useAppStore((s) => s.selectedPlatforms.length > 0);
+  const platforms = useAppStore((s) => s.platforms);
+  // 平台分组顺序与展示名以运行时平台列表（服务端顺序）为准。
+  const orderIds = useMemo(() => selectablePlatformIds(platforms), [platforms]);
+  const labelOf = useCallback((id: string) => platformLabel(platforms, id), [platforms]);
   const { data, isLoading, error } = useSessionsList();
   const raw = data ?? [];
   const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
@@ -404,8 +411,8 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
     return filterSessionList(byProject, filterTerm);
   }, [raw, projectValues, projectFilter, filterTerm]);
   const rows = useMemo(
-    () => buildRows(filtered, effectiveGroupBy, collapsed, projectValues),
-    [filtered, effectiveGroupBy, collapsed, projectValues]
+    () => buildRows(filtered, effectiveGroupBy, collapsed, projectValues, orderIds, labelOf),
+    [filtered, effectiveGroupBy, collapsed, projectValues, orderIds, labelOf]
   );
   const visibleSessions = useMemo(
     () => rows.filter((r): r is Extract<SessionRow, { kind: 'session' }> => r.kind === 'session').map((r) => r.session),
@@ -525,6 +532,7 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
                     active={dataRow.session.id === selectedSessionId}
                     project={projectValues.get(dataRow.session) ?? ''}
                     onClick={() => selectSession(dataRow.session)}
+                    labelOf={labelOf}
                   />
                 ) : dataRow.kind === 'group' ? (
                   <CollapseHeader
@@ -558,18 +566,22 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
                   active={row.session.id === selectedSessionId}
                   project={projectValues.get(row.session) ?? ''}
                   onClick={() => selectSession(row.session)}
+                  labelOf={labelOf}
                 />
               </div>
             ) : row.kind === 'group' ? (
-              <CollapseHeader
-                key={row.key}
-                label={row.label}
-                count={row.count}
-                collapsed={row.collapsed}
-                onToggle={() => toggleCollapsed(row.name)}
-                className="text-foreground"
-                dataAttr={row.label}
-              />
+              // 外层分组折叠头吸顶：相对本列表滚动容器（overflow-y-auto）吸顶，不透明
+              // 背景遮住滚动上来的卡片；-mr-1 抵消容器 pr-1 让吸顶背景横向占满。
+              <div key={row.key} className="sticky top-0 z-10 -mr-1 bg-panel-alt/95 backdrop-blur-sm">
+                <CollapseHeader
+                  label={row.label}
+                  count={row.count}
+                  collapsed={row.collapsed}
+                  onToggle={() => toggleCollapsed(row.name)}
+                  className="text-foreground"
+                  dataAttr={row.label}
+                />
+              </div>
             ) : (
               <SessionRowHeader
                 key={row.key}

@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SessionDetail } from '@/api/types';
-import { getCliBins } from '@/api/client';
+import { getCliBins, getResumeCommand } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
@@ -114,26 +114,44 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
   );
 }
 
+const RESUME_BUILTIN_IDS: Record<string, true> = { codex: true, 'claude-code': true, omp: true };
+
 function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
+  const platforms = useAppStore((s) => s.platforms);
   const [copied, setCopied] = useState(false);
-  // 读取平台 CLI 命令配置（GET /api/settings/cli-bins，未配置回退默认命令名），
+  const builtin = RESUME_BUILTIN_IDS[platform] === true;
+  // 内置三平台本地生成（零往返、后端不可达也可用）；自定义平台是否声明原生续跑由
+  // GET /api/platforms 的 resume 标志决定，命令串其后端生成（args 是适配器 JS）。
+  const customResume = platforms.some((p) => p.id === platform && p.resume);
+  const supported = builtin || customResume;
+
+  // 读取平台 CLI 命令配置（GET /api/settings 的 cliBins section，未配置回退默认命令名），
   // 与后端 bin/sessions.js resume 使用同一命令，保证复制即所见即所得。
   const cliBins = useQuery({ queryKey: ['cli-bins'], queryFn: getCliBins });
-  const bin =
-    platform === 'codex' || platform === 'claude-code' || platform === 'omp'
-      ? cliBins.data?.[platform]?.bin
-      : undefined;
-  const cmd = resumeCommand(platform, selectedSessionId, cwd, bin);
-  if (!cmd) return null;
+  const bin = builtin ? cliBins.data?.[platform]?.bin : undefined;
+  // 自定义平台由后端 buildResumeCommand 生成命令串（内部解析同一份 cli-bins 配置）。
+  const remote = useQuery({
+    queryKey: ['resume-command', platform, selectedSessionId, cwd ?? ''],
+    queryFn: () => getResumeCommand(platform, selectedSessionId, cwd),
+    enabled: customResume,
+  });
+  if (!supported) return null;
+
+  const cmd = builtin
+    ? resumeCommand(platform, selectedSessionId, cwd, bin)
+    : remote.data?.supported
+      ? (remote.data.command ?? null)
+      : null;
   return (
     <button
       type="button"
       className={ACTION_BTN}
-      title={`复制在终端恢复此会话的命令：${cmd}`}
+      title={cmd ? `复制在终端恢复此会话的命令：${cmd}` : '复制在终端恢复此会话的命令'}
       data-testid="resume-btn"
       onClick={async () => {
+        if (!cmd) return;
         try {
           await navigator.clipboard.writeText(cmd);
           setCopied(true);

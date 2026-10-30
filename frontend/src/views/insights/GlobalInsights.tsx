@@ -6,10 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { getInsights } from '@/api/client';
 import type { ErrorCluster, ErrorClusterExample, Insights } from '@/api/types';
-import { PLATFORM_LABELS } from '@/api/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCost } from '@/lib/pure';
-import { dirForPlatform, useAppStore } from '@/store';
+import { dirForPlatform, platformLabel, useAppStore } from '@/store';
 import { InsightSection, ScopeChip, StatCard, UsageBar, fmtTokens } from './bits';
 import { ToolsAuditSection } from './ToolsAuditSection';
 
@@ -60,6 +59,7 @@ export function GlobalInsights() {
   const platform = useAppStore((s) => s.platform);
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const settings = useAppStore((s) => s.settings);
+  const platforms = useAppStore((s) => s.platforms);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
   const setView = useAppStore((s) => s.setView);
   const requestScrollToMessage = useAppStore((s) => s.requestScrollToMessage);
@@ -111,7 +111,7 @@ export function GlobalInsights() {
     <div className="flex flex-col gap-4">
       <h2 className="flex items-center gap-2 text-lg font-semibold">
         全局分析{agent ? ` — ${agent}` : ''}{' '}
-        <ScopeChip>📍 当前平台：{PLATFORM_LABELS[platform] || platform}</ScopeChip>
+        <ScopeChip>📍 当前平台：{platformLabel(platforms, platform)}</ScopeChip>
       </h2>
 
       <div className="flex flex-wrap gap-3">

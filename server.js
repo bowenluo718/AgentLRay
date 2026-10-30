@@ -12,6 +12,7 @@ const mountBackupRoutes = require('./lib/routes/backup');
 const mountWatchRoutes = require('./lib/routes/watch');
 const mountCliBinsRoutes = require('./lib/routes/cli-bins');
 const mountSettingsRoutes = require('./lib/routes/settings');
+const mountPlatformsRoutes = require('./lib/routes/platforms');
 const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
 const { migrateLegacySettings } = require('./lib/settings');
@@ -67,6 +68,7 @@ mountBackupRoutes(app);
 mountWatchRoutes(app);
 mountCliBinsRoutes(app);
 mountSettingsRoutes(app, { status: { setStatusConfig } });
+mountPlatformsRoutes(app);
 
 // SPA fallback: unknown paths render the appropriate UI shell
 app.get('*', (req, res) => {

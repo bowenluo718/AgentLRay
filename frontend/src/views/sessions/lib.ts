@@ -361,8 +361,10 @@ export function buildProjectOptions(
 /**
  * Terminal command that resumes a session (legacy resumeCmdBtn); null when
  * unsupported. `bin` is the platform's configured CLI command (from
- * GET /api/settings/cli-bins); when omitted, falls back to the default
- * command name. args shape stays in sync with bin/sessions.js RESUME_BINS.
+ * GET /api/settings's cliBins section); when omitted, falls back to the default
+ * command name. args shape stays in sync with server lib/resume.js RESUME_BINS
+ * (built-in platforms only — custom platforms build via
+ * GET /api/:platform/sessions/:id/resume-command in ResumeButton).
  */
 export function resumeCommand(
   platform: Platform,

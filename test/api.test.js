@@ -177,6 +177,49 @@ describe('AgentLRay API', () => {
     });
   });
 
+  describe('resume-command 端点（复制恢复命令，与 CLI resume 同源）', () => {
+    it('内置三平台返回命令串（?cwd= 拼 cd 前缀）', async () => {
+      const codex = await getJson(
+        srv.base,
+        `/api/codex/sessions/${CODEX1}/resume-command?cwd=${encodeURIComponent('/fixtures/project-alpha')}`
+      );
+      assert.equal(codex.supported, true);
+      assert.equal(codex.bin, 'codex');
+      assert.deepEqual(codex.args, ['resume', CODEX1, '--yolo']);
+      assert.equal(codex.command, "cd '/fixtures/project-alpha' && codex resume 01900000-0000-7000-8000-000000000001 --yolo");
+
+      const claude = await getJson(srv.base, `/api/claude-code/sessions/${CLAUDE_A}/resume-command`);
+      assert.equal(claude.supported, true);
+      assert.equal(claude.command, `claude --dangerously-skip-permissions --resume ${CLAUDE_A}`);
+
+      const omp = await getJson(srv.base, `/api/omp/sessions/${OMP1}/resume-command`);
+      assert.equal(omp.supported, true);
+      assert.equal(omp.command, `omp --auto-approve --resume=${OMP1}`);
+    });
+
+    it('无原生续跑平台返回 supported:false，未知平台 404', async () => {
+      const hermes = await getJson(srv.base, '/api/hermes/sessions/x/resume-command');
+      assert.equal(hermes.supported, false);
+      assert.match(hermes.error, /no native resume command/);
+
+      const openclaw = await getJson(srv.base, '/api/openclaw/sessions/oc-1/resume-command');
+      assert.equal(openclaw.supported, false);
+      assert.match(openclaw.error, /no native resume command/);
+
+      await getJson(srv.base, '/api/nope/sessions/x/resume-command', 404);
+    });
+
+    it('GET /api/platforms 透出 resume 契约标志', async () => {
+      const platforms = await getJson(srv.base, '/api/platforms');
+      const byId = Object.fromEntries(platforms.filter((p) => p.id).map((p) => [p.id, p]));
+      assert.equal(byId.codex.resume, true);
+      assert.equal(byId['claude-code'].resume, true);
+      assert.equal(byId.omp.resume, true);
+      assert.equal(byId.hermes.resume, false);
+      assert.equal(byId.openclaw.resume, false);
+    });
+  });
+
   describe('sessions: multi-platform aggregate', () => {
     it('lists sessions across comma-separated platforms', async () => {
       const result = await getJson(srv.base, '/api/sessions?platform=omp,codex');

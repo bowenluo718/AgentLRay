@@ -2,19 +2,37 @@
 // Typed from real responses sampled via curl + the legacy UI's field usage
 // (public/js/app.js). Open/evolving shapes carry index signatures.
 
-export type Platform = 'openclaw' | 'codex' | 'claude-code' | 'hermes' | 'omp' | 'dsh' | 'gemini';
+// 平台 id（openclaw / codex / claude-code / hermes / omp / dsh / gemini 等内置
+// id，或自定义平台适配器声明的小写字母 id）。宽 string：允许运行时新增/移除
+// 平台而不改类型；API 路径统一拼 `/api/${id}/...`。
+export type Platform = string;
 
-export const PLATFORMS: Platform[] = ['openclaw', 'codex', 'claude-code', 'hermes', 'omp', 'dsh', 'gemini'];
+/** 平台能力位（与后端 lib/platforms/index.js capabilityBits 一致）。 */
+export interface PlatformCapabilities {
+  list: boolean;
+  find: boolean;
+  parse: boolean;
+  getSession: boolean;
+  collectFiles: boolean;
+  watchParse: boolean;
+  needsAgent: boolean;
+}
 
-export const PLATFORM_LABELS: Record<Platform, string> = {
-  openclaw: 'OpenClaw',
-  codex: 'Codex',
-  'claude-code': 'Claude Code',
-  hermes: 'Hermes',
-  omp: 'OMP',
-  dsh: 'DeepSeek Harness',
-  gemini: 'Gemini CLI',
-};
+/** GET /api/platforms 单条：内置 → 自定义 → broken。broken 条目 id 可能为 null。 */
+export interface PlatformInfo {
+  id: string | null;
+  label: string | null;
+  builtin: boolean;
+  capabilities: PlatformCapabilities;
+  /** 是否声明原生续跑契约（内置三平台，或自定义适配器 resume: { bin, args }）。 */
+  resume: boolean;
+  broken: boolean;
+  /** 仅 broken 条目：加载/校验失败原因。 */
+  error?: string;
+}
+
+/** GET /api/platforms 响应（服务端顺序即展示顺序）。 */
+export type PlatformsResponse = PlatformInfo[];
 
 // ---------- Sessions ----------
 

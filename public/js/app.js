@@ -408,8 +408,33 @@ const PLATFORM_LABELS = {
   dsh: 'DeepSeek Harness',
   gemini: 'Gemini CLI',
 };
+
+// --- 自定义平台（GET /api/platforms 动态并入，最小侵入） ---
+// customPlatforms：builtin:false 且未 broken 的自定义平台（含 label/capabilities），
+// 追加进平台栏展示数组与探活/首启候选；brokenPlatforms：broken 条目（含 error）
+// 仅作徽标展示、不参与会话查询。请求失败静默降级为仅显示内置平台。
+let customPlatforms = []; // PlatformInfo[]（builtin:false && !broken）
+let brokenPlatforms = []; // PlatformInfo[]（builtin:false && broken）
+async function loadCustomPlatforms() {
+  try {
+    const all = await fetchJson('/api/platforms');
+    if (!Array.isArray(all)) return;
+    customPlatforms = all.filter((p) => p && !p.builtin && !p.broken);
+    brokenPlatforms = all.filter((p) => p && !p.builtin && p.broken);
+  } catch {
+    customPlatforms = [];
+    brokenPlatforms = [];
+  }
+}
+// 自定义平台展示名（内置走 PLATFORM_LABELS，此处只管自定义；builtin 的 label 由注册表保证）
+function customPlatformLabel(id) {
+  const p = customPlatforms.find((x) => x.id === id);
+  return p ? p.label || p.id : '';
+}
+
 function platformScopeChip() {
-  return `<span class="scope-chip">📍 当前平台：${PLATFORM_LABELS[state.platform] || state.platform}</span>`;
+  const label = PLATFORM_LABELS[state.platform] || customPlatformLabel(state.platform);
+  return `<span class="scope-chip">📍 当前平台：${label || state.platform}</span>`;
 }
 const platformSessionCounts = {}; // platform id → count (0 = known empty; missing = unknown/probing)
 let platformBarExpanded = false;
@@ -426,6 +451,8 @@ function probePlatformSessionCounts() {
     ['omp', '/api/omp/sessions' + dirQ(state.settings.ompDir)],
     ['dsh', '/api/dsh/sessions' + dirQ(state.settings.dshDir)],
     ['gemini', '/api/gemini/sessions' + dirQ(state.settings.geminiDir)],
+    // 自定义平台无内置 dir 设置，defaultDir 由适配器自行决定，探活不带 ?dir=
+    ...customPlatforms.map((p) => [p.id, '/api/' + p.id + '/sessions']),
   ];
   Promise.all(
     probes.map(
@@ -453,9 +480,10 @@ function renderAgents() {
     dsh: 'DeepSeek Harness sessions',
     gemini: 'Gemini CLI sessions',
   };
-  subtitle.textContent = platformLabels[state.platform] || '';
+  subtitle.textContent =
+    platformLabels[state.platform] || (customPlatformLabel(state.platform) ? customPlatformLabel(state.platform) + ' sessions' : '');
 
-  // Platform tabs
+  // Platform tabs：内置表保持原序，自定义平台按 /api/platforms 返回序追加（内置在前）
   const platforms = [
     { id: 'openclaw', label: 'OpenClaw' },
     { id: 'codex', label: 'Codex' },
@@ -464,6 +492,7 @@ function renderAgents() {
     { id: 'omp', label: 'OMP' },
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'gemini', label: 'Gemini CLI' },
+    ...customPlatforms.map((p) => ({ id: p.id, label: p.label || p.id })),
   ];
   const isCollapsedTab = (p) => p.id !== state.platform && !platformBarExpanded && platformSessionCounts[p.id] === 0;
   const shownPlatforms = platforms.filter((p) => !isCollapsedTab(p));
@@ -486,7 +515,14 @@ function renderAgents() {
       .join('') +
     (collapsedPlatforms.length
       ? `<button class="platform-tab more-tab" id="platformMoreTab" title="暂无会话的平台：${collapsedPlatforms.map((p) => p.label).join('、')} — 点击展开">+${collapsedPlatforms.length}</button>`
-      : '');
+      : '') +
+    // broken 平台：仅徽标展示（悬停 title 显示加载错误），不参与会话查询（无 data-platform）
+    brokenPlatforms
+      .map(
+        (p) =>
+          `<button class="platform-tab broken" title="${escapeHtml(p.error || '平台加载失败')}" data-broken-platform="${escapeHtml(p.id || '')}">⚠ ${escapeHtml(p.label || p.id || '加载失败')}</button>`
+      )
+      .join('');
 
   document.getElementById('platformMoreTab')?.addEventListener('click', () => {
     platformBarExpanded = true;
@@ -4287,6 +4323,10 @@ async function loadSessions(preserveSelection) {
     state.sessions = await fetchJson('/api/dsh/sessions' + dp);
   } else if (state.platform === 'gemini') {
     state.sessions = await fetchJson('/api/gemini/sessions' + dp);
+  } else {
+    // 自定义平台：通用列表端点，有选中 agent 时携带 agent 参数
+    const agentParam = state.selectedAgent ? (dp ? '&' : '?') + 'agent=' + encodeURIComponent(state.selectedAgent) : '';
+    state.sessions = await fetchJson('/api/' + state.platform + '/sessions' + dp + agentParam);
   }
   if (state.platform !== 'openclaw' && Array.isArray(state.sessions))
     platformSessionCounts[state.platform] = state.sessions.length;
@@ -4329,6 +4369,9 @@ async function loadSession() {
     payload = await fetchJson(`/api/dsh/sessions/${encodeURIComponent(state.selectedSessionId)}` + dp);
   } else if (state.platform === 'gemini') {
     payload = await fetchJson(`/api/gemini/sessions/${encodeURIComponent(state.selectedSessionId)}` + dp);
+  } else {
+    // 自定义平台：通用详情端点 /api/:platform/sessions/:id
+    payload = await fetchJson('/api/' + state.platform + '/sessions/' + encodeURIComponent(state.selectedSessionId) + dp);
   }
   state.sessionData = payload;
   // Show all messages if <= 200, otherwise first 60 with load-more
@@ -4636,6 +4679,10 @@ function buildWatchUrl() {
 function startSse() {
   closeSse();
   if (!state.autoRefresh || !state.selectedSessionId) return;
+  // 自定义平台：仅当能力含 watchParse 才发 /api/watch（服务端缺位会 400，避免盲连）；
+  // 内置平台行为不变（存在即发）。
+  const customInfo = customPlatforms.find((p) => p.id === state.platform);
+  if (customInfo && !(customInfo.capabilities && customInfo.capabilities.watchParse)) return;
   const url = buildWatchUrl();
   if (!url) return;
 
@@ -5035,6 +5082,7 @@ document.addEventListener('keydown', async (event) => {
 
 async function initialLoad() {
   loadStatusLabels(); // 单源四态标签（服务端 /api/status-labels）
+  await loadCustomPlatforms(); // 自定义平台先行并入：探活/首启候选/列表都用这份表
   await refreshAll(false);
   // First run without a stored platform: switch to the first platform that has sessions
   if (!hasStoredPlatform && state.platform === 'openclaw' && state.agents.length === 0) {
@@ -5045,6 +5093,8 @@ async function initialLoad() {
       ['hermes', '/api/hermes/sessions', state.settings.hermesDir],
       ['dsh', '/api/dsh/sessions', state.settings.dshDir],
       ['gemini', '/api/gemini/sessions', state.settings.geminiDir],
+      // 自定义平台追加在候选末尾（defaultDir 由适配器决定，无需 dir 参数）
+      ...customPlatforms.map((p) => [p.id, '/api/' + p.id + '/sessions', '']),
     ];
     for (const [platform, endpoint, dir] of candidates) {
       let sessions = [];

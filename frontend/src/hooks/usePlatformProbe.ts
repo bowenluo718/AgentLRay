@@ -4,19 +4,24 @@
 // (all-empty guided state).
 
 import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { getAgents, getSessions } from '@/api/client';
 import type { Platform } from '@/api/types';
-import { PLATFORMS } from '@/api/types';
-import { dirForPlatform, useAppStore } from '@/store';
+import { dirForPlatform, selectablePlatformIds, useAppStore } from '@/store';
 
 export function usePlatformProbe() {
   const settings = useAppStore((s) => s.settings);
+  // 只探测可查询平台（非 broken），自定义平台同样进首启自动挑选候选。
+  // 注意：派生数组在组件内 useMemo（依赖 store 的平台列表引用），避免 zustand
+  // selector 每渲染返回新引用导致无限重渲染。
+  const platforms = useAppStore((s) => s.platforms);
+  const platformIds = useMemo(() => selectablePlatformIds(platforms), [platforms]);
   return useQuery({
-    queryKey: ['platform-probe', settings],
+    queryKey: ['platform-probe', platformIds, settings],
     staleTime: Number.POSITIVE_INFINITY,
     queryFn: async () => {
       const entries = await Promise.all(
-        PLATFORMS.map(async (p) => {
+        platformIds.map(async (p) => {
           try {
             const list =
               p === 'openclaw'

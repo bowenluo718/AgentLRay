@@ -3,11 +3,35 @@
 
 import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { getSessionDetail, getSessions, getSessionsAll } from '@/api/client';
+import { useEffect } from 'react';
+import { fetchPlatforms, getSessionDetail, getSessions, getSessionsAll } from '@/api/client';
 import type { DirSettings } from '@/api/client';
-import { PLATFORMS } from '@/api/types';
 import type { Platform, SessionDetail, SessionSummary } from '@/api/types';
-import { dirForPlatform, useAppStore } from '@/store';
+import { DEMO } from '@/demo/flag';
+import { FALLBACK_PLATFORM_INFOS, dirForPlatform, selectablePlatformIds, useAppStore } from '@/store';
+
+/** 平台列表查询：拉取 GET /api/platforms 并写入 store（含 broken）。展示侧从
+ *  store.platforms 读取派生；拉取失败时 store 保持内置降级表并记录错误信息。 */
+export function usePlatforms() {
+  const setPlatforms = useAppStore((s) => s.setPlatforms);
+  const query = useQuery({
+    queryKey: ['platforms'] as const,
+    // 平台列表通常跨请求不变（增删需重启 server），页面内不重复拉取。
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+    enabled: !DEMO,
+    queryFn: async () => {
+      const data = await fetchPlatforms();
+      setPlatforms(data);
+      return data;
+    },
+  });
+  // TanStack v5 已移除 useQuery 的 onError 回调，经 effect 把失败写入 store。
+  useEffect(() => {
+    if (query.isError) setPlatforms(FALLBACK_PLATFORM_INFOS, (query.error as Error).message);
+  }, [query.isError, query.error, setPlatforms]);
+  return query;
+}
 
 export interface ListScope {
   platform: Platform;
@@ -31,13 +55,20 @@ export function sessionsListOptions(scope: ListScope) {
 }
 
 /** 聚合视图查询：GET /api/sessions?platform=<子集，全选时 all>，铺平为带来源标记的 SessionSummary[]。 */
-export function sessionsAllListOptions(scope: { platformIds: Platform[]; settings: DirSettings }) {
-  const { platformIds, settings } = scope;
-  const all = platformIds.length === PLATFORMS.length;
+export function sessionsAllListOptions(scope: {
+  platformIds: Platform[];
+  settings: DirSettings;
+  /** 运行时可查询平台数（store 派生），用于「全选 → platform=all」判定。 */
+  selectableCount: number;
+}) {
+  const { platformIds, settings, selectableCount } = scope;
+  // 「全部」判定：选择数与运行时可查询平台数一致 → 交给后端 platform=all
+  // （含 openclaw per-agent 展开）；否则按所选子集逗号拼接。
+  const all = platformIds.length > 0 && platformIds.length >= selectableCount;
   return {
     queryKey: ['sessions', 'multi', all ? 'all' : [...platformIds].sort().join(':')] as const,
     queryFn: async (): Promise<SessionSummary[]> => {
-      const result = await getSessionsAll({ platforms: platformIds, dirs: settings });
+      const result = await getSessionsAll({ platforms: all ? [] : platformIds, dirs: settings });
       const flat: SessionSummary[] = [];
       for (const block of result.platforms) {
         for (const session of block.sessions) {
@@ -55,9 +86,10 @@ export function useSessionsList(): UseQueryResult<SessionSummary[]> {
   const agent = useAppStore((s) => s.selectedAgent);
   const settings = useAppStore((s) => s.settings);
   const autoRefresh = useAppStore((s) => s.autoRefresh);
+  const selectableCount = useAppStore((s) => selectablePlatformIds(s.platforms).length);
   const listOptions =
     selectedPlatforms.length > 0
-      ? sessionsAllListOptions({ platformIds: selectedPlatforms, settings })
+      ? sessionsAllListOptions({ platformIds: selectedPlatforms, settings, selectableCount })
       : sessionsListOptions({ platform, agent, settings });
   return useQuery<SessionSummary[]>({
     ...listOptions,

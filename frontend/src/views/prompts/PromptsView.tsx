@@ -9,12 +9,11 @@ import { toast } from 'sonner';
 
 import { getHiddenPrompts, getPromptAnalysis, getPrompts } from '@/api/client';
 import type { PromptAnalysis, PromptCluster } from '@/api/types';
-import { PLATFORM_LABELS } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { clusterPrefillContent } from '@/lib/pure';
-import { HIDE_TRIVIAL_KEY, dirForPlatform, loadStoredFlag, saveStoredFlag, useAppStore } from '@/store';
+import { HIDE_TRIVIAL_KEY, dirForPlatform, loadStoredFlag, platformLabel, saveStoredFlag, useAppStore } from '@/store';
 import { LibraryFormDialog, heuristicLibraryName } from '@/views/library/LibraryFormDialog';
 
 import { PromptGroupSection } from './PromptGroupSection';
@@ -32,6 +31,7 @@ export function PromptsView() {
   const platform = useAppStore((s) => s.platform);
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const settings = useAppStore((s) => s.settings);
+  const platforms = useAppStore((s) => s.platforms);
   const setView = useAppStore((s) => s.setView);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
   const openLibraryForm = useAppStore((s) => s.openLibraryForm);
@@ -186,7 +186,7 @@ export function PromptsView() {
 
       <div className="text-xs text-muted-foreground">
         <span className="mr-1 rounded-full border border-border bg-secondary px-2 py-0.5">
-          📍 当前平台：{PLATFORM_LABELS[platform] || platform}
+          📍 当前平台：{platformLabel(platforms, platform)}
         </span>
         从会话历史自动提取的真人 prompt（已过滤工具输出与系统注入），按目录分组 — 每条可 ⭐
         收藏入库、「优化」用 Claude 改写 · {data.totalPrompts} prompts / {data.totalSessions} sessions /{' '}

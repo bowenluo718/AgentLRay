@@ -3,7 +3,8 @@
 //
 //   list   按条件查询会话列表（全部平台；openclaw 缺省 --agent = 合并全部 agents）
 //   show   查看单个会话详细信息（会话元信息 + 消息时间线；openclaw 缺省 --agent 跨 agent 查找）
-//   resume 生成并（可选）执行续跑命令（仅 codex / claude-code / omp 有原生续跑）
+//   resume 生成并（可选）执行续跑命令（内置 codex / claude-code / omp；
+//          自定义平台可经适配器 resume opt-in 接入）
 //
 // 与 inspect.js 相同的输出约定：--json 输出 {schemaVersion:1,…}，错误为
 // {schemaVersion:1, kind:'error', error:{code,message}}；退出码 0 = 命令成功
@@ -14,7 +15,7 @@ const path = require('path');
 const { spawn } = require('child_process');
 const { PLATFORMS } = require('../lib/platforms');
 const { resolveDir } = require('../lib/config');
-const { resolveCliBin } = require('../lib/cli-bins');
+const { hasResumeContract, buildResumeCommand } = require('../lib/resume');
 const { setStatusConfig } = require('../lib/status');
 const { loadStatusConfig } = require('../lib/status-config');
 const { findOmpSessionFile } = require('../lib/platforms/omp');
@@ -35,7 +36,7 @@ const HELP = `Usage:
                             [--since ISO] [--until ISO] [--limit N] [--offset N] [--json]
   agentlray sessions show   [--platform <p>] --id <SESSION_ID> [--agent NAME] [--dir PATH]
                             [--tail N] [--full] [--json]
-  agentlray sessions resume [--platform <codex|claude-code|omp>] --id <SESSION_ID>
+  agentlray sessions resume [--platform <p>] --id <SESSION_ID>
                             [--dir PATH] [--cwd PATH] [--message TEXT] [--run] [--json]
 
 list:   按条件查询会话列表，支持一次查多个平台：--platform 逗号分隔多值（omp,codex）
@@ -49,17 +50,18 @@ list:   按条件查询会话列表，支持一次查多个平台：--platform �
 show:   查看单个会话的元信息与归一化消息时间线（openclaw 未传 --agent 时跨全部
         agents 查找该 id，JSON 含 agent 归属）。
 resume: 生成该会话在原 CLI 中的续跑命令（codex resume / claude --resume /
-        omp --resume=），默认只打印命令不执行；加 --run 才真正 spawn 平台 CLI
-        执行并透传 stdin/stdout 与退出码。统一语义：**同 id 续跑、不接受派生**——
-        codex/claude 原生同 id 续写；omp 目标若正被运行中的 omp 实例以 --resume
-        持有（会话非空闲，续跑必派生），--run 会拒绝并在提示中给出持有进程 pid，
-        请先结束该实例（退出其终端令会话 dispose）再续跑。仅这三平台有原生续跑
-        契约，其余平台 resume 报错。
+        omp --resume= / 自定义平台 resume 生成器），默认只打印命令不执行；加
+        --run 才真正 spawn 平台 CLI 执行并透传 stdin/stdout 与退出码。统一语义：
+        **同 id 续跑、不接受派生**——codex/claude 原生同 id 续写；omp 目标若正被
+        运行中的 omp 实例以 --resume 持有（会话非空闲，续跑必派生），--run 会拒绝
+        并在提示中给出持有进程 pid，请先结束该实例（退出其终端令会话 dispose）再
+        续跑。内置仅 codex/claude-code/omp 有原生续跑契约；自定义平台需适配器声明
+        resume（bin + args(id,opts)），缺省则 resume 报错。
 
 公共参数：
-  --platform <p>  可选。list/show 支持逗号分隔多平台或 all（全部平台）；resume 仅
-                  codex|claude-code|omp。缺省使用页面持久化的平台数据（看板 /api/settings/ui
-                  落盘的 ~/.agentlray/ui-settings.json）：list 用持久化的多选集合（单平台模式用
+  --platform <p>  可选。list/show 支持逗号分隔多平台或 all（全部平台）；resume 支持
+                  内置 codex|claude-code|omp 或声明了 resume 的自定义平台。缺省使用页面持久化的平台数据（看板
+                  /api/settings 落盘的 ~/.agentlray/settings.json）：list 用持久化的多选集合（单平台模式用
                   platform，未持久化或全选时 = all）；show/resume 用持久化的单平台，无该数据则
                   报错要求显式指定。
   --id <ID>       会话 id（show/resume）
@@ -164,16 +166,6 @@ function sanitizeNonNegInt(value, flag) {
 // 终端纯文本对齐：按码点位宽 padEnd（CJK 在等宽终端为双宽，这里只做近似对齐）。
 function pad(text, width) {
   return String(text).padEnd(width);
-}
-
-function shellQuote(text) {
-  return `'${String(text).replace(/'/g, `'\\''`)}'`;
-}
-
-// 仅对含空格/引号等特殊字符的 token 加引号，安全且可读（与前端 resume 展示一致）。
-function shellToken(text) {
-  const s = String(text);
-  return /^[A-Za-z0-9_./:=@%,+-]+$/.test(s) && s.length > 0 ? s : shellQuote(s);
 }
 
 function labelFor(status) {
@@ -541,14 +533,8 @@ async function showSession(opts, json) {
 
 // --- resume ---
 
-// 各平台 resume 的原生续跑参数生成器。实际可执行命令（bin）由
-// resolveCliBin() 在运行时解析：环境变量 → ~/.agentlray/cli-bins.json（web
-// 设置面板）→ 默认命令名，见 lib/cli-bins.js。
-const RESUME_BINS = {
-  codex: { args: (id) => ['resume', id, '--yolo'] },
-  'claude-code': { args: (id) => ['--dangerously-skip-permissions', '--resume', id] },
-  omp: { args: (id) => ['--auto-approve', `--resume=${id}`] },
-};
+// 原生续跑参数生成器与命令串构建的统一真源在 lib/resume.js（RESUME_BINS +
+// hasResumeContract + buildResumeCommand），CLI 与 web「复制恢复命令」共用。
 
 function runChild(bin, args, cwd) {
   return new Promise((resolvePromise) => {
@@ -564,15 +550,14 @@ function runChild(bin, args, cwd) {
 
 async function resumeSession(opts, json) {
   const platform = resolvePlatform(opts.platform);
-  const spec = RESUME_BINS[platform.id];
-  if (!spec) {
+  if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
+  // 无原生续跑契约的平台快速失败（内置三平台，或自定义 resume opt-in；契约判断
+  // 与命令串构建统一在 lib/resume.js，避免此处与 web 端点各维护一份）。
+  if (!hasResumeContract(platform)) {
     throw new Error(
       `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp are supported.`
     );
   }
-  // 可执行命令：环境变量 → ~/.agentlray/cli-bins.json（web 设置面板）→ 默认名。
-  const bin = await resolveCliBin(platform.id);
-  if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
 
   const dir = resolveDir(opts.dir, platform.defaultDir());
   const payload = await platform.getSession(dir, opts.id);
@@ -617,9 +602,8 @@ async function resumeSession(opts, json) {
     }
   }
 
-  const args = spec.args(opts.id);
-  if (opts.message != null) args.push(String(opts.message));
-  const command = `${cwd ? `cd ${shellQuote(cwd)} && ` : ''}${bin} ${args.map(shellToken).join(' ')}`;
+  // 构建命令串（bin/args/command 单一真源，见 lib/resume.js buildResumeCommand）。
+  const { bin, args, command } = await buildResumeCommand(platform, opts.id, { ...opts, cwd });
 
   if (!opts.run) {
     if (json) {

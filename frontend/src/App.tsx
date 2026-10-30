@@ -8,6 +8,7 @@ import { useVersionPoller } from '@/hooks/useVersionPoller';
 import { DEMO } from '@/demo/flag';
 import { useAppStore } from '@/store';
 import type { MainView } from '@/store';
+import { usePlatforms } from '@/views/sessions/queries';
 import { InsightsView } from '@/views/insights/InsightsView';
 import { LibraryView } from '@/views/library/LibraryView';
 import { PromptsView } from '@/views/prompts/PromptsView';
@@ -22,6 +23,7 @@ const TABS: { view: MainView; label: string; title: string }[] = [
 ];
 
 export default function App() {
+  usePlatforms(); // 服务端平台列表驱动（结果写入 store）
   useVersionPoller();
   const view = useAppStore((s) => s.view);
   const setView = useAppStore((s) => s.setView);

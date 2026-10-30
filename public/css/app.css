@@ -2715,6 +2715,7 @@
     .insights-scope-seg .seg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
     .platform-tab.more-tab { color: var(--muted); opacity: 0.7; }
+    .platform-tab.broken { color: var(--danger); opacity: 0.85; cursor: not-allowed; }
 
     /* --- Unified toast (top-right, auto-dismiss, stacks) --- */
     #toastHolder {

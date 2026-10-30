@@ -52,6 +52,30 @@ async function makeFakeBin(home, bin, exitCode = 0, outFile) {
   return bindir;
 }
 
+// 在 temp HOME 写入自定义平台适配器 my-copilot（cli 子进程 require 期经
+// lib/platforms/loader.js 并入注册表）。withResume=false 时不声明 resume
+//（→ 「无原生续跑」）；bin 为 resume.bin 默认命令名。
+async function addCustomPlatform(home, { withResume = true, bin = 'my-copilot-cli' } = {}) {
+  const dir = path.join(home, '.agentlray', 'platforms');
+  await fsp.mkdir(dir, { recursive: true });
+  const resume = withResume
+    ? `  resume: {\n    bin: ${JSON.stringify(bin)},\n    args: (id) => ['--resume', id],\n  },\n`
+    : '';
+  const source = `module.exports = {
+  id: 'my-copilot',
+  label: 'My Copilot',
+  defaultDir: () => '/fixtures/my-copilot',
+  list: async () => [],
+  parse: async () => null,
+  getSession: async (_dir, sessionId) =>
+    sessionId === 'mp-1234'
+      ? { session: { id: sessionId, cwd: '/fixtures/project-mp' }, messages: [] }
+      : null,
+${resume}};
+`;
+  await fsp.writeFile(path.join(dir, 'my-copilot.js'), source);
+}
+
 // 判定进程仍存活：已消失或已成僵尸（终止待回收）都视为不再运行。
 function isAlive(pid) {
   try {
@@ -425,6 +449,92 @@ test('sessions resume 读取 web 设置面板写入的 settings.json cliBins（�
     { AGENTLRAY_CODEX_BIN: '/override/bin/codex' }
   );
   assert.equal(JSON.parse(env.stdout).bin, '/override/bin/codex');
+});
+
+test('sessions resume 自定义平台声明 resume 时生成续跑命令（bin=resume.bin，args 正确）', async () => {
+  const home = await makeTmpHome();
+  await addCustomPlatform(home);
+
+  const res = runCli(home, ['sessions', 'resume', '--platform', 'my-copilot', '--id', 'mp-1234', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'resume');
+  assert.equal(doc.platform, 'my-copilot');
+  assert.equal(doc.executed, false);
+  assert.equal(doc.bin, 'my-copilot-cli');
+  assert.deepEqual(doc.args, ['--resume', 'mp-1234']);
+  assert.equal(doc.cwd, '/fixtures/project-mp');
+  assert.equal(doc.command, "cd '/fixtures/project-mp' && my-copilot-cli --resume mp-1234");
+});
+
+test('sessions resume 自定义平台 settings.json cliBins 的 <id> 键覆盖 resume.bin', async () => {
+  const home = await makeTmpHome();
+  await addCustomPlatform(home);
+  await fsp.mkdir(path.join(home, '.agentlray'), { recursive: true });
+  await fsp.writeFile(path.join(home, '.agentlray', 'settings.json'), JSON.stringify({ cliBins: { 'my-copilot': '/override/bin/mycopilot' } }));
+
+  const res = runCli(home, ['sessions', 'resume', '--platform', 'my-copilot', '--id', 'mp-1234', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.bin, '/override/bin/mycopilot');
+  assert.match(doc.command, /\/override\/bin\/mycopilot --resume mp-1234/);
+});
+
+test('sessions resume 自定义平台 AGENTLRAY_<ID>_BIN 环境变量 > settings.json cliBins > resume.bin', async () => {
+  const home = await makeTmpHome();
+  await addCustomPlatform(home);
+  await fsp.mkdir(path.join(home, '.agentlray'), { recursive: true });
+  await fsp.writeFile(path.join(home, '.agentlray', 'settings.json'), JSON.stringify({ cliBins: { 'my-copilot': '/file/bin/mycopilot' } }));
+
+  // 仅文件覆盖 → 文件值（高于 resume.bin 默认）
+  const fromFile = runCli(home, ['sessions', 'resume', '--platform', 'my-copilot', '--id', 'mp-1234', '--json']);
+  assert.equal(JSON.parse(fromFile.stdout).bin, '/file/bin/mycopilot');
+
+  // env + 文件同时存在 → env 优先
+  const fromEnv = runCli(
+    home,
+    ['sessions', 'resume', '--platform', 'my-copilot', '--id', 'mp-1234', '--json'],
+    { AGENTLRAY_MY_COPILOT_BIN: '/env/bin/mycopilot' }
+  );
+  assert.equal(JSON.parse(fromEnv.stdout).bin, '/env/bin/mycopilot');
+});
+
+test('sessions resume 自定义平台 --run 真实 spawn resume.bin 与 args', async () => {
+  const home = await makeTmpHome();
+  await addCustomPlatform(home);
+  const fakeLog = path.join(home, 'fake-custom.log');
+  const bindir = await makeFakeBin(home, 'my-copilot-cli', 0, fakeLog);
+  const workdir = path.join(home, 'work');
+  await fsp.mkdir(workdir, { recursive: true });
+
+  const res = runCli(
+    home,
+    ['sessions', 'resume', '--platform', 'my-copilot', '--id', 'mp-1234', '--run', '--cwd', workdir, '--message', 'go on', '--json'],
+    { PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` }
+  );
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.executed, true);
+  assert.equal(doc.bin, 'my-copilot-cli');
+  // 假平台 CLI 被真实调用：args 含 --resume <id> 与追加消息
+  const log = await fsp.readFile(fakeLog, 'utf8');
+  assert.match(log, /arg:--resume/);
+  assert.match(log, /arg:mp-1234/);
+  assert.match(log, /arg:go on/);
+  assert.match(log, new RegExp(`cwd:${workdir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});
+
+test('sessions resume 自定义平台未声明 resume 报「无原生续跑」', async () => {
+  const home = await makeTmpHome();
+  await addCustomPlatform(home, { withResume: false });
+
+  const res = runCli(home, ['sessions', 'resume', '--platform', 'my-copilot', '--id', 'mp-1234', '--json']);
+  assert.equal(res.status, 1);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'error');
+  assert.equal(doc.error.code, 'usage');
+  assert.match(doc.error.message, /no native resume command/);
+  assert.match(res.stderr, /no native resume command/);
 });
 
 test('sessions resume --run 真实 spawn 平台 CLI、透传退出码', async () => {

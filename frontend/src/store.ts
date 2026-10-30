@@ -1,9 +1,70 @@
 import { create } from 'zustand';
 import { saveUiSettings } from '@/api/client';
 import type { DirSettings } from '@/api/client';
-import type { Platform } from '@/api/types';
-import { PLATFORMS } from '@/api/types';
+import type { Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
 import { DEMO } from '@/demo/flag';
+
+// —— 平台列表降级表 ——
+// 平台列表以运行时 GET /api/platforms 为唯一真源（内置 → 自定义 → broken）。
+// 仅当拉取失败（如后端不可达）时降级到下面的内置 7 平台表，与 legacy
+// public/js/app.js 的内置表一致，避免页面在端点故障下完全不可用。
+
+const BUILTIN_CAPS: PlatformCapabilities = {
+  list: true,
+  find: true,
+  parse: true,
+  getSession: true,
+  collectFiles: true,
+  watchParse: true,
+  needsAgent: false,
+};
+
+export const FALLBACK_PLATFORM_INFOS: PlatformInfo[] = [
+  { id: 'openclaw', label: 'OpenClaw', builtin: true, capabilities: { ...BUILTIN_CAPS, list: false, needsAgent: true }, resume: false, broken: false },
+  { id: 'codex', label: 'Codex', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
+  { id: 'claude-code', label: 'Claude Code', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
+  { id: 'hermes', label: 'Hermes', builtin: true, capabilities: { list: true, find: false, parse: false, getSession: true, collectFiles: false, watchParse: false, needsAgent: false }, resume: false, broken: false },
+  { id: 'omp', label: 'OMP', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
+  { id: 'dsh', label: 'DeepSeek Harness', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, broken: false },
+  { id: 'gemini', label: 'Gemini CLI', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, broken: false },
+];
+
+const EMPTY_CAPABILITIES: PlatformCapabilities = {
+  list: false, find: false, parse: false, getSession: false, collectFiles: false, watchParse: false, needsAgent: false,
+};
+
+// —— 平台列表派生 ——
+// 入参为 store.platforms 的运行时列表；组件经 useAppStore((s) => s.platforms) 取数后调用。
+
+/** 可查询平台 id（非 broken 且有 id），保留服务端顺序。 */
+export function selectablePlatformIds(infos: PlatformInfo[]): string[] {
+  return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null).map((p) => p.id);
+}
+
+/** 可查询平台条目（非 broken 且有 id），保留服务端顺序。 */
+export function selectablePlatforms(infos: PlatformInfo[]): Array<PlatformInfo & { id: string }> {
+  return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null);
+}
+
+/** 自定义平台（非内置、非 broken），按服务端顺序。 */
+export function customPlatforms(infos: PlatformInfo[]): PlatformInfo[] {
+  return selectablePlatforms(infos).filter((p) => !p.builtin);
+}
+
+/** broken 平台（适配器加载/校验失败），按服务端顺序。 */
+export function brokenPlatforms(infos: PlatformInfo[]): PlatformInfo[] {
+  return infos.filter((p) => p.broken);
+}
+
+/** 平台 id → 展示名；未知 id 回退 id 本身。 */
+export function platformLabel(infos: PlatformInfo[], id: string): string {
+  return selectablePlatforms(infos).find((p) => p.id === id)?.label ?? id;
+}
+
+/** 平台能力位；未知 id → 全 false。 */
+export function capabilitiesOf(infos: PlatformInfo[], id: string): PlatformCapabilities {
+  return selectablePlatforms(infos).find((p) => p.id === id)?.capabilities ?? EMPTY_CAPABILITIES;
+}
 
 // Settings persist to the SAME localStorage key/shape as the legacy app
 // (public/js/app.js SETTINGS_KEY) so both UIs share settings:
@@ -58,6 +119,9 @@ export function dirForPlatform(settings: DirSettings, platform: Platform): strin
       return settings.dshDir;
     case 'gemini':
       return settings.geminiDir;
+    default:
+      // 自定义平台无每平台目录配置（目录由适配器 defaultDir 决定）。
+      return '';
   }
 }
 
@@ -84,8 +148,9 @@ function loadPersisted(): {
     settings: { ...EMPTY_SETTINGS },
     platform: defaultPlatform,
     hasStoredPlatform: false,
-    // 无持久化选择时默认「全部平台」（聚合视图）。
-    selectedPlatforms: [...PLATFORMS],
+    // 无持久化选择时默认「全部平台」（聚合视图）。平台列表加载成功后 setPlatforms
+    // 会把选择收敛/扩展到运行时列表（含自定义平台）。
+    selectedPlatforms: selectablePlatformIds(FALLBACK_PLATFORM_INFOS),
     groupBy: 'none',
     projectFilter: [],
     collapsedGroups: { platform: [], project: [], none: [] },
@@ -101,13 +166,15 @@ function loadPersisted(): {
       result.settings.ompDir = typeof parsed.ompDir === 'string' ? parsed.ompDir : '';
       result.settings.dshDir = typeof parsed.dshDir === 'string' ? parsed.dshDir : '';
       result.settings.geminiDir = typeof parsed.geminiDir === 'string' ? parsed.geminiDir : '';
-      if (PLATFORMS.includes(parsed.platform as Platform)) {
-        result.platform = parsed.platform as Platform;
+      // 持久化的单平台接受任意非空字符串（可能是自定义平台 id，加载时无法对运行时
+      // 列表校验；由 setPlatforms 在列表就绪后收敛）。旧存储无该键 → 默认平台。
+      if (typeof parsed.platform === 'string' && parsed.platform.trim() !== '') {
+        result.platform = parsed.platform.trim();
         result.hasStoredPlatform = true;
       }
       // 显式持久化的平台多选与 UI 偏好（旧存储无这些键 → 各自默认值）。
       if (Array.isArray(parsed.selectedPlatforms)) {
-        const picked = parsed.selectedPlatforms.filter((p): p is Platform => PLATFORMS.includes(p as Platform));
+        const picked = parsed.selectedPlatforms.filter((x): x is string => typeof x === 'string');
         result.selectedPlatforms = picked;
       }
       if (parsed.groupBy === 'platform' || parsed.groupBy === 'project') {
@@ -151,7 +218,9 @@ function parseDetailFromUrl(): { detailPlatform?: Platform; detailAgent?: string
     const params = new URLSearchParams(window.location.search);
     const platform = params.get(URL_PARAM_SESSION);
     const sid = params.get(URL_PARAM_SID);
-    if (!platform || !PLATFORMS.includes(platform as Platform) || !sid) return {};
+    // 平台 id 遵循适配器契约正则（^[a-z0-9][a-z0-9-]*$）；加载时无法对运行时列表
+    // 校验，只挡明显非法值（防路径注入），合法与否由列表就绪后的 setPlatforms 收敛。
+    if (!platform || !/^[a-z0-9][a-z0-9-]*$/.test(platform) || !sid) return {};
     return {
       detailPlatform: platform as Platform,
       detailAgent: params.get(URL_PARAM_AGENT) || '',
@@ -270,7 +339,13 @@ interface AppState {
   /** Sidebar toggles (sessions view): 5s list polling + SSE tail / scroll-to-top on new messages. */
   autoRefresh: boolean;
   autoScroll: boolean;
+  /** 运行时平台列表（GET /api/platforms，含 broken）；拉取失败保持内置降级表。 */
+  platforms: PlatformInfo[];
+  /** /api/platforms 拉取失败的错误信息（有则展示降级提示）。 */
+  platformsError: string | null;
 
+  /** 写入运行时平台列表，并把当前平台选择收敛到可查询集合（见实现注释）。 */
+  setPlatforms: (infos: PlatformInfo[], error?: string | null) => void;
   setPlatform: (platform: Platform) => void;
   /** 切换某个平台是否被选入聚合视图；保持至少一个平台（取消最后一个会退回单平台模式）。
    *  返回新的选中集合。 */
@@ -327,7 +402,35 @@ export const useAppStore = create<AppState>((set, get) => ({
   pendingScrollMsgId: null,
   autoRefresh: true,
   autoScroll: false,
+  platforms: FALLBACK_PLATFORM_INFOS,
+  platformsError: null,
 
+  setPlatforms: (infos, error = null) => {
+    const state = get();
+    const ids = new Set(selectablePlatformIds(infos));
+    // 单平台：当前平台失效（如自定义平台文件被删/broken）→ 回退默认平台。
+    let platform = state.platform;
+    if (!ids.has(platform)) {
+      platform = ids.has('openclaw') ? 'openclaw' : (DEMO ? 'claude-code' : selectablePlatformIds(infos)[0] ?? 'openclaw');
+    }
+    // 多选：显式子集只剔除失效项；默认「全部」（选择数与加载前可查询数一致）扩展到
+    // 运行时列表（含新增自定义平台）；单平台模式（[]）保持，除非当前平台失效。
+    let selectedPlatforms = state.selectedPlatforms;
+    if (selectedPlatforms.length > 0) {
+      const kept = selectedPlatforms.filter((p) => ids.has(p));
+      const beforeCount = selectablePlatformIds(state.platforms).length;
+      const wasAll = selectedPlatforms.length === beforeCount;
+      selectedPlatforms = kept.length === 0 || wasAll ? selectablePlatformIds(infos) : kept;
+    }
+    const detailPlatform = ids.has(state.detailPlatform) ? state.detailPlatform : platform;
+    const changed =
+      platform !== state.platform ||
+      selectedPlatforms.join('|') !== state.selectedPlatforms.join('|') ||
+      detailPlatform !== state.detailPlatform;
+    set({ platforms: infos, platformsError: error, platform, selectedPlatforms, detailPlatform });
+    // 收敛导致选择变化时回写持久化（localStorage + 服务端 ui-settings），保持单选/多选一致。
+    if (changed) persistState();
+  },
   setPlatform: (platform) => {
     if (platform === get().platform && get().selectedPlatforms.length === 0) return;
     // Mirrors legacy platform switch: clear agent/session selection.
@@ -403,7 +506,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   selectAllPlatforms: () => {
     set({
-      selectedPlatforms: [...PLATFORMS],
+      selectedPlatforms: selectablePlatformIds(get().platforms),
       selectedAgent: '',
       selectedSessionId: '',
       sessionView: 'messages',

@@ -3,18 +3,18 @@
 
 import { Settings, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { PLATFORM_LABELS } from '@/api/types';
 import { SessionFiltersDialog } from '@/components/SessionFiltersDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { useAppStore } from '@/store';
+import { platformLabel, useAppStore } from '@/store';
 import { CmdkDialog } from '@/views/sessions/CmdkDialog';
 import { SessionList } from '@/views/sessions/SessionList';
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const platform = useAppStore((s) => s.platform);
   const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
+  const platforms = useAppStore((s) => s.platforms);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filterTerm, setFilterTerm] = useState('');
@@ -41,7 +41,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         <div>
           <h1 className="text-lg font-semibold tracking-wide">AgentLRay</h1>
           <div className="text-xs text-muted-foreground">
-            {multi ? `全部平台（${selectedPlatforms.length}）` : PLATFORM_LABELS[platform]} sessions
+            {multi ? `全部平台（${selectedPlatforms.length}）` : platformLabel(platforms, platform)} sessions
           </div>
         </div>
         <div className="flex items-center gap-1">

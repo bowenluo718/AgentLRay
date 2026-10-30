@@ -17,6 +17,7 @@ import type {
   LibraryUsageData,
   OtlpExport,
   Platform,
+  PlatformInfo,
   PromptAnalysis,
   PromptsData,
   RewriteResult,
@@ -30,7 +31,6 @@ import type {
   ToolsAudit,
   VersionInfo,
 } from './types';
-import { PLATFORMS } from './types';
 import { DEMO } from '@/demo/flag';
 import { demoJson } from '@/demo/router';
 
@@ -73,6 +73,13 @@ function requestJson<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body?: u
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+}
+
+// ---------- Platforms ----------
+
+/** GET /api/platforms — 内置 + 自定义 + broken 一体列表（服务端驱动单一真源）。 */
+export function fetchPlatforms(): Promise<PlatformInfo[]> {
+  return fetchJson('/api/platforms');
 }
 
 // ---------- Sessions ----------
@@ -129,9 +136,10 @@ export function getSessionsAll(
     offset?: number;
   } = {}
 ): Promise<SessionsListResponse> {
-  const allPlatforms = !opts.platforms || opts.platforms.length === PLATFORMS.length;
+  // platforms 缺省/空数组 = 全部平台（`platform=all`）；非空子集用逗号拼接。
+  const allPlatforms = !opts.platforms || opts.platforms.length === 0;
   const params: Record<string, ParamValue> = {
-    platform: allPlatforms ? 'all' : opts.platforms!.join(','),
+    platform: allPlatforms ? 'all' : (opts.platforms ?? []).join(','),
     agent: opts.agent || undefined,
     status: opts.status,
     match: opts.match,
@@ -158,6 +166,32 @@ export function getSessionDetail(
         ? `/api/agents/${encodeURIComponent(opts.agent || '')}/sessions`
         : `/api/${platform}/sessions`;
   return fetchJson(withParams(`${base}/${encodeURIComponent(sessionId)}`, { dir: opts.dir }));
+}
+
+/** GET /api/:platform/sessions/:id/resume-command — 会话详情「复制恢复命令」。
+ * 命令串与 CLI（bin/sessions.js resume）同源（后端 lib/resume.js 单一真源），
+ * 自定义平台（适配器 resume opt-in）的 args 是后端 JS，前端无法本地拼，必须走后端。
+ * supported=false（平台无原生续跑契约）时无 command。 */
+export interface ResumeCommandResult {
+  supported: boolean;
+  bin?: string;
+  args?: string[];
+  command?: string;
+  error?: string;
+}
+
+/** 复制在终端恢复指定会话的命令；cwd 缺省时命令不含 cd 前缀。 */
+export function getResumeCommand(
+  platform: Platform,
+  sessionId: string,
+  cwd?: string | null
+): Promise<ResumeCommandResult> {
+  return fetchJson(
+    withParams(
+      `/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/resume-command`,
+      { cwd: cwd || undefined }
+    )
+  );
 }
 
 /** Spawned sub-agents of a session (omp / claude-code only). */

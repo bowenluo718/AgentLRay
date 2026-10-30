@@ -4,7 +4,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { getAgents } from '@/api/client';
-import { PLATFORM_LABELS, PLATFORMS } from '@/api/types';
 import type { Platform } from '@/api/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -21,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { useAppStore } from '@/store';
+import { brokenPlatforms, selectablePlatforms, useAppStore } from '@/store';
 import type { GroupBy } from '@/store';
 import { buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
 import { useSessionsList } from '@/views/sessions/queries';
@@ -31,7 +30,8 @@ const chipBase =
 const chipActive = 'border-primary/60 bg-primary/15 text-foreground';
 const chipIdle = 'border-border bg-transparent text-muted-foreground hover:border-primary/40 hover:text-foreground';
 
-const PLATFORM_TIPS: Record<Platform, string> = {
+// 内置平台悬停提示；自定义平台无条目 → 用通用提示兜底。
+const PLATFORM_TIPS: Partial<Record<string, string>> = {
   openclaw: 'OpenClaw 会话（~/.openclaw/agents）',
   codex: 'Codex 会话（~/.codex/sessions）',
   'claude-code': 'Claude Code 会话（~/.claude/projects）',
@@ -73,15 +73,19 @@ function ToggleRow({
   );
 }
 
-/** 平台筛选：全部 + 多选。空白态默认全部平台。 */
+/** 平台筛选：全部 + 多选。空白态默认全部平台。运行时列表（服务端顺序），
+ *  broken 平台不进入可选项，单独以徽标 + 错误列出（不可交互启停）。 */
 function PlatformNav() {
   const platform = useAppStore((s) => s.platform);
   const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
   const setPlatform = useAppStore((s) => s.setPlatform);
   const togglePlatform = useAppStore((s) => s.togglePlatform);
   const selectAllPlatforms = useAppStore((s) => s.selectAllPlatforms);
+  const platforms = useAppStore((s) => s.platforms);
+  const selectable = selectablePlatforms(platforms);
+  const broken = brokenPlatforms(platforms);
   const multi = selectedPlatforms.length > 0;
-  const allSelected = multi && selectedPlatforms.length === PLATFORMS.length;
+  const allSelected = multi && selectedPlatforms.length === selectable.length;
   const active = (p: Platform) => (multi ? selectedPlatforms.includes(p) : p === platform);
   return (
     <div className="space-y-1.5">
@@ -96,19 +100,39 @@ function PlatformNav() {
         >
           全部
         </button>
-        {PLATFORMS.map((p) => (
+        {selectable.map((p) => (
           <button
-            key={p}
+            key={p.id}
             type="button"
-            aria-pressed={active(p)}
-            onClick={() => togglePlatform(p)}
-            title={PLATFORM_TIPS[p]}
-            className={cn(chipBase, active(p) ? chipActive : chipIdle)}
+            aria-pressed={active(p.id)}
+            onClick={() => togglePlatform(p.id)}
+            title={PLATFORM_TIPS[p.id] ?? `${p.label ?? p.id} 会话（自定义平台）`}
+            className={cn(chipBase, active(p.id) ? chipActive : chipIdle)}
           >
-            {PLATFORM_LABELS[p]}
+            {p.label ?? p.id}
           </button>
         ))}
       </div>
+      {broken.length > 0 ? (
+        <div className="space-y-1 rounded border border-dashed border-amber-500/40 bg-amber-500/5 px-2 py-1.5" data-testid="broken-platforms">
+          <SectionLabel>异常平台（加载失败，不可查询）</SectionLabel>
+          {broken.map((b) => (
+            <div
+              key={b.id ?? 'unknown'}
+              className="flex items-start gap-1.5 text-[11px]"
+              title={b.error ?? '适配器加载失败'}
+            >
+              <span
+                className="shrink-0 rounded border border-amber-500/50 bg-amber-500/10 px-1 py-px text-[10px] font-medium text-amber-500"
+                data-testid="broken-platform-badge"
+              >
+                ⚠ {b.id ?? '未知'}
+              </span>
+              <span className="break-all text-muted-foreground">{b.error ?? '加载失败'}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
