@@ -77,7 +77,7 @@ type SectionKey = 'llm' | 'cliBins' | 'status' | 'kanban';
 // 全对话框单一 draft：所有 tab 的待保存输入。服务器 section 的「空串 = 回默认」。
 interface Draft {
   dirs: DirSettings;
-  llm: { baseUrl: string; model: string; apiKey: string };
+  llm: { baseUrl: string; model: string; apiKey: string; analysisTimeoutMs: string };
   cliBins: Partial<Record<string, string>>;
   status: Partial<Record<StatusKey, string>>;
   kanban: string;
@@ -86,7 +86,7 @@ interface Draft {
 function emptyDraft(): Draft {
   return {
     dirs: { ...EMPTY_SETTINGS },
-    llm: { baseUrl: '', model: '', apiKey: '' },
+    llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
     cliBins: {},
     status: {},
     kanban: '',
@@ -115,7 +115,7 @@ function BackupSection() {
   return (
     <div className="space-y-1.5">
       <label className="text-xs text-muted-foreground">
-        会话备份（codex / claude-code / omp 增量归档）
+        会话备份（codex / claude-code / omp / dsh / gemini 增量归档）
       </label>
       <div className="flex items-center gap-2.5">
         <Button
@@ -195,7 +195,14 @@ export function SettingsDialog({
     const settings = useAppStore.getState().settings;
     setDraft({
       dirs: { ...settings },
-      llm: { baseUrl: all.data?.llm.baseUrl ?? '', model: all.data?.llm.model ?? '', apiKey: '' },
+      llm: {
+        baseUrl: all.data?.llm.baseUrl ?? '',
+        model: all.data?.llm.model ?? '',
+        apiKey: '',
+        analysisTimeoutMs: all.data?.llm.analysisTimeoutMs
+          ? String(Math.round(all.data.llm.analysisTimeoutMs / 60_000))
+          : '',
+      },
       cliBins: {},
       status: {},
       kanban: '',
@@ -271,11 +278,19 @@ export function SettingsDialog({
     }
     if (touched.llm) {
       const baseUrl = draft.llm.baseUrl.trim();
+      const timeoutRaw = draft.llm.analysisTimeoutMs.trim();
+      // 分钟→毫秒；空/非法 = 0 → 服务端清除该键回默认。
+      let analysisTimeoutMs = 0;
+      if (timeoutRaw !== '') {
+        const n = Number(timeoutRaw);
+        if (Number.isFinite(n) && n > 0) analysisTimeoutMs = Math.round(n * 60_000);
+      }
       patch.llm = {
         baseUrl,
         model: draft.llm.model.trim(),
         // apiKey 语义：非空 = 替换；空时 baseUrl 非空 = 保留服务器密钥，baseUrl 空 = 清除。
         apiKey: draft.llm.apiKey !== '' ? draft.llm.apiKey : baseUrl ? undefined : '',
+        analysisTimeoutMs,
       };
     }
     return patch;
@@ -299,7 +314,7 @@ export function SettingsDialog({
   const reset = () => {
     setDraft({
       dirs: { ...EMPTY_SETTINGS },
-      llm: { baseUrl: '', model: '', apiKey: '' },
+      llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
       cliBins: Object.fromEntries(binsRows.map((r) => [r.id, ''])),
       status: Object.fromEntries(STATUS_FIELDS.map((f) => [f.key, ''])),
       kanban: '',
@@ -414,6 +429,25 @@ export function SettingsDialog({
                 />
                 <p className="text-[11px] text-muted-foreground">本地服务可留空；密钥只在服务端保存、不回显</p>
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground" htmlFor="llm-analysis-timeout">
+                  提示词分析超时（分钟）
+                </label>
+                <Input
+                  id="llm-analysis-timeout"
+                  type="number"
+                  min="1"
+                  value={draft.llm.analysisTimeoutMs}
+                  placeholder="10"
+                  onChange={(e) => {
+                    setDraft((d) => ({ ...d, llm: { ...d.llm, analysisTimeoutMs: e.target.value } }));
+                    touch('llm');
+                  }}
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  「提示词画像」分析的单次 LLM 请求上限，默认 10 分钟；留空 = 默认。超过时限自动中止并提示，遇慢端点可调大
+                </p>
+              </div>
             </div>
           </TabsContent>
 
@@ -518,7 +552,7 @@ export function SettingsDialog({
 
           <TabsContent value="backup" className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              把 codex / claude-code / omp 会话日志增量归档到 ~/.agentlray/archive。
+              把 codex / claude-code / omp / dsh / gemini 会话日志增量归档到 ~/.agentlray/archive。
             </p>
             <BackupSection />
           </TabsContent>

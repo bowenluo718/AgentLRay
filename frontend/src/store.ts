@@ -66,6 +66,22 @@ export function capabilitiesOf(infos: PlatformInfo[], id: string): PlatformCapab
   return selectablePlatforms(infos).find((p) => p.id === id)?.capabilities ?? EMPTY_CAPABILITIES;
 }
 
+/**
+ * 分析/Prompts 页签的「当前有效平台」：有选中会话时跟随其来源平台
+ * （detailPlatform，聚合视图点击会话时由 setDetailContext 设置），
+ * 无选中会话时回退侧栏筛选平台。侧栏手动切平台只改筛选上下文，不清空
+ * 会话选择则页签仍跟随当前会话（follow-the-session-first）。
+ */
+export function useActivePlatform(): Platform {
+  const platform = useAppStore((s) => s.platform);
+  const detailPlatform = useAppStore((s) => s.detailPlatform);
+  const selectedSessionId = useAppStore((s) => s.selectedSessionId);
+  const platforms = useAppStore((s) => s.platforms);
+  const hasSession = !!selectedSessionId;
+  const detailValid = selectablePlatformIds(platforms).includes(detailPlatform);
+  return hasSession && detailValid ? detailPlatform : platform;
+}
+
 // Settings persist to the SAME localStorage key/shape as the legacy app
 // (public/js/app.js SETTINGS_KEY) so both UIs share settings:
 //   { openclawDir, codexDir, claudeCodeDir, hermesDir, ompDir, platform }

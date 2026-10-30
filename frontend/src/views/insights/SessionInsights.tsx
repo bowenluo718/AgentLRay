@@ -8,7 +8,7 @@ import { getSessionDetail } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDurationCompact } from '@/lib/pure';
-import { dirForPlatform, useAppStore } from '@/store';
+import { dirForPlatform, useActivePlatform, useAppStore } from '@/store';
 import { InsightSection, ScopeChip, StatCard, UsageBar, fmtTokens, formatNumber } from './bits';
 import { computeSessionInsights } from './sessionStats';
 
@@ -25,7 +25,8 @@ const TOOL_PALETTE = [
 ];
 
 export function SessionInsights() {
-  const platform = useAppStore((s) => s.platform);
+  // 跟随当前会话所属平台（聚合视图点击会话后自动切到该平台）；无选中会话回退侧栏平台。
+  const platform = useActivePlatform();
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const settings = useAppStore((s) => s.settings);

@@ -13,7 +13,15 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { clusterPrefillContent } from '@/lib/pure';
-import { HIDE_TRIVIAL_KEY, dirForPlatform, loadStoredFlag, platformLabel, saveStoredFlag, useAppStore } from '@/store';
+import {
+  HIDE_TRIVIAL_KEY,
+  dirForPlatform,
+  loadStoredFlag,
+  platformLabel,
+  saveStoredFlag,
+  useActivePlatform,
+  useAppStore,
+} from '@/store';
 import { LibraryFormDialog, heuristicLibraryName } from '@/views/library/LibraryFormDialog';
 
 import { PromptGroupSection } from './PromptGroupSection';
@@ -28,7 +36,8 @@ import {
 } from './promptsLib';
 
 export function PromptsView() {
-  const platform = useAppStore((s) => s.platform);
+  // 跟随当前会话所属平台（聚合视图点击会话后自动切到该平台）；无选中会话回退侧栏平台。
+  const platform = useActivePlatform();
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);

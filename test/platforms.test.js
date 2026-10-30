@@ -333,3 +333,96 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
     assert.ok(md.includes('| Platform | codex |'), 'codex md 导出不变');
   });
 });
+
+// 回归：自定义平台的 Prompts 页签应能提取真人 prompt（lib/prompts.js 通用 JSONL
+// 提取器）。用 claude-code 同构记录形状（rec.type==='user' + rec.message?.content）
+// 的 collectFiles 适配器，断言 /api/prompts 按目录分组返回真人 prompt。
+test('自定义平台 /api/prompts 提取真人 prompt（generic JSONL 提取器回归）', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-platforms-prompts-test-'));
+  const platDir = path.join(home, '.agentlray', 'platforms');
+  fs.mkdirSync(platDir, { recursive: true });
+
+  const ADAPTER = `'use strict';
+const fs = require('fs');
+const path = require('path');
+module.exports = {
+  id: 'co-mind-like',
+  label: 'Co Mind Like',
+  defaultDir: () => process.env.PROMPTS_DIR,
+  list: async () => [],
+  find: async (dir, id) => null,
+  parse: async () => ({ session: { id: 'x', cwd: null, timestamp: null }, messages: [] }),
+  getSession: async () => null,
+  collectFiles: async (dir) => {
+    const files = [];
+    for (const name of fs.readdirSync(dir).filter((n) => n.endsWith('.jsonl')).sort()) {
+      files.push({ path: path.join(dir, name), file: name, sessionId: name.replace(/\\.jsonl$/, '') });
+    }
+    return files;
+  },
+  watchParse: () => null,
+  needsAgent: false,
+};
+`;
+  fs.writeFileSync(path.join(platDir, 'co-mind-like.js'), ADAPTER);
+
+  const dataDir = path.join(home, 'prompts-data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  // claude-code 同构记录：type:'user' + message.content（真实 prompt + 噪音）。
+  // 每个会话文件一个目录（真实存储布局：<项目slug>/<sessionId>.jsonl）。
+  const sessA = [
+    JSON.stringify({ type: 'user', timestamp: '2026-10-25T01:00:00.000Z', cwd: '/proj/a', slug: 'proj-a', message: { content: '分析并总结 resolve.js 实现' } }),
+    JSON.stringify({ type: 'assistant', timestamp: '2026-10-25T01:00:05.000Z', message: { content: '好的，我来分析。' } }),
+    JSON.stringify({ type: 'user', timestamp: '2026-10-26T01:00:00.000Z', cwd: '/proj/a', slug: 'proj-a', message: { content: '再加一条约束：不要用可选链。' } }),
+  ];
+  const sessB = [
+    JSON.stringify({ type: 'user', timestamp: '2026-10-26T02:00:00.000Z', cwd: '/proj/b', slug: 'proj-b', message: { content: '另一个项目的问题' } }),
+  ];
+  fs.writeFileSync(path.join(dataDir, 'sess-a.jsonl'), sessA.join('\n') + '\n');
+  fs.writeFileSync(path.join(dataDir, 'sess-b.jsonl'), sessB.join('\n') + '\n');
+
+  const port = 20000 + Math.floor(Math.random() * 10000);
+  const child = spawn(process.execPath, [path.join(REPO_ROOT, 'server.js')], {
+    env: { ...process.env, HOME: home, PORT: String(port), HOST: '127.0.0.1', PROMPTS_DIR: dataDir },
+    cwd: REPO_ROOT,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk;
+  });
+  let exited = false;
+  child.once('exit', () => {
+    exited = true;
+  });
+  const base = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    if (exited) throw new Error(`server exited before ready: ${stderr.trim()}`);
+    try {
+      const res = await fetch(`${base}/api/version`);
+      if (res.ok) {
+        await res.json();
+        break;
+      }
+    } catch {
+      /* 尚未监听 */
+    }
+    await new Promise((r) => setTimeout(r, 60));
+  }
+  t.after(() => child.kill('SIGKILL'));
+  if (Date.now() >= deadline) {
+    throw new Error(`server never became ready: ${stderr.trim()}`);
+  }
+
+  const data = await getJson(base, '/api/prompts?platform=co-mind-like');
+  assert.equal(data.platform, 'co-mind-like');
+  assert.equal(data.totalSessions, 2, '两个会话均提取');
+  assert.equal(data.totalPrompts, 3, '三个真人 prompt（assistant/噪音不计数）');
+  assert.equal(data.groups.length, 2, '按目录分组（/proj/a 与 /proj/b）');
+  const texts = data.groups.flatMap((g) => g.sessions.flatMap((s) => s.prompts.map((p) => p.text)));
+  assert.ok(texts.includes('分析并总结 resolve.js 实现'), '首个 prompt 命中');
+  assert.ok(texts.includes('再加一条约束：不要用可选链。'), '第二条 prompt 命中');
+  assert.ok(texts.includes('另一个项目的问题'), '另一目录 prompt 命中');
+  assert.ok(!texts.includes('好的，我来分析。'), 'assistant 文本不进入 prompts');
+});

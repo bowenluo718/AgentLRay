@@ -440,6 +440,8 @@ export interface LlmSettings {
   model: string;
   /** true when an API key is stored (the key itself never leaves the server) */
   hasApiKey: boolean;
+  /** 提示词画像分析单次 LLM 请求的实际生效超时（毫秒，未配置时回默认 600s） */
+  analysisTimeoutMs: number;
   /** which backend prompt tooling would use right now */
   backend: 'openai' | 'claude-cli' | null;
 }
@@ -504,7 +506,7 @@ export type SettingsPatch = {
   cliBins?: Partial<Record<string, string>>;
   status?: Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', number>>;
   kanban?: { maxPerStatus?: number };
-  llm?: { baseUrl: string; model: string; apiKey?: string };
+  llm?: { baseUrl: string; model: string; apiKey?: string; analysisTimeoutMs?: number };
 };
 
 /** 空串 = 清除该平台配置（回退默认命令名）。 */

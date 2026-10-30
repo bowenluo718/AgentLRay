@@ -121,7 +121,7 @@ npm start
 - **预览与展开** — 每个 session 行内直接预览首条 prompt，点击展开完整列表（markdown 渲染）
 - **搜索** — 实时过滤 prompt / 目录 / session
 - **Export JSON** — 导出全部提取的 prompt 用于离线处理
-- **分析优化** — 相似 prompt 聚类成模板，结合每个模板的 session 效果归因（平均轮次、工具调用、错误率），由配置的 LLM 后端（设置 → LLM 接口）生成模板改写建议；未配置端点时改由服务器 PATH 中的 [`claude` CLI](https://claude.com/claude-code) 生成。两者都没有时，聚类和归因仍然可用，接口会把缺失的后端报告为 `llmError`
+- **分析优化** — 相似 prompt 聚类成模板，结合每个模板的 session 效果归因（平均轮次、工具调用、错误率），由配置的 LLM 后端（设置 → LLM 接口）生成模板改写建议；未配置端点时改由服务器 PATH 中的 [`claude` CLI](https://claude.com/claude-code) 生成。两者都没有时，聚类和归因仍然可用，接口会把缺失的后端报告为 `llmError`。单次分析请求有 LLM 超时上限（默认 10 分钟，可在 设置 → LLM 接口 调整）；超时自动中止并给出可读的超时提示，而不是裸透 undici 的 "operation aborted" 文案
 - **优化单条** — 悬停任意 prompt 点击「优化」，内联生成 LLM 改写版本（在 设置 → LLM 接口 配置后端，或 PATH 上有 `claude` CLI）
 
 ### 键盘快捷键
@@ -259,7 +259,7 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与�
 | `GET /api/prompts` | 按目录分组的各 session 真人 prompt |
 | `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |
 | `POST /api/prompts/rewrite` | 通过配置的 LLM 后端改写单条 prompt（`{ "text": "..." }`；无可用后端时返回 503 及配置指引） |
-| `GET/PUT /api/settings` | 统一设置端点：所有服务端设置聚合在 `~/.agentlray/settings.json`（旧 `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` 首启幂等迁移）。PUT 只保存请求体提供的 section（`ui`/`cliBins`/`status`/`kanban`/`llm`），未提供者保持原值。`cliBins` 返回 `bin`/`configured`/`default`，空串 = 清除回退默认；`status`/`kanban` 返回 `value`/`configured`/`default`，保存即生效；`llm` 返回 `baseUrl`/`model`/`hasApiKey`（key 不回显） |
+| `GET/PUT /api/settings` | 统一设置端点：所有服务端设置聚合在 `~/.agentlray/settings.json`（旧 `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` 首启幂等迁移）。PUT 只保存请求体提供的 section（`ui`/`cliBins`/`status`/`kanban`/`llm`），未提供者保持原值。`cliBins` 返回 `bin`/`configured`/`default`，空串 = 清除回退默认；`status`/`kanban` 返回 `value`/`configured`/`default`，保存即生效；`llm` 返回 `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey`（key 不回显） |
 | `GET /api/settings/cli-bins` | 只读兼容端点（legacy 冻结快照 `/legacy` 的「复制恢复命令」按钮用）；与 `/api/settings` 的 `cliBins` 同构 |
 | `GET /api/search` | 会话全文搜索（`?platform=all` 一次搜索全部平台，多关键词 AND） |
 | `GET /api/omp/sessions/:id/children` | 获取该 OMP 会话派生的子 Agent 列表 |

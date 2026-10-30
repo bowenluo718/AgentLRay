@@ -174,7 +174,7 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
         historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
       },
       kanban: { maxPerStatus: { value: 20, configured: false, default: 20 } },
-      llm: { baseUrl: '', model: '', hasApiKey: false, backend: null },
+      llm: { baseUrl: '', model: '', hasApiKey: false, analysisTimeoutMs: 600000, backend: null },
     });
   }
 

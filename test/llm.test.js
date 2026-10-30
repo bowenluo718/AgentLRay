@@ -13,7 +13,7 @@ const { startServer, getJson, sendJson } = require('./helpers');
 const NO_CLI = { AGENTLRAY_CLAUDE_BIN: '/nonexistent/claude-cli-disabled' };
 
 // Minimal OpenAI-compatible /chat/completions mock. Records requests.
-function startMockOpenAi(replyContent) {
+function startMockOpenAi(replyContent, { delayMs = 0 } = {}) {
   const requests = [];
   const server = http.createServer((req, res) => {
     let body = '';
@@ -23,7 +23,10 @@ function startMockOpenAi(replyContent) {
     req.on('end', () => {
       requests.push({ url: req.url, auth: req.headers.authorization || null, body: JSON.parse(body) });
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: replyContent } }] }));
+      // delayMs > 0 用于模拟慢端点，配合小超时配置触发 abort 中止。
+      setTimeout(() => {
+        res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: replyContent } }] }));
+      }, delayMs);
     });
   });
   return new Promise((resolve) => {
@@ -51,7 +54,7 @@ test('LLM settings API: defaults, save, key redaction and validation', async () 
   try {
     // Fresh home: nothing configured, no claude CLI → backend null
     const initial = await getLlm(base);
-    assert.deepEqual(initial, { baseUrl: '', model: '', hasApiKey: false, backend: null });
+    assert.deepEqual(initial, { baseUrl: '', model: '', hasApiKey: false, analysisTimeoutMs: 600000, backend: null });
 
     // Save an endpoint; the key must never be echoed back
     const saved = await putLlm(base, {
@@ -72,13 +75,39 @@ test('LLM settings API: defaults, save, key redaction and validation', async () 
     });
     assert.equal(kept.hasApiKey, true);
 
+    // analysisTimeoutMs：落盘回读、超上限钳制、非法/0 清除回默认
+    const timed = await putLlm(base, {
+      baseUrl: 'http://127.0.0.1:9/v1',
+      model: 'other-model',
+      analysisTimeoutMs: 300_000,
+    });
+    assert.equal(timed.analysisTimeoutMs, 300_000);
+    const clamped = await putLlm(base, {
+      baseUrl: 'http://127.0.0.1:9/v1',
+      model: 'other-model',
+      analysisTimeoutMs: 7_200_000,
+    });
+    assert.equal(clamped.analysisTimeoutMs, 3_600_000);
+    const cleared = await putLlm(base, {
+      baseUrl: 'http://127.0.0.1:9/v1',
+      model: 'other-model',
+      analysisTimeoutMs: 0,
+    });
+    assert.equal(cleared.analysisTimeoutMs, 600_000);
+
     // Validation: baseUrl without model, non-http baseUrl
     await putLlm(base, { baseUrl: 'http://x', model: '' }, 400);
     await putLlm(base, { baseUrl: 'ftp://x', model: 'm' }, 400);
 
     // Clearing baseUrl also clears the stored key
-    const cleared = await putLlm(base, { baseUrl: '', model: '' });
-    assert.deepEqual(cleared, { baseUrl: '', model: '', hasApiKey: false, backend: null });
+    const clearedLlm = await putLlm(base, { baseUrl: '', model: '' });
+    assert.deepEqual(clearedLlm, {
+      baseUrl: '',
+      model: '',
+      hasApiKey: false,
+      analysisTimeoutMs: 600000,
+      backend: null,
+    });
   } finally {
     await stop();
   }
@@ -168,5 +197,25 @@ test('analysis without skipLlm surfaces the no-backend error as llmError, cluste
     assert.ok(String(analysis.llmError || '').includes('未配置 LLM 后端'));
   } finally {
     await stop();
+  }
+});
+
+test('timed-out analysis surfaces a readable timeout llmError instead of the raw undici abort message', async () => {
+  // mock 迟 10s 响应；分析超时配到下限 2s → fetch 必在响应前被 abort()。
+  const mock = await startMockOpenAi('{"suggestions":[]}', { delayMs: 10_000 });
+  const { base, stop } = await startServer(NO_CLI);
+  try {
+    await putLlm(base, { baseUrl: `${mock.base}/v1`, model: 'mock-model', analysisTimeoutMs: 2_000 });
+
+    const analysis = await getJson(base, '/api/prompts/analyze?platform=codex&refresh=1');
+    assert.ok(Array.isArray(analysis.clusters));
+    assert.ok(String(analysis.llmError || '').includes('已中止'), 'llmError 说明超时中止');
+    assert.ok(
+      !/This operation was aborted/.test(String(analysis.llmError || '')),
+      '不再透传 undici 原生 abort 文案'
+    );
+  } finally {
+    await stop();
+    await mock.close();
   }
 });
