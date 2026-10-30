@@ -6,7 +6,7 @@
 // 项目 = cwd 推导显示值（末段；末段重复显完整 cwd 消歧；无 cwd → 未知项目）。
 
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { SessionSummary } from '@/api/types';
 import { formatDurationCompact, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
@@ -14,53 +14,11 @@ import { platformLabel, selectablePlatformIds, useAppStore } from '@/store';
 import type { GroupBy } from '@/store';
 import { UNKNOWN_PROJECT, filterSessionList, formatDate, resolveProjectValues } from './lib';
 import { useSessionsList } from './queries';
+import { statusMetaFor, useServerStatusLabels } from './statusMeta';
 
 const VIRT_THRESHOLD = 200; // below this many sessions, render everything
 const VIRT_OVERSCAN = 10; // extra cards above/below the visible range
 const VIRT_ESTIMATE = 96; // estimated card height incl. gap
-
-// 四态中文标签与配色。标签单源在服务端 /api/status-labels（lib/status.js STATUS_LABELS）；
-// 这里保留同键配色与启动闪屏回退，启动后 fetch 一次并入服务器标签，避免各端硬编码漂移。
-const STATUS_FALLBACK_META: Record<string, { label: string; badgeClass: string }> = {
-  'awaiting-input': { label: '待用户输入', badgeClass: 'text-amber-300 border-amber-500/40' },
-  working: { label: '工作中', badgeClass: 'text-emerald-300 border-emerald-500/40' },
-  waiting: { label: '等待中', badgeClass: 'text-sky-300 border-sky-500/40' },
-  stopped: { label: '已停止', badgeClass: 'text-muted-foreground border-border' },
-};
-
-const statusMetaCache = new Map<string, { label: string; badgeClass: string }>();
-
-function statusMetaFor(status: string | null | undefined) {
-  if (!status) return null;
-  return statusMetaCache.get(status) ?? STATUS_FALLBACK_META[status] ?? null;
-}
-
-/** 启动时并入服务端四态定义（新状态自动出现；失败静默回退本地副本）。 */
-function useServerStatusLabels(): void {
-  const [, forceRender] = useReducer((x: number) => x + 1, 0);
-  useEffect(() => {
-    let alive = true;
-    fetch('/api/status-labels')
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((payload: { labels?: Record<string, string> }) => {
-        if (!alive || !payload?.labels) return;
-        statusMetaCache.clear();
-        for (const [status, label] of Object.entries(payload.labels)) {
-          statusMetaCache.set(status, {
-            label,
-            badgeClass: STATUS_FALLBACK_META[status]?.badgeClass || 'text-muted-foreground border-border',
-          });
-        }
-        forceRender();
-      })
-      .catch(() => {
-        /* keep fallback */
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-}
 
 // 聚合视图跨平台归并时用到的状态展示顺序（与服务端 STATUS_ORDER 一致）。
 const STATUS_ORDER = ['awaiting-input', 'working', 'waiting', 'stopped'];

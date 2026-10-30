@@ -51,6 +51,15 @@ function emptyPrompts(platform: string): PromptsData {
   return { platform, totalPrompts: 0, totalSessions: 0, groups: [] };
 }
 
+// 真实后端的 SessionSummary 带状态（status 四态）；demo fixtures 生成时不带，这里
+// 按 fixture 顺序轮换补上，使任务看板四列与侧栏状态徽标在 demo 下可演示。
+const DEMO_STATUSES = ['awaiting-input', 'working', 'waiting', 'stopped'];
+
+function withDemoStatuses(list: SessionSummary[]): SessionSummary[] {
+  // 已带 status 的条目保留原值（防御：fixtures 缺省不带，看板在 demo 下靠轮换补）。
+  return list.map((s, i) => ({ ...s, status: s.status || DEMO_STATUSES[i % DEMO_STATUSES.length] }));
+}
+
 // --- Demo search: same semantics as lib/search.js (multi-keyword AND,
 // case-insensitive, snippet ±(40/60) chars around the first keyword hit),
 // evaluated over the bundled session transcripts.
@@ -129,7 +138,7 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
       total,
       offset: 0,
       limit: null,
-      platforms: platformIds.map((p) => ({ platform: p, agent: null, total: platforms[p]?.length || 0, offset: 0, limit: null, sessions: platforms[p] ?? [] })),
+      platforms: platformIds.map((p) => ({ platform: p, agent: null, total: platforms[p]?.length || 0, offset: 0, limit: null, sessions: withDemoStatuses(platforms[p] ?? []) })),
     });
   }
 
@@ -153,16 +162,26 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   }
   if (parsed.pathname === '/api/settings') {
     return ok({
-      recentActivityMs: { value: 120000, configured: false, default: 120000 },
-      activeWorkCeilMs: { value: 1800000, configured: false, default: 1800000 },
-      historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
+      ui: { platform: null, selectedPlatforms: [] },
+      cliBins: {
+        codex: { bin: 'codex', configured: false, default: 'codex' },
+        'claude-code': { bin: 'claude', configured: false, default: 'claude' },
+        omp: { bin: 'omp', configured: false, default: 'omp' },
+      },
+      status: {
+        recentActivityMs: { value: 120000, configured: false, default: 120000 },
+        activeWorkCeilMs: { value: 1800000, configured: false, default: 1800000 },
+        historyCeilMs: { value: 43200000, configured: false, default: 43200000 },
+      },
+      kanban: { maxPerStatus: { value: 20, configured: false, default: 20 } },
+      llm: { baseUrl: '', model: '', hasApiKey: false, backend: null },
     });
   }
 
   // /api/:platform/sessions[/:id[/children[/:name]]]
   if (seg(2) === 'sessions') {
     const platform = seg(1);
-    if (parts.length === 3) return ok(data.sessions[platform] ?? []);
+    if (parts.length === 3) return ok(withDemoStatuses(data.sessions[platform] ?? []));
     if (parts.length === 4) {
       const detail = data.details[`${platform}/${seg(3)}`];
       if (detail) return ok(detail);

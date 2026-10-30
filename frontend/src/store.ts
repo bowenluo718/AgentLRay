@@ -198,7 +198,11 @@ function loadPersisted(): {
   return result;
 }
 
-export type MainView = 'sessions' | 'insights' | 'prompts' | 'library';
+export type MainView = 'sessions' | 'insights' | 'prompts' | 'library' | 'kanban';
+/** 右侧视图页签值校验（URL 参数 / localStorage 解析共用；非法值一律回退默认）。 */
+export function isMainView(v: unknown): v is MainView {
+  return v === 'sessions' || v === 'insights' || v === 'prompts' || v === 'library' || v === 'kanban';
+}
 export type InsightsScope = 'global' | 'session';
 export type SessionView = 'messages' | 'trace';
 /** 侧栏会话列表分组模式：按平台 / 按项目 / 不分组。 */
