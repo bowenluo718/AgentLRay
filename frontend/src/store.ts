@@ -71,6 +71,16 @@ export function capabilitiesOf(infos: PlatformInfo[], id: string): PlatformCapab
 //   { openclawDir, codexDir, claudeCodeDir, hermesDir, ompDir, platform }
 export const SETTINGS_KEY = 'agent-xray-settings';
 
+// 左侧菜单（会话导航）宽度与折叠：桌面端可拖拽调宽（最小 200 / 最大 480），
+// 折叠后主内容占满；两者都随 agent-xray-settings 持久化（移动端抽屉逻辑不受影响）。
+export const SIDEBAR_DEFAULT_WIDTH = 280;
+export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MAX_WIDTH = 480;
+
+function clampSidebarWidth(value: number): number {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, value));
+}
+
 // Legacy per-view flags, reused as-is ('1'/'0' strings, default true when absent).
 export const SUMMARY_COLLAPSED_KEY = 'axr-summary-collapsed';
 export const HIDE_TRIVIAL_KEY = 'axr-hide-trivial';
@@ -133,6 +143,9 @@ function loadPersisted(): {
   groupBy: GroupBy;
   projectFilter: string[];
   collapsedGroups: Record<GroupBy, string[]>;
+  sidebarCollapsed: boolean;
+  sidebarWidth: number;
+  view: MainView;
 } {
   // Demo build ships claude-code/codex fixtures only — land on a populated tab.
   const defaultPlatform: Platform = DEMO ? 'claude-code' : 'openclaw';
@@ -144,6 +157,9 @@ function loadPersisted(): {
     groupBy: GroupBy;
     projectFilter: string[];
     collapsedGroups: Record<GroupBy, string[]>;
+    sidebarCollapsed: boolean;
+    sidebarWidth: number;
+    view: MainView;
   } = {
     settings: { ...EMPTY_SETTINGS },
     platform: defaultPlatform,
@@ -154,6 +170,9 @@ function loadPersisted(): {
     groupBy: 'none',
     projectFilter: [],
     collapsedGroups: { platform: [], project: [], none: [] },
+    sidebarCollapsed: false,
+    sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
+    view: 'sessions',
   };
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -191,6 +210,17 @@ function loadPersisted(): {
           }
         }
       }
+      // 桌面端侧栏折叠与宽度（旧存储无这些键 → 各自默认值）。宽度需为正数，越界收敛。
+      if (typeof parsed.sidebarCollapsed === 'boolean') {
+        result.sidebarCollapsed = parsed.sidebarCollapsed;
+      }
+      if (typeof parsed.sidebarWidth === 'number' && Number.isFinite(parsed.sidebarWidth)) {
+        result.sidebarWidth = clampSidebarWidth(parsed.sidebarWidth);
+      }
+      // 右侧视图页签（旧存储无该键 → 默认 sessions）。非法值回退，避免脏数据卡死页面。
+      if (isMainView(parsed.view)) {
+        result.view = parsed.view;
+      }
     }
   } catch {
     /* corrupted storage — fall back to defaults */
@@ -208,12 +238,15 @@ export type SessionView = 'messages' | 'trace';
 /** 侧栏会话列表分组模式：按平台 / 按项目 / 不分组。 */
 export type GroupBy = 'platform' | 'project' | 'none';
 
-// —— 路由持久化：会话详情 ↔ URL query（?session=&sid=&agent=）——
-// 点击会话查看详情时把详情上下文写进 URL；刷新后从 URL 恢复「正在查看的会话详情」。
-// 用 replaceState 不产生历史栈噪音；筛选/分组配置仍走 localStorage，两者独立。
+// —— 路由持久化：会话详情 + 右侧视图页签 ↔ URL query ——
+// 点击会话查看详情时把详情上下文（?session=&sid=&agent=）写进 URL；右侧视图页签
+// （?view=）随切换一并反映。刷新后从 URL 恢复「正在查看的详情 + 所在页签」，再回退
+// localStorage。用 replaceState 不产生历史栈噪音；筛选/分组配置仍走 localStorage，
+// 两者独立。
 const URL_PARAM_SESSION = 'session'; // 平台
 const URL_PARAM_SID = 'sid'; // 会话 id（URLSearchParams 自动编解码）
 const URL_PARAM_AGENT = 'agent'; // openclaw 归属 agent（可选）
+const URL_PARAM_VIEW = 'view'; // 右侧视图页签（sessions/insights/prompts/library/kanban）
 
 /** 从当前 URL 解析详情上下文（无参数/平台非法 → 空）。 */
 function parseDetailFromUrl(): { detailPlatform?: Platform; detailAgent?: string; selectedSessionId?: string } {
@@ -235,29 +268,43 @@ function parseDetailFromUrl(): { detailPlatform?: Platform; detailAgent?: string
   }
 }
 
-let lastSessionUrlKey = '';
-/** 把当前详情上下文写回（或清出）URL；带值缓存避免重复 replaceState。 */
-function syncSessionUrl(): void {
-  const st = useAppStore.getState();
-  const { detailPlatform, detailAgent, selectedSessionId } = st;
-  const key = selectedSessionId ? `${detailPlatform}|${detailAgent}|${selectedSessionId}` : '';
-  if (key === lastSessionUrlKey) return;
-  lastSessionUrlKey = key;
+/** 从当前 URL 解析右侧视图页签（无参数/非法值 → null，回退 localStorage/默认）。 */
+function parseViewFromUrl(): MainView | null {
+  if (DEMO) return null;
   try {
     const params = new URLSearchParams(window.location.search);
-    if (!selectedSessionId) {
-      params.delete(URL_PARAM_SESSION);
-      params.delete(URL_PARAM_SID);
-      params.delete(URL_PARAM_AGENT);
-      const qs = params.toString();
-      window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
-    } else {
+    const v = params.get(URL_PARAM_VIEW);
+    return isMainView(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+let lastTopUrlKey = '';
+/** 把「当前详情上下文 + 右侧视图页签」写回（或清出）URL；带值缓存避免重复 replaceState。 */
+function syncSessionUrl(): void {
+  const st = useAppStore.getState();
+  const { detailPlatform, detailAgent, selectedSessionId, view } = st;
+  const detailKey = selectedSessionId ? `${detailPlatform}|${detailAgent}|${selectedSessionId}` : '';
+  const key = `${view}|${detailKey}`;
+  if (key === lastTopUrlKey) return;
+  lastTopUrlKey = key;
+  try {
+    const params = new URLSearchParams(window.location.search);
+    // 右侧视图页签始终反映在 URL；详情上下文仅在选中会话时写入。
+    params.set(URL_PARAM_VIEW, view);
+    if (selectedSessionId) {
       params.set(URL_PARAM_SESSION, detailPlatform);
       params.set(URL_PARAM_SID, selectedSessionId);
       if (detailAgent) params.set(URL_PARAM_AGENT, detailAgent);
       else params.delete(URL_PARAM_AGENT);
-      window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+    } else {
+      params.delete(URL_PARAM_SESSION);
+      params.delete(URL_PARAM_SID);
+      params.delete(URL_PARAM_AGENT);
     }
+    const qs = params.toString();
+    window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
   } catch {
     /* non-fatal */
   }
@@ -275,6 +322,9 @@ function persistState(): void {
         groupBy: st.groupBy,
         projectFilter: st.projectFilter,
         collapsedGroups: st.collapsedGroups,
+        sidebarCollapsed: st.sidebarCollapsed,
+        sidebarWidth: st.sidebarWidth,
+        view: st.view,
       })
     );
   } catch {
@@ -321,6 +371,10 @@ interface AppState {
   projectFilter: string[];
   /** 折叠的组名集合，按分组模式分别记忆（名字带 kind: 前缀防键撞）。 */
   collapsedGroups: Record<GroupBy, string[]>;
+  /** 桌面端左侧菜单折叠（true = 只显示主内容；移动端抽屉展开仍由局部 navigationOpen 控制）。 */
+  sidebarCollapsed: boolean;
+  /** 桌面端左侧菜单宽度（可拖拽，200–480px）。 */
+  sidebarWidth: number;
   /** true when the persisted settings carried an explicit platform (skip auto-pick on boot) */
   hasStoredPlatform: boolean;
   /** 会话详情上下文（来源平台/agent）：聚合视图点击会话时只更新它，不扰动筛选
@@ -364,6 +418,10 @@ interface AppState {
   clearProjectFilter: () => void;
   /** 切换分组模式下某个组名的折叠状态（name 已带 kind: 前缀）。 */
   toggleGroupCollapsed: (mode: GroupBy, name: string) => void;
+  /** 设置桌面端左侧菜单折叠（持久化）。 */
+  setSidebarCollapsed: (collapsed: boolean) => void;
+  /** 拖拽侧栏宽度（持久化，自动收敛到 200–480）。 */
+  setSidebarWidth: (width: number) => void;
   /** 设置会话详情上下文（来源平台/agent），不动筛选上下文。聚合视图点击/⌘K/分析跳转用。 */
   setDetailContext: (platform: Platform, agent: string) => void;
   setSelectedAgent: (agent: string) => void;
@@ -384,6 +442,8 @@ interface AppState {
 
 const initial = loadPersisted();
 const urlDetail = parseDetailFromUrl();
+// 右侧视图页签初始值：URL > localStorage > 默认 sessions。
+const urlView = parseViewFromUrl();
 
 export const useAppStore = create<AppState>((set, get) => ({
   platform: initial.platform,
@@ -391,6 +451,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   groupBy: initial.groupBy,
   projectFilter: initial.projectFilter,
   collapsedGroups: initial.collapsedGroups,
+  sidebarCollapsed: initial.sidebarCollapsed,
+  sidebarWidth: initial.sidebarWidth,
   hasStoredPlatform: initial.hasStoredPlatform,
   detailPlatform: urlDetail.detailPlatform ?? initial.platform,
   detailAgent: urlDetail.detailAgent ?? '',
@@ -398,7 +460,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 刷新默认进入 URL 指定的会话详情；无则空（列表自动选首个）。
   selectedSessionId: urlDetail.selectedSessionId ?? '',
   settings: initial.settings,
-  view: 'sessions',
+  view: urlView ?? initial.view,
   insightsScope: null,
   sessionView: 'messages',
   viewingChildAgent: null,
@@ -540,6 +602,17 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ collapsedGroups: { ...get().collapsedGroups, [mode]: next } });
     persistState();
   },
+  setSidebarCollapsed: (collapsed) => {
+    if (get().sidebarCollapsed === collapsed) return;
+    set({ sidebarCollapsed: collapsed });
+    persistState();
+  },
+  setSidebarWidth: (width) => {
+    const next = clampSidebarWidth(Math.round(width));
+    if (get().sidebarWidth === next) return;
+    set({ sidebarWidth: next });
+    persistState();
+  },
   /** 设置会话详情上下文（来源平台/agent），不动筛选上下文。聚合视图点击/⌘K/分析跳转用。 */
   setDetailContext: (platform, agent) => set({ detailPlatform: platform, detailAgent: agent }),
   setSelectedAgent: (agent) =>
@@ -549,7 +622,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ settings });
     persistState();
   },
-  setView: (view) => set({ view }),
+  setView: (view) => {
+    // 右侧视图页签切换 → 持久化 localStorage + URL（URL 写入由订阅 syncSessionUrl 统一处理）。
+    if (get().view === view) return;
+    set({ view });
+    persistState();
+  },
   setInsightsScope: (scope) => set({ insightsScope: scope }),
   setSessionView: (view) => set({ sessionView: view }),
   // Opening a child transcript lands on messages (legacy viewChildAgent forces sessionView='messages')
@@ -572,5 +650,5 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAutoScroll: (value) => set({ autoScroll: value }),
 }));
 
-// 详情上下文任一变化（选中会话/切详情平台/agent、或清空选中）→ 同步回 URL（路由持久化）。
+// 详情上下文 / 右侧视图页签任一变化 → 同步回 URL（路由持久化）。
 useAppStore.subscribe(syncSessionUrl);

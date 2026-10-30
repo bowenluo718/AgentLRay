@@ -1,4 +1,5 @@
 import { ArrowLeft, Copy, PanelLeft } from 'lucide-react';
+import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Sidebar } from '@/components/Sidebar';
@@ -31,6 +32,9 @@ export default function App() {
   const setView = useAppStore((s) => s.setView);
   const platform = useAppStore((state) => state.platform);
   const selectedSession = useAppStore((state) => state.selectedSessionId);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const sidebarWidth = useAppStore((s) => s.sidebarWidth);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const navigationPanel = useRef<HTMLDivElement>(null);
@@ -130,9 +134,16 @@ export default function App() {
             {navigationOpen ? '返回内容' : '会话列表'}
           </button>
         </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] md:grid-cols-[280px_minmax(0,1fr)]">
+        <div
+          className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)] md:grid-cols-[var(--sidebar-cols)]"
+          style={{ '--sidebar-cols': sidebarCollapsed ? 'minmax(0,1fr)' : `${sidebarWidth}px minmax(0,1fr)` } as CSSProperties}
+        >
           <div id="session-navigation" ref={navigationPanel}
-            className={cn('min-h-0 min-w-0 flex-col md:flex', navigationOpen ? 'flex' : 'hidden')}>
+            className={cn(
+              'min-h-0 min-w-0 flex-col md:flex',
+              navigationOpen ? 'flex' : 'hidden',
+              sidebarCollapsed && 'md:hidden'
+            )}>
             <Sidebar onNavigate={returnToContent} />
           </div>
           <main className={cn('min-h-0 min-w-0 flex-col overflow-hidden md:flex', navigationOpen ? 'hidden' : 'flex')}>
@@ -141,8 +152,19 @@ export default function App() {
               onValueChange={(v) => setView(v as MainView)}
               className="flex min-h-0 flex-1 flex-col"
             >
-              <div className="shrink-0 overflow-x-auto border-b border-border px-2 pt-1 md:px-4 md:pt-3">
-                <TabsList className="h-11 bg-transparent p-0 md:h-9">
+              <div className="flex shrink-0 items-center border-b border-border px-2 pt-1 md:px-4 md:pt-3">
+                {sidebarCollapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => setSidebarCollapsed(false)}
+                    title="展开侧栏"
+                    aria-label="展开侧栏"
+                    className="mr-1 hidden h-8 shrink-0 items-center rounded border border-border px-1.5 text-muted-foreground hover:text-foreground md:inline-flex"
+                  >
+                    <PanelLeft className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <TabsList className="h-11 overflow-x-auto bg-transparent p-0 md:h-9">
                   {TABS.map((tab) => (
                     <TabsTrigger
                       key={tab.view}

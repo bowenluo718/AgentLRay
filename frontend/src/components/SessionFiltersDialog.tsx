@@ -288,7 +288,7 @@ export function SessionFiltersDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[min(85vh,700px)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="overflow-y-auto md:max-h-[min(85vh,700px)] sm:max-w-lg max-md:max-w-none max-md:w-[calc(100vw-2rem)] max-md:max-h-[calc(100dvh-2rem)] max-md:rounded-2xl max-md:p-4 max-md:gap-3 max-md:grid-cols-[minmax(0,1fr)]">
         <DialogHeader>
           <DialogTitle>会话筛选与分组</DialogTitle>
         </DialogHeader>
