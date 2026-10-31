@@ -25,13 +25,14 @@ import { buildKanbanColumns } from './kanbanLib';
 /** 看板每列默认最多展示条数（配置加载中/失败回退值）。 */
 const DEFAULT_MAX_PER_STATUS = 20;
 
-function KanbanCard({ session, project, platformLabelText, onClick }: {
+function KanbanCard({ session, project, platformLabelText, active, onClick }: {
   session: SessionSummary;
   project: string;
   platformLabelText: string;
+  active: boolean;
   onClick: (s: SessionSummary) => void;
 }) {
-  const preview = session.firstUserMessage || '（无消息）';
+  const preview = session.firstUserMessage || session.title || session.id || '（无消息）';
   return (
     <div
       role="button"
@@ -44,7 +45,14 @@ function KanbanCard({ session, project, platformLabelText, onClick }: {
           onClick(session);
         }
       }}
-      className="cursor-pointer rounded-md border border-border bg-card/60 px-2.5 py-2 text-xs transition-colors hover:border-primary/40 hover:bg-card"
+      aria-pressed={active}
+      className={cn(
+        'cursor-pointer rounded-md border px-2.5 py-2 text-xs transition-colors',
+        // 激活态对齐左侧会话列表卡片（SessionList.tsx 同配方）
+        active
+          ? 'border-primary/70 bg-primary/10'
+          : 'border-border bg-card/60 hover:border-primary/40 hover:bg-card'
+      )}
     >
       <div className="line-clamp-2 break-words font-medium text-foreground">{preview}</div>
       <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground">
@@ -69,6 +77,8 @@ export function KanbanView() {
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
   const setView = useAppStore((s) => s.setView);
   const setSessionView = useAppStore((s) => s.setSessionView);
+  // 当前选中会话（看板卡片激活态判定，与侧栏列表同源）。
+  const selectedSessionId = useAppStore((s) => s.selectedSessionId);
 
   // 看板局部控件（切走 TABS 重置；共享筛选仍在 store 持久化）。
   const [term, setTerm] = useState('');
@@ -225,6 +235,7 @@ export function KanbanView() {
                       session={s}
                       project={projectValues.get(s) ?? ''}
                       platformLabelText={labelOf(s.platform || currentPlatform)}
+                      active={s.id === selectedSessionId}
                       onClick={openSession}
                     />
                   ))

@@ -127,3 +127,43 @@ test('parseClaudeCodeSessionMetadata 以 slash 命令为 firstUserMessage', asyn
   const meta = await claude.parseClaudeCodeSessionMetadata(file, 'cccc1111-2222-4333-8444-555566667779.jsonl');
   assert.equal(meta.firstUserMessage, '分析当前项目的架构实现');
 });
+
+test('parseClaudeCodeSessionMetadata 的 title 回退到 firstUserMessage（不显示 UUID）', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-claude-title-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'dddd1111-2222-4333-8444-555566667770.jsonl');
+  const recs = [
+    {
+      parentUuid: null,
+      isSidechain: false,
+      userType: 'external',
+      cwd: '/fixtures/project-beta',
+      sessionId: 'dddd1111-2222-4333-8444-555566667770',
+      version: '2.1.282',
+      gitBranch: 'main',
+      type: 'user',
+      message: { role: 'user', content: '做一件普通的事' },
+      uuid: 'ua-1',
+      timestamp: '2026-01-18T11:00:00.000Z',
+    },
+    {
+      parentUuid: 'ua-1',
+      isSidechain: false,
+      userType: 'external',
+      cwd: '/fixtures/project-beta',
+      sessionId: 'dddd1111-2222-4333-8444-555566667770',
+      version: '2.1.282',
+      gitBranch: 'main',
+      type: 'assistant',
+      message: { model: 'claude-fixture-1', id: 'msg-1', type: 'message', role: 'assistant', content: [{ type: 'text', text: '好的' }] },
+      uuid: 'ua-2',
+      timestamp: '2026-01-18T11:00:05.000Z',
+    },
+  ];
+  fs.writeFileSync(file, recs.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const meta = await claude.parseClaudeCodeSessionMetadata(file, 'dddd1111-2222-4333-8444-555566667770.jsonl');
+  assert.equal(meta.firstUserMessage, '做一件普通的事');
+  // claude 无独立 title 记录时，title 回退到首条用户消息，前端据此显示而非 UUID
+  assert.equal(meta.title, '做一件普通的事');
+});
+

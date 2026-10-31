@@ -23,10 +23,10 @@ export const FALLBACK_PLATFORM_INFOS: PlatformInfo[] = [
   { id: 'openclaw', label: 'OpenClaw', builtin: true, capabilities: { ...BUILTIN_CAPS, list: false, needsAgent: true }, resume: false, broken: false },
   { id: 'codex', label: 'Codex', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
   { id: 'claude-code', label: 'Claude Code', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
-  { id: 'hermes', label: 'Hermes', builtin: true, capabilities: { list: true, find: false, parse: false, getSession: true, collectFiles: false, watchParse: false, needsAgent: false }, resume: false, broken: false },
+  { id: 'hermes', label: 'Hermes', builtin: true, capabilities: { list: true, find: false, parse: false, getSession: true, collectFiles: false, watchParse: false, needsAgent: false }, resume: true, broken: false },
   { id: 'omp', label: 'OMP', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
-  { id: 'dsh', label: 'DeepSeek Harness', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, broken: false },
-  { id: 'gemini', label: 'Gemini CLI', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, broken: false },
+  { id: 'dsh', label: 'DeepSeek Harness', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
+  { id: 'gemini', label: 'Gemini CLI', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
 ];
 
 const EMPTY_CAPABILITIES: PlatformCapabilities = {

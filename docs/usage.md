@@ -30,7 +30,7 @@ Detailed feature catalog, screenshots, installation alternatives, configuration 
 - **Spawn tracking** — Detect and navigate parent/child agent relationships
 - **OMP sub-agents** — Sub-agents spawned by an OMP session show up as chips in the summary; click one to read the child agent's full transcript
 - **Message timeline** — Visual graph showing conversation flow with role indicators
-- **Resume command** — One click copies the exact command to resume a session in its own CLI (`codex resume`, `claude --resume`, `omp --resume=`)
+- **Resume command** — One click copies the exact command to resume a session in its own CLI (`codex resume`, `claude --resume`, `omp --resume=`, `dsh --profile pi-tui --preset standard --resume`, `gemini -r`, `hermes --resume`)
 - **Collapsible summary** — Fold the session summary away when you want the full height for messages
 - **Auto-refresh** — Live-updating session list and messages
 - **Settings panel** — Configure platform directories from the UI, persisted in localStorage
@@ -126,7 +126,7 @@ Click the **Prompts** tab (next to Sessions / Insights) to see every real human 
 - **Preview & expand** — Each session row shows a one-line preview of its first prompt; click to expand the full markdown-rendered prompt list
 - **Search** — Filter prompts / directories / sessions live
 - **Export JSON** — Download all extracted prompts for offline processing
-- **分析优化 (Analyze)** — Cluster prompts into templates, attribute session outcomes (avg turns, tool calls, error rate) per template, and get rewrite suggestions from the configured LLM backend (Settings → LLM 接口) or, when no endpoint is set, the [`claude` CLI](https://claude.com/claude-code) on the server's PATH. With neither, clustering and attribution still work, and the analysis route reports the missing backend as `llmError`. A per-request LLM timeout (default 10 min, adjustable under Settings → LLM 接口) aborts slow calls and surfaces a readable timeout message instead of a bare "operation aborted"
+- **分析优化 (Analyze)** — Cluster prompts into templates, attribute session outcomes (avg turns, tool calls, error rate) per template, and get rewrite suggestions from the configured LLM backend (Settings → LLM 接口) or, when no endpoint is set, the [`claude` CLI](https://claude.com/claude-code) on the server's PATH. With neither, clustering and attribution still work, and the analysis route reports the missing backend as `llmError`. A per-request LLM timeout (default 15 min, adjustable under Settings → LLM 接口) bounds each call. Requests use node http(s) directly for NO_PROXY (intranet/local) endpoints and the Node proxy for external ones; slow gateways are no longer killed by undici's 5-minute headers timeout into a bare "fetch failed" — our own timeout closes the call with a readable message, and network errors carry their underlying cause (connection refused / TLS / DNS)
 - **优化 (Optimize)** — Hover any single prompt and click 优化 for an inline LLM-powered rewrite (configure the backend in Settings → LLM 接口, or have the `claude` CLI on PATH)
 
 ### Keyboard Shortcuts
@@ -179,9 +179,9 @@ npm start
 
 ### Platform CLI commands
 
-`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/settings.json` `cliBins` section) > default command name**.
+`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`, `dsh`, `gemini`, `hermes`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/settings.json` `cliBins` section) > default command name**.
 
-**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp. Submitted with the dialog's single Save button, persisted server-side in `~/.agentlray/settings.json` (cliBins section); both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
+**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp / dsh / gemini / hermes. Submitted with the dialog's single Save button, persisted server-side in `~/.agentlray/settings.json` (cliBins section); both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
 
 **Via environment variables (highest priority):**
 
@@ -189,6 +189,9 @@ npm start
 AGENTLRAY_CODEX_BIN=/path/to/codex \
 AGENTLRAY_CLAUDE_CODE_BIN=/home/0668000603/.nvm/versions/node/v22.19.0/bin/claude \
 AGENTLRAY_OMP_BIN=/path/to/omp \
+AGENTLRAY_DSH_BIN=/path/to/dsh \
+AGENTLRAY_GEMINI_BIN=/path/to/gemini \
+AGENTLRAY_HERMES_BIN=/path/to/hermes \
 npm start
 ```
 

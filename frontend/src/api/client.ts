@@ -440,14 +440,14 @@ export interface LlmSettings {
   model: string;
   /** true when an API key is stored (the key itself never leaves the server) */
   hasApiKey: boolean;
-  /** 提示词画像分析单次 LLM 请求的实际生效超时（毫秒，未配置时回默认 600s） */
+  /** 提示词画像分析单次 LLM 请求的实际生效超时（毫秒，未配置时回默认 900s） */
   analysisTimeoutMs: number;
   /** which backend prompt tooling would use right now */
   backend: 'openai' | 'claude-cli' | null;
 }
 
-/** 平台 CLI 命令配置（key = 平台 id）。GET 目前只回传内置三平台
- *  （codex / claude-code / omp）；自定义平台 id 的 bin 由后端 resolveCliBin 从
+/** 平台 CLI 命令配置（key = 平台 id）。GET 目前只回传内置六平台
+ *  （codex / claude-code / omp / dsh / gemini / hermes）；自定义平台 id 的 bin 由后端 resolveCliBin 从
  *  `~/.agentlray/settings.json` 的 cliBins section 手工配置键读取。 */
 export type CliBins = Partial<Record<string, CliBinSetting>>;
 

@@ -375,8 +375,34 @@ test('sessions resume 默认只打印命令，含 cwd 前缀与消息转义', as
   assert.equal(ompDoc.note, null);
   assert.doesNotMatch(ompJson.stderr, /持有|派生/);
 
-  // 无原生续跑的平台明确报错
-  const unsupported = runCli(home, ['sessions', 'resume', '--platform', 'hermes', '--id', 'x']);
+  // dsh：pi-tui 交互式续跑（web 界面创建的会话；--resume <id> 在 TUI 重开会话）
+  const dsh = runCli(home, ['sessions', 'resume', '--platform', 'dsh', '--id', 'dsh-fixture-session-0001']);
+  assert.equal(dsh.status, 0);
+  assert.equal(
+    dsh.stdout.trim(),
+    "cd '/fixtures/project-delta' && dsh --profile pi-tui --preset standard --resume dsh-fixture-session-0001"
+  );
+
+  // dsh 带 --message：消息追加在 --resume 之后（pi-tui 忽略 unknown 参，行为统一）
+  const dshMsg = runCli(home, [
+    'sessions', 'resume', '--platform', 'dsh', '--id', 'dsh-fixture-session-0001',
+    '--message', 'run the extra check',
+  ]);
+  assert.equal(dshMsg.status, 0);
+  assert.equal(
+    dshMsg.stdout.trim(),
+    "cd '/fixtures/project-delta' && dsh --profile pi-tui --preset standard --resume dsh-fixture-session-0001 'run the extra check'"
+  );
+
+  const gemini = runCli(home, ['sessions', 'resume', '--platform', 'gemini', '--id', 'gemini-fixture-session-0001']);
+  assert.equal(gemini.status, 0);
+  assert.equal(
+    gemini.stdout.trim(),
+    "cd '/fixtures/project-zeta' && gemini -r gemini-fixture-session-0001 --approval-mode=yolo"
+  );
+
+  // 无原生续跑的平台明确报错（openclaw 无续跑契约）
+  const unsupported = runCli(home, ['sessions', 'resume', '--platform', 'openclaw', '--id', 'oc-1111']);
   assert.equal(unsupported.status, 1);
   assert.match(unsupported.stderr, /no native resume/);
 
@@ -393,22 +419,31 @@ test('sessions resume 可用 AGENTLRAY_*_BIN 环境变量覆盖平台 CLI 命令
   const defDoc = JSON.parse(def.stdout);
   assert.equal(defDoc.bin, 'codex');
 
-  // 三个平台分别用绝对路径覆盖
+  // 各平台分别用绝对路径覆盖（dsh/gemini 有会话夹具；hermes 无夹具不可达续跑，跳过）
   const bins = {
     codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
     'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
     omp: '/home/u/.nvm/versions/node/v22.19.0/bin/omp',
+    dsh: '/home/u/.local/bin/dsh',
+    gemini: '/home/u/.local/bin/gemini',
+  };
+  const envVar = {
+    codex: 'AGENTLRAY_CODEX_BIN',
+    'claude-code': 'AGENTLRAY_CLAUDE_CODE_BIN',
+    omp: 'AGENTLRAY_OMP_BIN',
+    dsh: 'AGENTLRAY_DSH_BIN',
+    gemini: 'AGENTLRAY_GEMINI_BIN',
   };
   const cases = [
     ['codex', '01900000-0000-7000-8000-000000000001'],
     ['claude-code', 'aaaa1111-2222-4333-8444-555566667777'],
     ['omp', '019a0000-0000-7000-8000-00000000aaaa'],
+    ['dsh', 'dsh-fixture-session-0001'],
+    ['gemini', 'gemini-fixture-session-0001'],
   ];
   for (const [platform, id] of cases) {
     const res = runCli(home, ['sessions', 'resume', '--platform', platform, '--id', id, '--json'], {
-      AGENTLRAY_CODEX_BIN: bins.codex,
-      AGENTLRAY_CLAUDE_CODE_BIN: bins['claude-code'],
-      AGENTLRAY_OMP_BIN: bins.omp,
+      [envVar[platform]]: bins[platform],
     });
     assert.equal(res.status, 0, `${platform} resume 应成功`);
     const doc = JSON.parse(res.stdout);

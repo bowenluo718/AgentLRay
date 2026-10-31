@@ -34,7 +34,14 @@ const DIR_FIELD_BY_ID: Partial<Record<string, { key: keyof DirSettings; label: s
 };
 
 /** resume 续跑配套的内置平台（其余内置无 resume 流程，不展示命令输入）。 */
-const RESUME_BUILTIN_IDS: Record<string, true> = { codex: true, 'claude-code': true, omp: true };
+const RESUME_BUILTIN_IDS: Record<string, true> = {
+  codex: true,
+  'claude-code': true,
+  omp: true,
+  dsh: true,
+  gemini: true,
+  hermes: true,
+};
 
 // 会话状态时间配置：存服务端 ~/.agentlray/settings.json 的 status section，
 // 保存即注入 lib/status.js setStatusConfig，使各平台状态判定立即使用新窗口。
@@ -173,7 +180,7 @@ export function SettingsDialog({
       }),
     [platforms]
   );
-  // resume 续跑配套行：内置三平台 + 声明了 resume 契约的自定义平台。
+  // resume 续跑配套行：内置六平台 + 声明了 resume 契约的自定义平台。
   const binsRows = useMemo(
     () =>
       selectablePlatforms(platforms)
@@ -438,14 +445,14 @@ export function SettingsDialog({
                   type="number"
                   min="1"
                   value={draft.llm.analysisTimeoutMs}
-                  placeholder="10"
+                  placeholder="15"
                   onChange={(e) => {
                     setDraft((d) => ({ ...d, llm: { ...d.llm, analysisTimeoutMs: e.target.value } }));
                     touch('llm');
                   }}
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  「提示词画像」分析的单次 LLM 请求上限，默认 10 分钟；留空 = 默认。超过时限自动中止并提示，遇慢端点可调大
+                  「提示词画像」分析的单次 LLM 请求上限，默认 15 分钟；留空 = 默认。超过时限自动中止并提示，遇慢端点可调大
                 </p>
               </div>
             </div>

@@ -24,7 +24,7 @@ export interface PlatformInfo {
   label: string | null;
   builtin: boolean;
   capabilities: PlatformCapabilities;
-  /** 是否声明原生续跑契约（内置三平台，或自定义适配器 resume: { bin, args }）。 */
+  /** 是否声明原生续跑契约（内置六平台，或自定义适配器 resume: { bin, args }）。 */
   resume: boolean;
   broken: boolean;
   /** 仅 broken 条目：加载/校验失败原因。 */

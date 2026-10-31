@@ -376,6 +376,10 @@ export function resumeCommand(
   if (platform === 'codex') cmd = `${bin || 'codex'} resume ${id} --yolo`;
   else if (platform === 'claude-code') cmd = `${bin || 'claude'} --dangerously-skip-permissions --resume ${id}`;
   else if (platform === 'omp') cmd = `${bin || 'omp'} --auto-approve --resume=${id}`;
+  // dsh pi-tui 交互式续跑（web 界面创建的会话；pi-tui 解析 --resume，非 headless 的 --session-id）
+  else if (platform === 'dsh') cmd = `${bin || 'dsh'} --profile pi-tui --preset standard --resume ${id}`;
+  else if (platform === 'gemini') cmd = `${bin || 'gemini'} -r ${id} --approval-mode=yolo`;
+  else if (platform === 'hermes') cmd = `${bin || 'hermes'} --resume ${id} --yolo`;
   else return null;
   return cwd ? `cd ${cwd} && ${cmd}` : cmd;
 }

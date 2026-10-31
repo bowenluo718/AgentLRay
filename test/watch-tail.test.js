@@ -10,6 +10,7 @@ const {
   noteEndTurn,
   noteEnded,
   addPending,
+  resolvePending,
   resolveAllPending,
   finishTail,
 } = require('../lib/platforms/tail-state');
@@ -105,6 +106,26 @@ test('同批 addPending→resolvePending 净清零（gemini 内联结果序列�
   const tail = finishTail(st);
   assert.equal(tail.pendingToolAt, null);
   assert.equal(tail.pendingNewestAt, null);
+});
+
+test('乱序：tool_result 先于 tool_use（co-mind 落盘偶发）→ 不残留 pending，不误判待输入', () => {
+  // co-mind 会话落盘偶发把 tool_result 记录排到对应 tool_use 之前（时间戳倒挂）。
+  // 单遍扫描先遇 result、后遇 use：残留 pending 会把已推进/已结束的会话误判成
+  // "待用户输入"（awaiting-input），而非正确的回合完成等待（waiting）。
+  const st = createTailState();
+  // 先落 tool_result（user 记录）：此时 use 尚未 addPending → resolve 记"已闭环"。
+  resolvePending(st, 'w1');
+  // 后落 tool_use（assistant 记录）：应跳过，不产生 pending。
+  addPending(st, 'w1', '2026-10-23T04:00:00.000Z', 'Write');
+  noteAssistant(st, '2026-10-23T04:20:00.000Z');
+  noteEndTurn(st, '2026-10-23T04:20:00.000Z');
+
+  const tail = finishTail(st);
+  assert.equal(tail.pendingToolAt, null);
+  assert.equal(tail.pendingNewestAt, null);
+  assert.equal(tail.oldestPendingToolName, null);
+  // 回合完成、无更新 prompt → waiting（非 awaiting-input）。
+  assert.equal(deriveStatus(tail, { lastActivity: '2026-10-23T04:20:00.000Z' }, NOW), 'waiting');
 });
 
 test('resolveAllPending：清除全部未应答调用（omp session_exit 闭环，防 ask 残留误判待输入）', () => {

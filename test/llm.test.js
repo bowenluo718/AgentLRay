@@ -54,7 +54,7 @@ test('LLM settings API: defaults, save, key redaction and validation', async () 
   try {
     // Fresh home: nothing configured, no claude CLI → backend null
     const initial = await getLlm(base);
-    assert.deepEqual(initial, { baseUrl: '', model: '', hasApiKey: false, analysisTimeoutMs: 600000, backend: null });
+    assert.deepEqual(initial, { baseUrl: '', model: '', hasApiKey: false, analysisTimeoutMs: 900000, backend: null });
 
     // Save an endpoint; the key must never be echoed back
     const saved = await putLlm(base, {
@@ -93,7 +93,7 @@ test('LLM settings API: defaults, save, key redaction and validation', async () 
       model: 'other-model',
       analysisTimeoutMs: 0,
     });
-    assert.equal(cleared.analysisTimeoutMs, 600_000);
+    assert.equal(cleared.analysisTimeoutMs, 900_000);
 
     // Validation: baseUrl without model, non-http baseUrl
     await putLlm(base, { baseUrl: 'http://x', model: '' }, 400);
@@ -105,7 +105,7 @@ test('LLM settings API: defaults, save, key redaction and validation', async () 
       baseUrl: '',
       model: '',
       hasApiKey: false,
-      analysisTimeoutMs: 600000,
+      analysisTimeoutMs: 900000,
       backend: null,
     });
   } finally {

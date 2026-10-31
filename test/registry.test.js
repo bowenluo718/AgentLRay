@@ -2,6 +2,11 @@
 // generic routes (sessions/search/watch/insights/export/otlp) rely on.
 // Guards against a new adapter being registered with a missing capability.
 
+// 本测试只守护内置平台契约，须在 require lib/platforms（require 期同步并入
+// ~/.agentlray/platforms/ 自定义适配器）之前禁用自定义平台，避免测试结果依赖
+// 用户机器上是否安装了自定义适配器（如 co-mind）。
+process.env.AGENTLRAY_NO_PLUGINS = '1';
+
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');

@@ -53,6 +53,8 @@ describe('AgentLRay API', () => {
       assert.equal(s1.toolCallCount, 1);
       assert.equal(s1.toolResultCount, 1);
       assert.ok(s1.firstUserMessage.startsWith('fixture: search-needle-alpha'));
+      // codex 无独立 title 记录，title 回退到首条用户消息（前端据此显示而非 UUID）
+      assert.equal(s1.title, s1.firstUserMessage);
       assert.deepEqual(s1.topTools, [{ name: 'shell', count: 1 }]);
     });
 
@@ -178,7 +180,7 @@ describe('AgentLRay API', () => {
   });
 
   describe('resume-command 端点（复制恢复命令，与 CLI resume 同源）', () => {
-    it('内置三平台返回命令串（?cwd= 拼 cd 前缀）', async () => {
+    it('内置六平台返回命令串（?cwd= 拼 cd 前缀）', async () => {
       const codex = await getJson(
         srv.base,
         `/api/codex/sessions/${CODEX1}/resume-command?cwd=${encodeURIComponent('/fixtures/project-alpha')}`
@@ -195,13 +197,24 @@ describe('AgentLRay API', () => {
       const omp = await getJson(srv.base, `/api/omp/sessions/${OMP1}/resume-command`);
       assert.equal(omp.supported, true);
       assert.equal(omp.command, `omp --auto-approve --resume=${OMP1}`);
+
+      const dshSid = 'session-9f8e7d6c-0101-1010-2323-abcde';
+      const dsh = await getJson(srv.base, `/api/dsh/sessions/${dshSid}/resume-command`);
+      assert.equal(dsh.supported, true);
+      assert.equal(dsh.bin, 'dsh');
+      assert.deepEqual(dsh.args, ['--profile', 'pi-tui', '--preset', 'standard', '--resume', dshSid]);
+      assert.equal(dsh.command, `dsh --profile pi-tui --preset standard --resume ${dshSid}`);
+
+      const gemini = await getJson(srv.base, '/api/gemini/sessions/gem-0123/resume-command');
+      assert.equal(gemini.supported, true);
+      assert.equal(gemini.command, 'gemini -r gem-0123 --approval-mode=yolo');
+
+      const hermes = await getJson(srv.base, '/api/hermes/sessions/h-0001/resume-command');
+      assert.equal(hermes.supported, true);
+      assert.equal(hermes.command, 'hermes --resume h-0001 --yolo');
     });
 
     it('无原生续跑平台返回 supported:false，未知平台 404', async () => {
-      const hermes = await getJson(srv.base, '/api/hermes/sessions/x/resume-command');
-      assert.equal(hermes.supported, false);
-      assert.match(hermes.error, /no native resume command/);
-
       const openclaw = await getJson(srv.base, '/api/openclaw/sessions/oc-1/resume-command');
       assert.equal(openclaw.supported, false);
       assert.match(openclaw.error, /no native resume command/);
@@ -215,7 +228,9 @@ describe('AgentLRay API', () => {
       assert.equal(byId.codex.resume, true);
       assert.equal(byId['claude-code'].resume, true);
       assert.equal(byId.omp.resume, true);
-      assert.equal(byId.hermes.resume, false);
+      assert.equal(byId.dsh.resume, true);
+      assert.equal(byId.gemini.resume, true);
+      assert.equal(byId.hermes.resume, true);
       assert.equal(byId.openclaw.resume, false);
     });
   });
@@ -647,6 +662,9 @@ describe('GET /api/settings 全量返回各 section 默认形态（单一聚合�
       codex: { bin: 'codex', configured: false, default: 'codex' },
       'claude-code': { bin: 'claude', configured: false, default: 'claude' },
       omp: { bin: 'omp', configured: false, default: 'omp' },
+      dsh: { bin: 'dsh', configured: false, default: 'dsh' },
+      gemini: { bin: 'gemini', configured: false, default: 'gemini' },
+      hermes: { bin: 'hermes', configured: false, default: 'hermes' },
     });
     assert.deepEqual(all.status, {
       recentActivityMs: { value: 120000, configured: false, default: 120000 },
@@ -731,13 +749,14 @@ describe('ui / cliBins 平台选择与 CLI 命令（CLI 缺省 --platform 与 re
     const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
       cliBins: { codex: 'codex', hermes: '/tmp/hermes', omp: 123 },
     });
-    assert.deepEqual(Object.keys(saved.cliBins).sort(), ['claude-code', 'codex', 'omp']);
+    assert.deepEqual(Object.keys(saved.cliBins).sort(), ['claude-code', 'codex', 'dsh', 'gemini', 'hermes', 'omp']);
     assert.equal(saved.cliBins.codex.bin, 'codex');
+    assert.equal(saved.cliBins.hermes.bin, '/tmp/hermes');
     assert.equal(saved.cliBins.omp.bin, 'omp');
     const onDisk = JSON.parse(
       await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
     );
-    assert.deepEqual(Object.keys(onDisk.cliBins).sort(), ['codex']);
+    assert.deepEqual(Object.keys(onDisk.cliBins).sort(), ['codex', 'hermes']);
   });
 });
 
@@ -812,10 +831,12 @@ describe('GET /api/settings/cli-bins 兼容只读端点（legacy 复制恢复命
     await srv.stop();
   });
 
-  it('返回与 /api/settings.cliBins 相同的响应结构', async () => {
+  it('返回与 /api/settings.cliBins 相同的响应结构（内置六平台）', async () => {
     const compat = await getJson(srv.base, '/api/settings/cli-bins');
-    assert.deepEqual(Object.keys(compat).sort(), ['claude-code', 'codex', 'omp']);
+    assert.deepEqual(Object.keys(compat).sort(), ['claude-code', 'codex', 'dsh', 'gemini', 'hermes', 'omp']);
     assert.equal(compat.codex.bin, 'codex');
     assert.equal(compat.codex.configured, false);
+    assert.equal(compat.hermes.bin, 'hermes');
+    assert.equal(compat.hermes.configured, false);
   });
 });

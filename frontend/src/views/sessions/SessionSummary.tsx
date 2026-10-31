@@ -114,7 +114,14 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
   );
 }
 
-const RESUME_BUILTIN_IDS: Record<string, true> = { codex: true, 'claude-code': true, omp: true };
+const RESUME_BUILTIN_IDS: Record<string, true> = {
+  codex: true,
+  'claude-code': true,
+  omp: true,
+  dsh: true,
+  gemini: true,
+  hermes: true,
+};
 
 function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const platform = useAppStore((s) => s.detailPlatform);
@@ -122,7 +129,7 @@ function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const platforms = useAppStore((s) => s.platforms);
   const [copied, setCopied] = useState(false);
   const builtin = RESUME_BUILTIN_IDS[platform] === true;
-  // 内置三平台本地生成（零往返、后端不可达也可用）；自定义平台是否声明原生续跑由
+  // 内置六平台本地生成（零往返、后端不可达也可用）；自定义平台是否声明原生续跑由
   // GET /api/platforms 的 resume 标志决定，命令串其后端生成（args 是适配器 JS）。
   const customResume = platforms.some((p) => p.id === platform && p.resume);
   const supported = builtin || customResume;

@@ -3,8 +3,8 @@
 //
 //   list   按条件查询会话列表（全部平台；openclaw 缺省 --agent = 合并全部 agents）
 //   show   查看单个会话详细信息（会话元信息 + 消息时间线；openclaw 缺省 --agent 跨 agent 查找）
-//   resume 生成并（可选）执行续跑命令（内置 codex / claude-code / omp；
-//          自定义平台可经适配器 resume opt-in 接入）
+//   resume 生成并（可选）执行续跑命令（内置 codex / claude-code / omp / dsh /
+//          gemini / hermes；自定义平台可经适配器 resume opt-in 接入）
 //
 // 与 inspect.js 相同的输出约定：--json 输出 {schemaVersion:1,…}，错误为
 // {schemaVersion:1, kind:'error', error:{code,message}}；退出码 0 = 命令成功
@@ -551,11 +551,11 @@ function runChild(bin, args, cwd) {
 async function resumeSession(opts, json) {
   const platform = resolvePlatform(opts.platform);
   if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
-  // 无原生续跑契约的平台快速失败（内置三平台，或自定义 resume opt-in；契约判断
+  // 无原生续跑契约的平台快速失败（内置六平台，或自定义 resume opt-in；契约判断
   // 与命令串构建统一在 lib/resume.js，避免此处与 web 端点各维护一份）。
   if (!hasResumeContract(platform)) {
     throw new Error(
-      `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp are supported.`
+      `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp / dsh / gemini / hermes, or custom platforms declaring resume, are supported.`
     );
   }
 

@@ -39,9 +39,18 @@ function TurnCard({
   onAgentClick: (name: string) => void;
 }) {
   const dur = Math.max(turn.end - turn.start, 1);
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="mb-3 overflow-hidden rounded-lg border border-border">
-      <div className="flex items-baseline gap-2.5 border-b border-border bg-[hsl(var(--panel-alt))] px-3 py-1.5 text-sm">
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="flex w-full cursor-pointer items-baseline gap-2.5 border-b border-border bg-[hsl(var(--panel-alt))] px-3 py-1.5 text-left text-sm transition-colors hover:bg-[hsl(var(--panel-alt)_/_0.7)]"
+        aria-expanded={expanded}
+      >
+        <span className="shrink-0 text-xs text-muted-foreground transition-transform">
+          {expanded ? '▾' : '▸'}
+        </span>
         <span className="shrink-0 font-mono text-xs text-muted-foreground">
           {new Date(turn.start).toLocaleTimeString()}
         </span>
@@ -51,8 +60,9 @@ function TurnCard({
         <span className="shrink-0 font-mono text-xs text-[#58a6ff]">
           {formatDurationCompact(turn.end - turn.start)}
         </span>
-      </div>
-      <div className="px-3 pb-2.5 pt-1.5">
+      </button>
+      {expanded && (
+        <div className="px-3 pb-2.5 pt-1.5 pr-10">
         {turn.spans.map((s, i) => {
           const left = ((s.start - turn.start) / dur) * 100;
           const width = Math.max(((s.end - s.start) / dur) * 100, 0.4);
@@ -97,7 +107,8 @@ function TurnCard({
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -31,7 +31,7 @@
 - **Spawn 追踪** — 检测并导航父子 Agent 之间的调用关系
 - **OMP 子 Agent** — OMP 会话派生的子 Agent 会在摘要区以标签列出，点击即可查看子 Agent 的完整对话
 - **消息时间线** — 可视化对话流程图，不同角色用不同颜色标识
-- **Resume 命令** — 一键复制该会话在原 CLI 中的续跑命令（`codex resume`、`claude --resume`、`omp --resume=`）
+- **Resume 命令** — 一键复制该会话在原 CLI 中的续跑命令（`codex resume`、`claude --resume`、`omp --resume=`、`dsh --profile pi-tui --preset standard --resume`、`gemini -r`、`hermes --resume`）
 - **摘要可折叠** — 需要更多阅读空间时可折叠会话摘要
 - **自动刷新** — 会话列表和消息实时更新；状态徽标随日志增长即时变化（SSE 推送）并按 5s 轮询校准
 - **设置面板** — 在页面上直接配置各平台目录，保存到 localStorage，无需重启
@@ -121,7 +121,7 @@ npm start
 - **预览与展开** — 每个 session 行内直接预览首条 prompt，点击展开完整列表（markdown 渲染）
 - **搜索** — 实时过滤 prompt / 目录 / session
 - **Export JSON** — 导出全部提取的 prompt 用于离线处理
-- **分析优化** — 相似 prompt 聚类成模板，结合每个模板的 session 效果归因（平均轮次、工具调用、错误率），由配置的 LLM 后端（设置 → LLM 接口）生成模板改写建议；未配置端点时改由服务器 PATH 中的 [`claude` CLI](https://claude.com/claude-code) 生成。两者都没有时，聚类和归因仍然可用，接口会把缺失的后端报告为 `llmError`。单次分析请求有 LLM 超时上限（默认 10 分钟，可在 设置 → LLM 接口 调整）；超时自动中止并给出可读的超时提示，而不是裸透 undici 的 "operation aborted" 文案
+- **分析优化** — 相似 prompt 聚类成模板，结合每个模板的 session 效果归因（平均轮次、工具调用、错误率），由配置的 LLM 后端（设置 → LLM 接口）生成模板改写建议；未配置端点时改由服务器 PATH 中的 [`claude` CLI](https://claude.com/claude-code) 生成。两者都没有时，聚类和归因仍然可用，接口会把缺失的后端报告为 `llmError`。单次分析请求有 LLM 超时上限（默认 15 分钟，可在 设置 → LLM 接口 调整）。请求走 node http(s) 直连（NO_PROXY 内网/本地端点）或 Node 代理（外部端点）；慢网关不再被 undici 默认 5 分钟 headers 超时误杀成 "fetch failed"，超时由本请求的超时上限收口并给出可读提示，网络错误会带上底层原因（连接拒绝/证书/DNS）
 - **优化单条** — 悬停任意 prompt 点击「优化」，内联生成 LLM 改写版本（在 设置 → LLM 接口 配置后端，或 PATH 上有 `claude` CLI）
 
 ### 键盘快捷键
@@ -173,9 +173,9 @@ npm start
 
 ### 平台 CLI 命令
 
-`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/settings.json` 的 `cliBins` section）> 默认命令名**。
+`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`、`dsh`、`gemini`、`hermes`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/settings.json` 的 `cliBins` section）> 默认命令名**。
 
-**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp 填写可执行命令（绝对路径）。经对话框底部统一 Save 提交后写服务端 `~/.agentlray/settings.json`（`cliBins` section）；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
+**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp / dsh / gemini / hermes 填写可执行命令（绝对路径）。经对话框底部统一 Save 提交后写服务端 `~/.agentlray/settings.json`（`cliBins` section）；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
 
 **通过环境变量（优先级最高）：**
 
@@ -183,6 +183,9 @@ npm start
 AGENTLRAY_CODEX_BIN=/path/to/codex \
 AGENTLRAY_CLAUDE_CODE_BIN=/home/0668000603/.nvm/versions/node/v22.19.0/bin/claude \
 AGENTLRAY_OMP_BIN=/path/to/omp \
+AGENTLRAY_DSH_BIN=/path/to/dsh \
+AGENTLRAY_GEMINI_BIN=/path/to/gemini \
+AGENTLRAY_HERMES_BIN=/path/to/hermes \
 npm start
 ```
 
