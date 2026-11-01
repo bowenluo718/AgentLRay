@@ -142,15 +142,17 @@ npm start
 
 ### 默认目录
 
-| 平台        | 默认路径                      |
-|-------------|-------------------------------|
-| OpenClaw    | `~/.openclaw/agents`          |
-| Codex       | `~/.codex/sessions`           |
-| Claude Code | `~/.claude/projects`          |
-| Hermes      | `~/.hermes`                   |
-| OMP         | `~/.omp/agent/sessions`       |
-| DeepSeek Harness | `~/.dsh/sessions`（同时识别 `DSH_HOME`） |
-| Gemini CLI  | `~/.gemini/tmp`               |
+| 平台        | 默认路径                      | Windows 提示 |
+|-------------|-------------------------------|--------------|
+| OpenClaw    | `~/.openclaw/agents`          | 不一致时设 `OPENCLAW_DIR` |
+| Codex       | `~/.codex/sessions`           | 不一致时设 `CODEX_DIR` |
+| Claude Code | `~/.claude/projects`          | 不一致时设 `CLAUDE_CODE_DIR` |
+| Hermes      | `~/.hermes`                   | 不一致时设 `HERMES_DIR` |
+| OMP         | `~/.omp/agent/sessions`       | 不一致时设 `OMP_DIR` |
+| DeepSeek Harness | `~/.dsh/sessions`（同时识别 `DSH_HOME`） | 不一致时设 `DSH_DIR` |
+| Gemini CLI  | `~/.gemini/tmp`               | 不一致时设 `GEMINI_DIR` |
+
+> **Windows 提示**：默认路径中的 `~` 即家目录，由 `os.homedir()` 解析（Windows 取 `%USERPROFILE%`，macOS/Linux 取 `HOME`），支持 `AGENTLRAY_HOME` 覆盖。多数跨平台 CLI 在 Windows 上也把各自的点目录放在 `%USERPROFILE%` 下，开箱即用；**若某平台 CLI 在 Windows 上的实际数据目录与上表不一致，请通过对应的环境变量覆盖**（`OPENCLAW_DIR` / `CODEX_DIR` / `CLAUDE_CODE_DIR` / `HERMES_DIR` / `OMP_DIR` / `DSH_DIR` / `GEMINI_DIR`），不内置 Windows 专属硬编码映射表。
 
 ### 自定义目录
 

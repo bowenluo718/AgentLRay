@@ -43,11 +43,42 @@ function runCli(home, args, extraEnv = {}) {
   });
 }
 
+// runCli 的异步版本（用 spawn 而非 spawnSync）：omp 持有/终止用例需在 CLI 运行期间
+// 让本测试进程的事件循环保持自由，才能及时 reap 被 SIGKILL 的持有实例（spawnSync
+// 会阻塞事件循环，使被杀的持有进程滞留为僵尸，导致 lib 侧仅用 process.kill(pid,0)
+// 的存活判定误认为仍存活）。返回 { status, stdout, stderr }，语义与 spawnSync 一致。
+function runCliAsync(home, args, extraEnv = {}) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(process.execPath, [BIN, ...args], {
+      env: { ...process.env, HOME: home, ...extraEnv },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d) => {
+      stdout += d;
+    });
+    child.stderr.on('data', (d) => {
+      stderr += d;
+    });
+    child.on('error', (err) => resolvePromise({ status: null, stdout, stderr, error: err }));
+    child.on('close', (code) => resolvePromise({ status: code, stdout, stderr }));
+  });
+}
+
 // 构造一个可执行假平台 CLI（spawn 用，验证 --run 传递的参数/工作目录/退出码）。
+// 用 process.execPath 写 Node 脚本（跨平台可 spawn），不再依赖 #!/bin/sh：
+// 语义与原 shell 版一致——逐行写 arg:参数、追加 cwd:工作目录、以指定退出码退出。
 async function makeFakeBin(home, bin, exitCode = 0, outFile) {
   const bindir = path.join(home, '.fakebin');
   await fsp.mkdir(bindir, { recursive: true });
-  const script = `#!/bin/sh\nprintf 'arg:%s\\n' "$@" > "${outFile}"\nprintf 'cwd:%s\\n' "$PWD" >> "${outFile}"\nexit ${exitCode}\n`;
+  const script =
+    `#!${process.execPath}\n` +
+    `const fs = require('node:fs');\n` +
+    `let out = '';\n` +
+    `process.argv.slice(2).forEach((a) => { out += 'arg:' + a + '\\n'; });\n` +
+    `out += 'cwd:' + process.cwd() + '\\n';\n` +
+    `fs.writeFileSync(${JSON.stringify(outFile)}, out);\n` +
+    `process.exit(${exitCode});\n`;
   await fsp.writeFile(path.join(bindir, bin), script, { mode: 0o755 });
   return bindir;
 }
@@ -76,17 +107,11 @@ ${resume}};
   await fsp.writeFile(path.join(dir, 'my-copilot.js'), source);
 }
 
-// 判定进程仍存活：已消失或已成僵尸（终止待回收）都视为不再运行。
+// 判定进程仍存活：已消失视为不再运行。跨平台可用——process.kill(pid, 0) 仅做
+// 存活探测（Windows 同样支持），不依赖 Linux 的 /proc/<pid>/stat 僵尸判定。
 function isAlive(pid) {
   try {
     process.kill(pid, 0);
-  } catch {
-    return false;
-  }
-  try {
-    const stat = require('node:fs').readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const idx = stat.indexOf(') ');
-    if (idx !== -1 && stat[idx + 2] === 'Z') return false; // 僵尸
     return true;
   } catch {
     return false;
@@ -630,7 +655,7 @@ test('sessions resume 对未被持有的 omp 会话放行（livePid=null，非�
   assert.doesNotMatch(res.stderr, /持有|派生/);
 });
 
-test('sessions resume --run 自动终止持有实例后同 id 续跑（不接受派生）', async () => {
+test('sessions resume --run 自动终止持有实例后同 id 续跑（不接受派生）', { skip: process.platform === 'win32' }, async () => {
   const home = await makeTmpHome();
   const log = path.join(home, 'fake-kill.log');
   const bindir = await makeFakeBin(home, 'omp', 0, log);
@@ -646,7 +671,7 @@ test('sessions resume --run 自动终止持有实例后同 id 续跑（不接受
   const workdir = path.join(home, 'work');
   await fsp.mkdir(workdir, { recursive: true });
   try {
-    const res = runCli(
+    const res = await runCliAsync(
       home,
       ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--run', '--cwd', workdir, '--json'],
       { PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` }
@@ -670,7 +695,7 @@ test('sessions resume --run 自动终止持有实例后同 id 续跑（不接受
   }
 });
 
-test('sessions resume --run 持有实例忽略 SIGTERM 时 SIGKILL 兜底后续跑', async () => {
+test('sessions resume --run 持有实例忽略 SIGTERM 时 SIGKILL 兜底后续跑', { skip: process.platform === 'win32' }, async () => {
   const home = await makeTmpHome();
   const log = path.join(home, 'fake-kill2.log');
   const bindir = await makeFakeBin(home, 'omp', 0, log);
@@ -685,7 +710,7 @@ test('sessions resume --run 持有实例忽略 SIGTERM 时 SIGKILL 兜底后续�
   const workdir = path.join(home, 'work2');
   await fsp.mkdir(workdir, { recursive: true });
   try {
-    const res = runCli(
+    const res = await runCliAsync(
       home,
       ['sessions', 'resume', '--platform', 'omp', '--id', '019a0000-0000-7000-8000-00000000aaaa', '--run', '--cwd', workdir, '--json'],
       { PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` }
@@ -703,7 +728,7 @@ test('sessions resume --run 持有实例忽略 SIGTERM 时 SIGKILL 兜底后续�
   }
 });
 
-test('sessions resume 打印模式检出持有实例仅提示、不自动终止', async () => {
+test('sessions resume 打印模式检出持有实例仅提示、不自动终止', { skip: process.platform === 'win32' }, async () => {
   const home = await makeTmpHome();
   const fakePath = path.join(os.tmpdir(), `holder3-${Date.now()}`, '019a0000-0000-7000-8000-00000000aaaa.jsonl');
   const holder = spawn('bash', ['-c', `exec -a "omp --resume ${fakePath} fakeholder" sleep 300; exit 0`], {

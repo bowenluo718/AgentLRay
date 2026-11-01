@@ -177,11 +177,16 @@ function labelFor(status) {
 // 与文件尾是否有 session_exit 无关（早前"先追加 session_exit 收尾"方案已实证无效）。
 // 返回持有进程的 pid，未检测到返回 null。排除本工具自身进程树（cmdline 含 agentlray）。
 function liveOmpPidForSession(sessionFilePath, sessionId) {
+  // 依赖 /proc 扫描，仅 Linux 可用；Windows 等平台暂不支持检测运行中的 omp 持有实例。
+  if (process.platform !== 'linux') {
+    process.stderr.write('agentlray sessions: 注意：Windows 暂不支持检测运行中的 omp 持有实例。\n');
+    return null;
+  }
   let entries;
   try {
     entries = fs.readdirSync('/proc');
   } catch {
-    return null; // 非 Linux：尽力而为，不阻塞
+    return null; // /proc 不可读（如受限容器）：尽力而为，不阻塞
   }
   for (const raw of entries) {
     if (!/^\d+$/.test(raw)) continue;
@@ -237,18 +242,27 @@ function sleepSync(ms) {
 // 优先 SIGTERM（让 OMP 有机会收尾、写 session_exit），等待退出；超时 SIGKILL 兜底。
 // 返回是否已确认进程不再存活。
 function terminateOmpHolder(pid, { termWaitMs = 8000, killWaitMs = 3000 } = {}) {
+  // Windows 无 SIGTERM/SIGKILL 语义、无 /proc 僵尸判定，暂不支持自动终止；
+  // 打印提示并视为未确认退出（返回 false），由调用方走「无法自动终止」路径。
+  if (process.platform !== 'linux') {
+    process.stderr.write(
+      'agentlray sessions: 注意：Windows 暂不支持自动终止 omp 持有实例，请手动结束。\n'
+    );
+    return false;
+  }
   const alive = () => {
+    // 仅用 process.kill(pid, 0) 探测进程存活。僵尸进程（STAT=Z，已终止仅待父
+    // 进程回收）对 kill(pid,0) 仍返回存活，会误判为仍持有会话资源导致同 id 续跑
+    // 被拒——故 Linux 分支保留 /proc/<pid>/stat 的 Z 态判定（本函数仅 Linux 执行）。
     try {
       process.kill(pid, 0);
     } catch {
       return false;
     }
-    // 僵尸：已终止、仅待父进程回收，不持有会话资源，视为已退出。
-    // stat 格式 `pid (comm) state …`；state 是 ') ' 后的首字符。
     try {
       const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
       const idx = stat.indexOf(') ');
-      if (idx !== -1 && stat[idx + 2] === 'Z') return false;
+      if (idx !== -1 && stat[idx + 2] === 'Z') return false; // 僵尸：视为已退出
     } catch {
       // 竞态：进程刚好消失
     }
@@ -539,13 +553,58 @@ async function showSession(opts, json) {
 function runChild(bin, args, cwd) {
   return new Promise((resolvePromise) => {
     let code;
-    const child = spawn(bin, args, { cwd: cwd || undefined, stdio: 'inherit' });
+    // 数组参数 + shell:true 会触发 Node DEP0190：参数仅拼接不转义，--message 等
+    // 用户输入可被注入 cmd.exe 执行（K1）。因此 win32 改为先 resolve 出可执行文件
+    // 的完整路径（.cmd/.bat/.exe 依次探测），再以无 shell 方式 spawn——既消除注入面，
+    // 又让 .cmd 脚本无需经 cmd.exe 即可执行（Node 直接 spawn .cmd 也能跑）。
+    const exec = resolveExecutablePath(bin);
+    const child = spawn(exec, args, { cwd: cwd || undefined, stdio: 'inherit' });
     child.on('error', (error) => resolvePromise({ error }));
     child.on('close', (exitCode) => {
       code = typeof exitCode === 'number' ? exitCode : 1;
       resolvePromise({ code });
     });
   });
+}
+
+// win32 将裸命令名/相对路径 resolve 为可执行文件全路径（绝对路径原样返回）。
+// 按 PATH 顺序探测 <dir>/<name>、<dir>/<name>.cmd/.bat/.exe/.com；全部 miss 时
+// 回退传入原值（spawn 报 ENOENT，错误信息含原命令名，便于诊断）。POSIX 直接返回
+// 原值（PATH 解析交给 spawn 自身，行为与改动前一致）。
+function resolveExecutablePath(bin) {
+  if (process.platform !== 'win32' || !bin) return bin;
+  if (path.isAbsolute(bin)) {
+    return binWithSuffix(bin);
+  }
+  const ext = path.extname(bin);
+  const suffixes = ext ? [''] : ['.cmd', '.bat', '.exe', '.com'];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    for (const suffix of suffixes) {
+      const candidate = path.join(dir, bin + suffix);
+      try {
+        fs.accessSync(candidate);
+        return candidate;
+      } catch {
+        /* keep scanning */
+      }
+    }
+  }
+  return bin;
+}
+
+function binWithSuffix(bin) {
+  if (path.extname(bin)) return bin;
+  const suffixes = ['.cmd', '.bat', '.exe', '.com'];
+  for (const suffix of suffixes) {
+    try {
+      fs.accessSync(bin + suffix);
+      return bin + suffix;
+    } catch {
+      /* keep scanning */
+    }
+  }
+  return bin;
 }
 
 async function resumeSession(opts, json) {
@@ -726,4 +785,4 @@ async function main(args, _mode = 'sessions') {
   }
 }
 
-module.exports = { main, HELP, resumeSession, listSessions, showSession };
+module.exports = { main, HELP, resumeSession, listSessions, showSession, resolveExecutablePath };

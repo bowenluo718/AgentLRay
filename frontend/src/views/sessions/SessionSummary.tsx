@@ -6,7 +6,7 @@ import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import type { SessionDetail } from '@/api/types';
-import { getCliBins, getResumeCommand } from '@/api/client';
+import { getResumeCommand } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
@@ -16,7 +16,7 @@ import { TurnLedger } from './TurnLedger';
 import type { ExportFormat } from './exports';
 import { runExport } from './exports';
 import type { MsgFilter, TimingAnalysis } from './lib';
-import { computeSessionStats, formatDate, formatNumber, resumeCommand, sessionCost, summarizeTokens } from './lib';
+import { computeSessionStats, formatDate, formatNumber, sessionCost, summarizeTokens } from './lib';
 import { useSessionsList } from './queries';
 
 function FilterBadge({
@@ -129,28 +129,21 @@ function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const platforms = useAppStore((s) => s.platforms);
   const [copied, setCopied] = useState(false);
   const builtin = RESUME_BUILTIN_IDS[platform] === true;
-  // 内置六平台本地生成（零往返、后端不可达也可用）；自定义平台是否声明原生续跑由
-  // GET /api/platforms 的 resume 标志决定，命令串其后端生成（args 是适配器 JS）。
+  // 内置六平台与自定义平台统一走服务端 resume-command 生成命令串（单一真源在
+  // lib/resume.js buildResumeCommand，内部按 process.platform 出 POSIX/PowerShell 并
+  // 解析同一份 cli-bins 配置）。自定义平台是否声明原生续跑由 GET /api/platforms 的
+  // resume 标志决定。
   const customResume = platforms.some((p) => p.id === platform && p.resume);
   const supported = builtin || customResume;
 
-  // 读取平台 CLI 命令配置（GET /api/settings 的 cliBins section，未配置回退默认命令名），
-  // 与后端 bin/sessions.js resume 使用同一命令，保证复制即所见即所得。
-  const cliBins = useQuery({ queryKey: ['cli-bins'], queryFn: getCliBins });
-  const bin = builtin ? cliBins.data?.[platform]?.bin : undefined;
-  // 自定义平台由后端 buildResumeCommand 生成命令串（内部解析同一份 cli-bins 配置）。
   const remote = useQuery({
     queryKey: ['resume-command', platform, selectedSessionId, cwd ?? ''],
     queryFn: () => getResumeCommand(platform, selectedSessionId, cwd),
-    enabled: customResume,
+    enabled: supported,
   });
   if (!supported) return null;
 
-  const cmd = builtin
-    ? resumeCommand(platform, selectedSessionId, cwd, bin)
-    : remote.data?.supported
-      ? (remote.data.command ?? null)
-      : null;
+  const cmd = remote.data?.supported ? (remote.data.command ?? null) : null;
   return (
     <button
       type="button"

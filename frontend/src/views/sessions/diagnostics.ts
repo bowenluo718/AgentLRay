@@ -626,8 +626,9 @@ function verificationCommand(call: RecordedCall): {
   const simple = (segment: CommandSegment) => segment.tokens.every((item) => !/[<>]/.test(item.value));
   const cd = segments[0];
   const direct = segments.length === 1 && simple(segments[0]);
+  // cd 目录前缀跨平台判定：POSIX 绝对路径（/…）、Windows 盘符（C:\… 或 C:/…）、UNC（\\…）
   const hasDirectoryPrefix = cd.separator === '&&' && cd.tokens.length === 2 &&
-    cd.tokens[0].value === 'cd' && !cd.tokens[0].quoted && /^\//.test(cd.tokens[1].value) &&
+    cd.tokens[0].value === 'cd' && !cd.tokens[0].quoted && /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(cd.tokens[1].value) &&
     recognized.length === 1 && recognized[0].index === 1;
   const directoryPrefix = hasDirectoryPrefix && segments.length === 2 && simple(segments[1]);
   return { command, basis: recognized[0].basis, fragments: recognized.map((entry) => entry.fragment),

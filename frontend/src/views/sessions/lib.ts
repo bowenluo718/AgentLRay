@@ -1,6 +1,6 @@
 // Pure helpers for the sessions view — ported from public/js/app.js (algorithms unchanged).
 
-import type { MessageContentPart, Platform, SessionMessage, SessionSummary } from '@/api/types';
+import type { MessageContentPart, SessionMessage, SessionSummary } from '@/api/types';
 import { getTextContent, parseTimestampMs } from '@/lib/pure';
 
 export type MsgFilter = null | 'user' | 'assistant' | 'toolCall' | 'toolResult' | 'error' | 'spawn';
@@ -356,32 +356,6 @@ export function buildProjectOptions(
   return [...counts.entries()]
     .map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value));
-}
-
-/**
- * Terminal command that resumes a session (legacy resumeCmdBtn); null when
- * unsupported. `bin` is the platform's configured CLI command (from
- * GET /api/settings's cliBins section); when omitted, falls back to the default
- * command name. args shape stays in sync with server lib/resume.js RESUME_BINS
- * (built-in platforms only — custom platforms build via
- * GET /api/:platform/sessions/:id/resume-command in ResumeButton).
- */
-export function resumeCommand(
-  platform: Platform,
-  id: string,
-  cwd: string | null | undefined,
-  bin?: string
-): string | null {
-  let cmd = '';
-  if (platform === 'codex') cmd = `${bin || 'codex'} resume ${id} --yolo`;
-  else if (platform === 'claude-code') cmd = `${bin || 'claude'} --dangerously-skip-permissions --resume ${id}`;
-  else if (platform === 'omp') cmd = `${bin || 'omp'} --auto-approve --resume=${id}`;
-  // dsh pi-tui 交互式续跑（web 界面创建的会话；pi-tui 解析 --resume，非 headless 的 --session-id）
-  else if (platform === 'dsh') cmd = `${bin || 'dsh'} --profile pi-tui --preset standard --resume ${id}`;
-  else if (platform === 'gemini') cmd = `${bin || 'gemini'} -r ${id} --approval-mode=yolo`;
-  else if (platform === 'hermes') cmd = `${bin || 'hermes'} --resume ${id} --yolo`;
-  else return null;
-  return cwd ? `cd ${cwd} && ${cmd}` : cmd;
 }
 
 export { getTextContent };

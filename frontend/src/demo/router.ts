@@ -108,6 +108,19 @@ function searchFixtures(q: string): SearchResult[] {
   return results;
 }
 
+// 演示用 resume 命令串（与真实后端 buildResumeCommand 的内置平台参数一致，但不含
+// POSIX/PowerShell 分支——demo 在浏览器里按 POSIX 形态展示即可）。无契约平台返回 null。
+function resumeDemoCommand(platform: string, id: string, cwd: string): string | null {
+  let cmd: string | null = null;
+  if (platform === 'codex') cmd = `codex resume ${id} --yolo`;
+  else if (platform === 'claude-code') cmd = `claude --dangerously-skip-permissions --resume ${id}`;
+  else if (platform === 'omp') cmd = `omp --auto-approve --resume=${id}`;
+  else if (platform === 'dsh') cmd = `dsh --profile pi-tui --preset standard --resume ${id}`;
+  else if (platform === 'gemini') cmd = `gemini -r ${id} --approval-mode=yolo`;
+  else if (platform === 'hermes') cmd = `hermes --resume ${id} --yolo`;
+  return cmd === null ? null : cwd ? `cd ${cwd} && ${cmd}` : cmd;
+}
+
 export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   const method = (init?.method || 'GET').toUpperCase();
   if (method !== 'GET') {
@@ -192,6 +205,15 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
       const child = data.childDetails[`${platform}/${seg(3)}/${seg(5)}`];
       if (child) return ok(child);
       return Promise.reject(new Error('Child transcript not available in demo'));
+    }
+    if (seg(4) === 'resume-command') {
+      // 与真实后端 /resume-command 同构（lib/resume.js buildResumeCommand）：演示
+      // 用固定命令串。内置六平台可演示；其余（openclaw 等无 resume 契约）返回
+      // supported:false，ResumeButton 据此不渲染按钮。
+      const id = seg(3);
+      const cwd = parsed.searchParams.get('cwd') || '';
+      const cmd = resumeDemoCommand(platform, id, cwd);
+      return ok({ supported: !!cmd, command: cmd });
     }
   }
 
