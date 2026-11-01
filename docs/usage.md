@@ -33,6 +33,8 @@ Detailed feature catalog, screenshots, installation alternatives, configuration 
 - **Resume command** — One click copies the exact command to resume a session in its own CLI (`codex resume`, `claude --resume`, `omp --resume=`, `dsh --profile pi-tui --preset standard --resume`, `gemini -r`, `hermes --resume`)
 - **Collapsible summary** — Fold the session summary away when you want the full height for messages
 - **Auto-refresh** — Live-updating session list and messages
+- **Kanban board** — A four-state task board view (`awaiting-input` / `working` / `waiting` / `stopped`) built from the same list cache and live status as the sidebar; columns truncate at `maxPerStatus` (default 20, configurable under Settings → 任务看板), stack vertically on narrow screens. Click a card to open that session in the Sessions view.
+- **Light / dark theme** — Toggle between light and dark in the top bar (follows the system once on first launch, then fixed by your manual choice, persisted in `agent-xray-settings`).
 - **Settings panel** — Configure platform directories from the UI, persisted in localStorage
 - **Session backup** — Incremental archive of your Codex, Claude Code, OMP, DeepSeek Harness and Gemini CLI session logs into `~/.agentlray/archive` (Hermes and OpenClaw are not archived), one click in settings (also runs automatically, daily); unchanged files are skipped
 - **Keyboard navigation** — Arrow keys to move between sessions
@@ -247,6 +249,7 @@ A complete runnable, annotated sample adapter (flat JSONL platform, with `find` 
 
 | Endpoint | Description |
 |----------|-------------|
+| `GET /api/status-labels` | Unified session-status vocabulary `{ order, labels }` for the four states (single source for both UIs) |
 | `GET /api/agents` | List OpenClaw agents |
 | `GET /api/agents/:name/sessions` | List sessions for an agent |
 | `GET /api/agents/:name/sessions/:id` | Get session messages |

@@ -9,3 +9,4 @@ frontend/dist/
 
 output/
 .playwright-cli/
+*.tgz

@@ -131,22 +131,24 @@ test('交互类工具（ask）等用户回复：超取证上界仍 awaiting-inpu
   );
 });
 
-test('交互类工具（ask）进行中工作上界内 → working（与普通工具一致）', () => {
+test('交互类工具（ask）发起即待输入：刚刚发起(30s前) → awaiting-input（守护"发起即判"）', () => {
+  // ask 一旦发起 agent 即停在界面等用户（与 AskUserQuestion 同语义），
+  // 不进入 working 上界判断——30s 前发起即判 awaiting-input。
   assert.equal(
     deriveStatus(
-      { pendingToolAt: secAgo(30), oldestPendingToolName: 'ask' },
+      { pendingToolAt: secAgo(30), pendingNewestAt: secAgo(30), oldestPendingToolName: 'ask' },
       { lastActivity: secAgo(30) },
       NOW
     ),
-    STATUS.WORKING
+    STATUS.AWAITING_INPUT
   );
   assert.equal(
     deriveStatus(
-      { pendingToolAt: minAgo(12), oldestPendingToolName: 'ask' },
+      { pendingToolAt: minAgo(12), pendingNewestAt: minAgo(12), oldestPendingToolName: 'ask' },
       { lastActivity: minAgo(12) },
       NOW
     ),
-    STATUS.WORKING
+    STATUS.AWAITING_INPUT
   );
 });
 

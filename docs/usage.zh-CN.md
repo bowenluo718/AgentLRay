@@ -34,6 +34,8 @@
 - **Resume 命令** — 一键复制该会话在原 CLI 中的续跑命令（`codex resume`、`claude --resume`、`omp --resume=`、`dsh --profile pi-tui --preset standard --resume`、`gemini -r`、`hermes --resume`）
 - **摘要可折叠** — 需要更多阅读空间时可折叠会话摘要
 - **自动刷新** — 会话列表和消息实时更新；状态徽标随日志增长即时变化（SSE 推送）并按 5s 轮询校准
+- **任务看板视图** — 按会话四态（待用户输入 / 工作中 / 等待中 / 已停止）分桶的任务看板，与侧栏共用同一份列表缓存与实时状态；每列按 `maxPerStatus`（默认 20，可在 设置 → 任务看板 调整）截断，窄屏纵向堆叠。点击卡片即可在 Sessions 视图打开该会话
+- **白天 / 黑夜主题** — 顶栏一键切换亮/暗主题（首启跟随系统一次，之后由手动选择固定，持久化在 `agent-xray-settings`）
 - **设置面板** — 在页面上直接配置各平台目录，保存到 localStorage，无需重启
 - **会话备份** — 增量归档 Codex、Claude Code、OMP、DeepSeek Harness、Gemini CLI 的会话日志到 `~/.agentlray/archive`（Hermes 与 OpenClaw 不归档），在设置面板一键触发（也会每天自动执行），未变化的文件自动跳过
 - **键盘导航** — 使用方向键在会话之间切换
@@ -243,6 +245,7 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与�
 
 | 接口 | 说明 |
 |------|------|
+| `GET /api/status-labels` | 会话四态的统一状态词汇 `{ order, labels }`（两套 UI 的状态徽标/组头单一来源） |
 | `GET /api/agents` | 获取 OpenClaw Agent 列表 |
 | `GET /api/agents/:name/sessions` | 获取指定 Agent 的会话列表 |
 | `GET /api/agents/:name/sessions/:id` | 获取会话消息详情 |

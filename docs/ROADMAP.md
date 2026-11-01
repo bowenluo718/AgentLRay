@@ -8,7 +8,11 @@
 - **Session browser** with tool-call inspection, trace/waterfall view, spawn tracking and message timeline
 - **Prompt tooling** — extraction (noise filtered), template clustering with outcome attribution, Claude-powered rewrites, and a prompt library that installs entries as native slash commands
 - **Global search** across all platforms, insights dashboard, incremental session backup
-- **React + Vite frontend** served by an Express backend; 348 tests on Node's built-in runner (`npm test`, 2026-09-27), CI on Node 22
+- **React + Vite frontend** served by an Express backend; 400+ tests on Node's built-in runner (`npm test`, 2026-11-01), CI on Node 22
+- **Unified session status** — a four-state model (`awaiting-input` / `working` / `waiting` / `stopped`) derived from record evidence, shared by the sidebar, a kanban board view, the SSE live tail and the terminal CLI; time windows are configurable
+- **Custom platform adapters** — drop a JavaScript adapter into `~/.agentlray/platforms/` to add a platform without touching the source; validated at startup, broken files never block boot
+- **Resume for all built-in platforms** — `codex`/`claude-code`/`omp`/`dsh`/`gemini`/`hermes` native resume from the CLI or a copy-button, with configurable executable resolution; Windows support (PowerShell quoting, `%USERPROFILE%` home) throughout
+- **Light/dark theme, unified settings file** — day/night theme toggle; all server-side settings aggregate in a single `~/.agentlray/settings.json` behind one `GET/PUT /api/settings`
 - **Evidence-backed failure events and local review** with full-result invalidation, evidence navigation and narrow-screen session layout
 
 ## Current priorities
