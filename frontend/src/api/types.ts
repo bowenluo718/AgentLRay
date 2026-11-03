@@ -26,6 +26,8 @@ export interface PlatformInfo {
   capabilities: PlatformCapabilities;
   /** 是否声明原生续跑契约（内置六平台，或自定义适配器 resume: { bin, args }）。 */
   resume: boolean;
+  /** 是否支持新建会话（与后端 hasCreateContract 一致：codex / claude-code / omp / gemini / hermes，或自定义适配器 create 契约）。 */
+  create: boolean;
   broken: boolean;
   /** 仅 broken 条目：加载/校验失败原因。 */
   error?: string;

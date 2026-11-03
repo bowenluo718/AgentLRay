@@ -116,6 +116,24 @@ npm start
 5. **检查工具调用** — 点击 `🔧 tool_name` 按钮展开参数/结果
 6. **导航 Spawn** — 点击 🔗 链接跳转到子 Agent 会话
 
+### 任务看板与新建任务
+
+**任务看板**标签页按会话四态分列展示（待用户输入 / 工作中 / 等待中 / 已停止），顶部有文本筛选框；看板头部有 **「新建任务」** 按钮，弹窗可 spawn 平台 CLI 开一个全新会话。
+
+**弹窗三个字段：**
+
+| 字段 | 说明 |
+| --- | --- |
+| **平台** | 下拉只列**支持新建会话的平台**——codex、claude-code、omp、gemini、hermes。dsh 与 openclaw 不在其中（dsh 是交互式 TUI、无法 headless 传提示词；openclaw 无原生新建命令）。自定义平台仅在适配器声明了 `create` 契约时出现。 |
+| **cwd** | 新会话的工作目录，手动输入。留空则使用平台默认目录。 |
+| **提示词** | 交给新会话的提示词，可空——留空则开交互式会话。 |
+
+**默认值跟随当前选中会话**：有选中会话时预填它的平台与项目路径；无选中会话时用当前筛选的平台、cwd 留空。
+
+**提交后**：后端 spawn 平台 CLI（`POST /api/:platform/sessions/new`）并立即返回实际执行的命令串；页面 toast 提示「已触发 `<platform>` 新建会话」并附命令串供手动复制，看板列表随之刷新。命令串的**单一真源在后端**（`lib/new.js`，与终端 `sessions new` 共享），页面展示与实际执行逐字符一致。
+
+**fire-and-forget 取舍**：spawn 的进程输出被丢弃、进程不被跟踪，页面**不提供查询/终止**——结果需在终端或平台 CLI 侧自行观察。这是刻意取舍：页面只负责触发，会话本身归平台所有。
+
 ### Prompt 视图
 
 点击顶部 **Prompts** 标签（Sessions / Insights 旁），即可看到所有 session 的真人 prompt，按 session 所属工作目录分组。工具结果、斜杠命令回显、系统提醒、任务通知等噪音会被自动过滤。
@@ -195,6 +213,10 @@ npm start
 
 未设置的环境变量与未在面板配置的平台回退到默认命令名。
 
+`agentlray sessions new [message...] --platform <p> [--dir <cwd>] [--run]` 会生成（并可选执行）**新建会话**命令——spawn 平台 CLI 开一个全新会话，带提示词 + 工作目录。可建平台与命令形态：codex（`codex exec --full-auto '<prompt>'`）、claude-code（`claude --dangerously-skip-permissions -p '<prompt>'`）、omp（`omp --auto-approve '<prompt>'`）、gemini（`gemini -p --approval-mode=yolo '<prompt>'`）、hermes（`hermes --yolo -z '<prompt>'`）。**dsh 是交互式 TUI、无法 headless 传提示词 → 不支持新建**（报「该平台不支持新建会话」）。提示词 = `new` 后剩余位置参数 `join(' ')`，可空（空 = 无提示词裸启/开交互式）；由框架追加为平台 CLI 参数末位裸参。默认只打印命令不执行；加 `--run` 才真正 **fire-and-forget** spawn（输出丢弃、不跟踪进程、不等待退出——输出在平台 CLI 侧，本工具不跟踪）。cwd 用 `cd '<cwd>' &&`（POSIX）/ `Set-Location`（PowerShell）前缀；`--dir` 覆盖、缺省取平台默认目录。可执行名解析与 resume 一致（环境变量 > cliBins > 默认命令名）。
+
+> **命令形态的实测来源**：各形态以该平台 CLI 自身的 `--help` 核定（仅限本机已安装者）——omp v18.8.4（位置参数 `MESSAGES` + `--auto-approve`）、Claude Code 2.1.282（`-p/--print` 是**布尔开关**，提示词走位置参数；另有 `--dangerously-skip-permissions`）、hermes（提示词必须走 **`-z/--oneshot`**；裸位置参数会被判为非法子命令，且 `-z` 必须带值——故无提示词时回落 `hermes --yolo` 交互式形态）。**codex 与 gemini 未实测**——构建本功能的机器上未安装这两个 CLI，暂沿用设计文档的推断形态，待有真实 CLI 时再校正。其中 gemini 的 `-p` 若需**取值**（设计文档写作 `gemini -p '<prompt>' --approval-mode=yolo`），而框架始终把提示词追加在末位，则该形态需改为 `gemini --approval-mode=yolo -p '<prompt>'`——待实测确认。
+
 ### 状态时间配置
 
 会话四态（awaiting-input / working / waiting / stopped）的判定依赖三个时间窗口，默认值 2 分钟 / 30 分钟 / 12 小时。可在 web 设置面板「状态时间配置」分区调整（单位：分钟 / 小时），保存即写服务端 `~/.agentlray/settings.json`（`status` section）并对后续状态判定生效；终端 `agentlray sessions list` 与 web 看板共用同一配置。
@@ -222,6 +244,7 @@ AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配
 | `watchParse(rec, line?)` | SSE 实时尾随（需与 `find` 一起；缺位时 `/api/watch` 返回 400） |
 | `needsAgent` | openclaw 式按 agent 平台（详情/列表需 `agent`，不进入 OTLP） |
 | `resume = { bin, args(id, opts) }` | 该平台的 CLI `sessions resume` |
+| `create = { bin, args(opts) }` | 该平台的 CLI `sessions new`（opts = `{ cwd, message }`；提示词由框架追加末位） |
 | `version` | 契约版本（自 1 起） |
 
 **CLI：**
@@ -235,7 +258,7 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与�
 
 **Web 前端：** React 与 legacy 两套 UI 都经 `GET /api/platforms` 展示内置 + 自定义平台；加载失败的自定义平台显示 broken 徽标（含错误），不参与查询。
 
-**resume 保持 opt-in：** 自定义平台仅当适配器声明 `resume = { bin, args(id, opts) }` 时 `sessions resume` 可用，否则报「无原生续跑」。spawn 的可执行名解析：环境变量 `AGENTLRAY_<平台id>_BIN` > `~/.agentlray/settings.json` 的 `cliBins` `<id>` 键 > 适配器默认 `bin`。
+**resume / create 均保持 opt-in：** 自定义平台仅当适配器声明 `resume = { bin, args(id, opts) }` 时 `sessions resume` 可用（否则报「无原生续跑」）；仅当声明 `create = { bin, args(opts) }` 时 `sessions new` 可用（否则报「该平台不支持新建会话」）。spawn 的可执行名解析：环境变量 `AGENTLRAY_<平台id>_BIN` > `~/.agentlray/settings.json` 的 `cliBins` `<id>` 键 > 适配器默认 `bin`。
 
 **信任边界：** 适配器以你的用户全权限执行任意代码（等同自己手动跑脚本）。只投递可信文件，必要时用 `AGENTLRAY_NO_PLUGINS=1` 逃生。`defaultDir()` 由适配器自行定义、可读自身 env；通用 `?dir=` / `--dir` 覆盖仍然生效。
 
@@ -262,6 +285,7 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与�
 | `GET /api/gemini/sessions` | 获取 Gemini CLI 会话列表 |
 | `GET /api/gemini/sessions/:id` | 获取 Gemini CLI 会话消息详情 |
 | `GET /api/platforms` | 列出全部平台（内置 + 自定义 + broken）：含能力位、label 与加载错误 |
+| `POST /api/:platform/sessions/new` | spawn 平台 CLI 开新会话（body `{ "message": "...", "cwd": "..." }`，均可空）。fire-and-forget：触发成功即返回 `{ triggered, platform, bin, args, command }`。404 平台不存在、422 平台无 create 契约（dsh / openclaw）、400 cwd 不存在或不是目录 |
 | `GET /api/spawn-map` | 获取 Agent spawn 关系图 |
 | `GET /api/insights` | 聚合分析（工具统计、错误聚类、趋势） |
 | `GET /api/prompts` | 按目录分组的各 session 真人 prompt |

@@ -135,4 +135,4 @@ async function sendJson(base, method, pathname, body, expectedStatus = 200) {
   return res.json();
 }
 
-module.exports = { startServer, getJson, sendJson, FIXTURE_HOME };
+module.exports = { startServer, getJson, sendJson, makeTmpHome, FIXTURE_HOME };

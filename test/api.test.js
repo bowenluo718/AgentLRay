@@ -7,7 +7,7 @@ const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { startServer, getJson, sendJson } = require('./helpers.js');
+const { startServer, getJson, sendJson, makeTmpHome } = require('./helpers.js');
 
 const CODEX1 = '01900000-0000-7000-8000-000000000001';
 const CODEX2 = '01900000-0000-7000-8000-000000000002';
@@ -21,6 +21,27 @@ async function exists(p) {
     () => true,
     () => false
   );
+}
+
+// 在 home 下写一个可执行的假平台 CLI（记录被调用的 args + cwd），返回其所在目录，
+// 以便把该目录注入服务器的 PATH 覆盖 spawn（fire-and-forget 真实 spawn 需要）。
+async function makeFakeBin(home, bin, outFile) {
+  const bindir = path.join(home, '.fakebin');
+  await fsp.mkdir(bindir, { recursive: true });
+  const script =
+    `#!${process.execPath}\n` +
+    `const fs = require('node:fs');\n` +
+    `let out = '';\n` +
+    `process.argv.slice(2).forEach((a) => { out += 'arg:' + a + '\\n'; });\n` +
+    `out += 'cwd:' + process.cwd() + '\\n';\n` +
+    `fs.writeFileSync(${JSON.stringify(outFile)}, out);\n` +
+    `process.exit(0);\n`;
+  await fsp.writeFile(path.join(bindir, bin), script, { mode: 0o755 });
+  return bindir;
+}
+
+async function readFakeLog(file) {
+  return (await fsp.readFile(file, 'utf8')).trim();
 }
 
 describe('AgentLRay API', () => {
@@ -232,6 +253,105 @@ describe('AgentLRay API', () => {
       assert.equal(byId.gemini.resume, true);
       assert.equal(byId.hermes.resume, true);
       assert.equal(byId.openclaw.resume, false);
+    });
+  });
+
+  describe('POST /api/:platform/sessions/new（新建会话任务，与 CLI new 同源）', () => {
+    // 新建会真实 fire-and-forget spawn 平台 CLI：happy-path 需要一个可执行的假
+    // codex 注入 PATH，否则 ENOENT 命中 50ms 首发 error 窗口 → 500。因此本组起
+    // 自己的服务器（独立 HOME + 假 bin 目录）。
+    let csrv;
+    let fakeLog;
+    let fakeCwd;
+    before(async () => {
+      const home = await makeTmpHome();
+      fakeLog = path.join(home, 'codex-new.log');
+      const bindir = await makeFakeBin(home, 'codex', fakeLog);
+      fakeCwd = path.join(home, 'work');
+      await fsp.mkdir(fakeCwd, { recursive: true });
+      csrv = await startServer({ PATH: `${bindir}${path.delimiter}${process.env.PATH || ''}` });
+      csrv.home = home;
+    });
+    after(async () => {
+      await csrv.stop();
+    });
+
+    it('codex + message → 200 triggered:true，命令含 exec --full-auto 且 message 末位，确实 fire-and-forget spawn', async () => {
+      const body = await sendJson(csrv.base, 'POST', '/api/codex/sessions/new', {
+        message: '修个 bug',
+        cwd: fakeCwd,
+      });
+      assert.equal(body.triggered, true);
+      assert.equal(body.platform, 'codex');
+      assert.equal(body.bin, 'codex');
+      assert.deepEqual(body.args, ['exec', '--full-auto', '修个 bug']);
+      assert.equal(body.command, `cd '${fakeCwd}' && codex exec --full-auto '修个 bug'`);
+      // fire-and-forget：子进程异步写日志，轮询等待落盘
+      const deadline = Date.now() + 3000;
+      let log = '';
+      while (Date.now() < deadline) {
+        try {
+          log = await readFakeLog(fakeLog);
+          if (log) break;
+        } catch {
+          /* not yet */
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.match(log, /arg:exec/);
+      assert.match(log, /arg:--full-auto/);
+      assert.match(log, /arg:修个 bug/);
+      assert.ok(log.includes(`cwd:${fakeCwd}`), `cwd 应为执行目录: ${log}`);
+    });
+
+    it('无 cwd/message 也可触发（空提示词裸启）', async () => {
+      const body = await sendJson(csrv.base, 'POST', '/api/codex/sessions/new', {});
+      assert.equal(body.triggered, true);
+      assert.deepEqual(body.args, ['exec', '--full-auto']);
+    });
+
+    it('dsh 无 create 契约 → 4xx（422）且 triggered:false', async () => {
+      const res = await fetch(csrv.base + '/api/dsh/sessions/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 422);
+      const body = await res.json();
+      assert.equal(body.triggered, false);
+      assert.match(body.error, /no native create command/);
+    });
+
+    it('cwd 不存在 → 400', async () => {
+      const res = await fetch(csrv.base + '/api/codex/sessions/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cwd: '/definitely/not/a/real/dir' }),
+      });
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.match(body.error, /cwd/);
+    });
+
+    it('未知平台 → 404', async () => {
+      const res = await fetch(csrv.base + '/api/nope/sessions/new', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      assert.equal(res.status, 404);
+    });
+
+    it('GET /api/platforms 透出 create 契约标志（codex true / dsh false）', async () => {
+      const platforms = await getJson(csrv.base, '/api/platforms');
+      const byId = Object.fromEntries(platforms.filter((p) => p.id).map((p) => [p.id, p]));
+      assert.equal(byId.codex.create, true);
+      assert.equal(byId['claude-code'].create, true);
+      assert.equal(byId.omp.create, true);
+      assert.equal(byId.gemini.create, true);
+      assert.equal(byId.hermes.create, true);
+      assert.equal(byId.dsh.create, false);
+      assert.equal(byId.openclaw.create, false);
     });
   });
 

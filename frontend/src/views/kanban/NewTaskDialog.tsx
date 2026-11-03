@@ -1,0 +1,295 @@
+// 看板「新建任务」弹窗：为可新建平台（create===true）触发一次会话新建。
+// - 数据源：平台列表取 store.platforms（由 App.tsx 的全局 usePlatforms() 维护，
+//   运行时 GET /api/platforms 单一真源，拉取失败回退内置表）；下拉可选项 = 设置文件
+//   （ui-settings.json）中「已选择平台」即左侧会话筛选选中的平台（多选
+//   selectedPlatforms / 单平台 platform，仅取运行时有效条目），与设置保持一致；
+//   可新建的平台可选，不可新建的平台（如 openclaw/dsh）列出但禁用（不标注
+//   「不支持新建」）。默认平台/路径由 KanbanView
+//   传入（当前选中会话的平台 + 项目路径，或当前筛选平台）。
+// - 命令串与 spawn 逻辑单一真源在后端 POST /api/:platform/sessions/new（lib/new.js），
+//   前端不本地拼命令，只消费后端返回（command 供成功提示手动复制）。
+// - 提交成功 → toast + 关弹窗 + 失效会话列表缓存（invalidate ['sessions']）；
+//   失败 → 弹窗内错误文本、保持打开；pending 期间禁用提交按钮。
+// - cwd：ProjectCombobox 可手动输入，也可下拉选择「已识别项目」（数据与左侧会话筛选
+//   的项目一致，剔除「未知项目」占位）；平台 / cwd / 提示词三者必填，提交前做必填
+//   校验并按字段展示错误。
+
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { ChevronsUpDown, Folder } from 'lucide-react';
+import { toast } from 'sonner';
+import { createSession } from '@/api/client';
+import type { Platform } from '@/api/types';
+import { Button } from '@/components/ui/button';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { createCapablePlatforms, selectablePlatforms, useAppStore } from '@/store';
+import { UNKNOWN_PROJECT, buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
+import { useSessionsList } from '@/views/sessions/queries';
+
+// cwd 下拉：可手动输入，也可从「已识别项目」下拉选择（数据与左侧会话筛选的项目一致，
+// 即 resolveProjectValues + buildProjectOptions 的项目选项，剔除「未知项目」占位）。
+// 下拉选项展示项目显示值（与左侧筛选一致，多为 cwd 末段），但选中后填入输入框的是
+// 该项目的完整 cwd 路径（valueToCwd 映射），保证提交给后端的 cwd 是真实目录。
+function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const { data } = useSessionsList();
+  const raw = data ?? [];
+  const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
+  // 项目显示值 → 完整 cwd 路径。resolveProjectValues 保证同名末段项目的 cwd 一致
+  // （末段重复时已升级为完整路径显示消歧），故显示值 → 任意同显示值会话的 cwd 即可。
+  const valueToCwd = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of raw) {
+      const v = projectValues.get(s);
+      if (v && v !== UNKNOWN_PROJECT && s.cwd) map.set(v, s.cwd);
+    }
+    return map;
+  }, [raw, projectValues]);
+  const projects = useMemo(
+    () => buildProjectOptions(projectValues, raw).map((o) => o.value).filter((v) => v !== UNKNOWN_PROJECT),
+    [projectValues, raw]
+  );
+  const filtered = useMemo(
+    () => (query ? projects.filter((p) => p.toLowerCase().includes(query.toLowerCase())) : projects),
+    [projects, query]
+  );
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      {/* Anchor 指向整个输入容器：--radix-popover-trigger-width 以容器宽为基准，
+          使下拉面板与输入框同宽（此前 Anchor 缺失，面板宽度按右下角小图标按钮算，
+          宽度仅约 24px 导致几乎无法选择项目）。 */}
+      <PopoverAnchor asChild>
+        <div className="relative">
+          <Input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="选择已识别项目或手动输入路径"
+            aria-label="cwd"
+            className="pr-8"
+          />
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 text-muted-foreground"
+              aria-label="选择项目"
+            >
+              <ChevronsUpDown className="h-3.5 w-3.5" />
+            </Button>
+          </PopoverTrigger>
+        </div>
+      </PopoverAnchor>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="搜索项目…" value={query} onValueChange={setQuery} />
+          <CommandList>
+            <CommandEmpty>无匹配项目</CommandEmpty>
+            <CommandGroup>
+              {filtered.map((p) => (
+                <CommandItem
+                  key={p}
+                  value={p}
+                  onSelect={(v) => {
+                    onChange(valueToCwd.get(v) ?? v);
+                    setOpen(false);
+                    setQuery('');
+                  }}
+                >
+                  <Folder className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                  {p}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+export function NewTaskDialog({
+  open,
+  onOpenChange,
+  defaultPlatform,
+  defaultCwd,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  defaultPlatform: Platform;
+  defaultCwd?: string | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const platforms = useAppStore((s) => s.platforms);
+  const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
+  const singlePlatform = useAppStore((s) => s.platform);
+  const creatable = useMemo(() => createCapablePlatforms(platforms), [platforms]);
+  // 可新建平台 id 静态查找表（只读下标查询）。
+  const creatableIds = useMemo(() => {
+    const table: Record<string, true> = {};
+    for (const p of creatable) table[p.id] = true;
+    return table;
+  }, [creatable]);
+
+  // 左侧筛选条件中选中的有效平台：多选模式用 selectedPlatforms，单平台模式用 platform；
+  // 只取运行时有效条目（非 broken、有 id），与可新建平台合并为下拉可选项（去重、可新建在前）。
+  const filteredSelected = useMemo(() => {
+    const ids = new Set(selectedPlatforms.length > 0 ? selectedPlatforms : [singlePlatform]);
+    return selectablePlatforms(platforms).filter((p) => ids.has(p.id));
+  }, [selectedPlatforms, singlePlatform, platforms]);
+
+  // 下拉可选项：与设置文件（ui-settings.json）中「已选择平台」保持一致，即左侧会话
+  // 筛选选中的平台（多选 selectedPlatforms / 单平台 platform），只取运行时有效条目。
+  // 可新建的平台排在前、可选；不可新建（如 openclaw/dsh）排在后、禁用。不额外并入
+  // 全部可新建平台——用户未在设置中选择的平台不出现在新建任务可选项中。
+  const options = useMemo(() => {
+    return [...filteredSelected].sort(
+      (a, b) => Number(!!creatableIds[b.id]) - Number(!!creatableIds[a.id])
+    );
+  }, [filteredSelected, creatableIds]);
+
+  const [platform, setPlatform] = useState<Platform>(defaultPlatform);
+  const [cwd, setCwd] = useState(defaultCwd ?? '');
+  const [message, setMessage] = useState('');
+  // 必填校验错误（平台/cwd/提示词 均必填）。
+  const [fieldErrors, setFieldErrors] = useState<{ platform?: string; cwd?: string; message?: string }>({});
+  // 后端请求错误（如命令不存在 / cwd 目录不存在）。
+  const [error, setError] = useState('');
+
+  // 每次打开时刷新默认值（选中会话/筛选平台可能已变化）。
+  const [lastOpen, setLastOpen] = useState(open);
+  if (open && !lastOpen) {
+    setLastOpen(true);
+    setPlatform(defaultPlatform);
+    setCwd(defaultCwd ?? '');
+    setMessage('');
+    setFieldErrors({});
+    setError('');
+  } else if (!open && lastOpen) {
+    setLastOpen(false);
+  }
+
+  // 默认平台若不可新建（如当前筛选平台是 openclaw/dsh），回退第一个可新建平台。
+  const effectivePlatform: Platform = creatable.some((p) => p.id === platform)
+    ? platform
+    : (creatable[0]?.id ?? platform);
+
+  const submit = useMutation({
+    mutationFn: () =>
+      createSession(effectivePlatform, {
+        message: message.trim(),
+        cwd: cwd.trim(),
+      }),
+    onSuccess: (result) => {
+      onOpenChange(false);
+      toast.success(`已触发 ${result.platform} 新建会话`);
+      if (result.command) toast.info(result.command);
+      // 新建会话会被平台 CLI 写入 → 失效会话列表缓存，触发看板/侧栏刷新。
+      queryClient.invalidateQueries({ queryKey: ['sessions'] });
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  const handleSubmit = () => {
+    setError('');
+    const errors: { platform?: string; cwd?: string; message?: string } = {};
+    if (options.length === 0 || !creatableIds[effectivePlatform]) {
+      errors.platform = '请选择平台';
+    }
+    if (!cwd.trim()) errors.cwd = '请填写工作目录（cwd）';
+    if (!message.trim()) errors.message = '请填写提示词';
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    submit.mutate();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onOpenChange(false)}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>新建任务</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              平台<span className="text-destructive">*</span>
+            </span>
+            <Select value={effectivePlatform} onValueChange={(v) => setPlatform(v as Platform)}>
+              <SelectTrigger className="h-9 text-sm" aria-label="选择平台">
+                <SelectValue placeholder="选择平台" />
+              </SelectTrigger>
+              <SelectContent>
+                {options.map((p) => {
+                  const ok = !!creatableIds[p.id];
+                  return (
+                    <SelectItem key={p.id} value={p.id} className="text-sm" disabled={!ok}>
+                      {p.label || p.id}
+                      {!ok && <span className="ml-2 text-[0.7rem] text-muted-foreground">不支持新建</span>}
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+            {fieldErrors.platform && <span className="text-xs text-destructive">{fieldErrors.platform}</span>}
+            {creatable.length === 0 && (
+              <span className="text-xs text-muted-foreground">当前没有可新建会话的平台</span>
+            )}
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              cwd（工作目录）<span className="text-destructive">*</span>
+            </span>
+            <ProjectCombobox value={cwd} onChange={setCwd} />
+            {fieldErrors.cwd && <span className="text-xs text-destructive">{fieldErrors.cwd}</span>}
+          </label>
+          <label className="block space-y-1">
+            <span className="text-xs text-muted-foreground">
+              提示词<span className="text-destructive">*</span>
+            </span>
+            <Textarea
+              rows={5}
+              value={message}
+              placeholder="给新任务的提示词（必填）"
+              onChange={(e) => setMessage(e.target.value)}
+              className="font-mono text-xs"
+            />
+            {fieldErrors.message && <span className="text-xs text-destructive">{fieldErrors.message}</span>}
+          </label>
+          {error && <div className="text-sm text-destructive">{error}</div>}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
+            <Button onClick={handleSubmit} disabled={submit.isPending || options.length === 0}>
+              {submit.isPending ? '触发中…' : '新建'}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

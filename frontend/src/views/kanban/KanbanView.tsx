@@ -14,6 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getKanbanConfig } from '@/api/client';
 import type { SessionSummary } from '@/api/types';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
 import { platformLabel, useAppStore } from '@/store';
@@ -21,6 +22,7 @@ import { UNKNOWN_PROJECT, filterSessionList, formatDate, resolveProjectValues } 
 import { useSessionsList } from '@/views/sessions/queries';
 import { statusMetaFor, useServerStatusLabels } from '@/views/sessions/statusMeta';
 import { buildKanbanColumns } from './kanbanLib';
+import { NewTaskDialog } from './NewTaskDialog';
 
 /** 看板每列默认最多展示条数（配置加载中/失败回退值）。 */
 const DEFAULT_MAX_PER_STATUS = 20;
@@ -85,6 +87,8 @@ export function KanbanView() {
   // 全局手风琴：任意时刻至多一列展开（null = 全收起）。桌面/移动共用同一 state，
   // 断点翻转自洽无需重置。
   const [expandedStatus, setExpandedStatus] = useState<string | null>(null);
+  // 「新建任务」弹窗开关。
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
 
   // 移动端断点订阅（与 App.tsx 同一 <768 约定，原生 matchMedia、不引依赖）。
   const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 767px)').matches);
@@ -98,6 +102,13 @@ export function KanbanView() {
   const { data, isLoading, error } = useSessionsList();
   const raw = data ?? [];
   useServerStatusLabels();
+
+  // 「新建任务」默认值：当前选中会话（selectedSessionId 命中 raw）→ 其来源平台 + 项目路径；
+  // 无选中会话 → 当前筛选平台、cwd 留空（由平台默认目录兜底）。
+  const newTaskDefaults = useMemo(() => {
+    const selected = selectedSessionId ? raw.find((s) => s.id === selectedSessionId) : undefined;
+    return { platform: selected?.platform || currentPlatform, cwd: selected?.cwd ?? undefined };
+  }, [raw, selectedSessionId, currentPlatform]);
 
   // 每列最多条数：与服务端 kanban-config 同缓存键（SettingsDialog 保存后 invalidate 同步）。
   const kanbanCfg = useQuery({
@@ -145,7 +156,7 @@ export function KanbanView() {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 pb-3">
+      <div className={cn('shrink-0 gap-2 pb-3', isMobile ? 'flex flex-col items-stretch' : 'flex items-center justify-between')}>
         <Input
           type="search"
           value={term}
@@ -154,6 +165,15 @@ export function KanbanView() {
           className="max-w-xs"
           aria-label="筛选任务"
         />
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => setNewTaskOpen(true)}
+          aria-label="新建任务"
+        >
+          新建任务
+        </Button>
       </div>
       <div
         className={cn(
@@ -256,6 +276,12 @@ export function KanbanView() {
           );
         })}
       </div>
+      <NewTaskDialog
+        open={newTaskOpen}
+        onOpenChange={setNewTaskOpen}
+        defaultPlatform={newTaskDefaults.platform}
+        defaultCwd={newTaskDefaults.cwd}
+      />
     </div>
   );
 }

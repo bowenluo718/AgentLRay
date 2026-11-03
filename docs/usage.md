@@ -121,6 +121,24 @@ Open http://localhost:3800
 5. **Inspect tool calls** — Click any `🔧 tool_name` button to expand arguments/results
 6. **Navigate spawns** — Click the 🔗 link to jump to the spawned child session
 
+### Task Board and New Tasks
+
+The **Task Board** tab (任务看板) groups every session into four status columns — awaiting input / working / waiting / stopped — with a text filter above them. Its header carries a **New Task** button that opens a dialog which spawns the platform CLI to start a brand-new session.
+
+**The dialog has three fields:**
+
+| Field | Meaning |
+|-------|---------|
+| **Platform** | Dropdown listing **only the platforms that support creating sessions** — codex, claude-code, omp, gemini, hermes. dsh and openclaw are never listed (dsh is an interactive TUI that cannot take a prompt headlessly; openclaw has no native create command). Custom platforms appear only when their adapter declares a `create` contract. |
+| **cwd** | Working directory for the new session, typed by hand. Leave it empty to use the platform's default directory. |
+| **Prompt** | The prompt to hand to the new session. Optional — leave it empty to start an interactive session. |
+
+**Defaults follow the current selection:** with a session selected, the platform and that session's project path are pre-filled; with no session selected, the platform filter's platform is used and cwd stays empty.
+
+**What happens on submit:** the backend spawns the platform CLI (`POST /api/:platform/sessions/new`) and answers immediately with the exact command it ran; a toast reports "Triggered `<platform>` new session" plus the command string for manual copy, and the board list refreshes. The command string has a **single source of truth on the backend** (`lib/new.js`, shared with terminal `sessions new`), so what the page shows is character-for-character what runs.
+
+**Fire-and-forget trade-off:** the spawned process's output is discarded, the process is not tracked, and the web UI offers **no way to query or terminate it** — watch the outcome in the terminal or in the platform's own CLI. This is deliberate: the page triggers the run, the platform owns the session.
+
 ### Prompt View
 
 Click the **Prompts** tab (next to Sessions / Insights) to see every real human prompt across all sessions, grouped by the session's working directory. Noise like tool results, slash-command echoes, system reminders and task notifications is filtered out.
@@ -199,6 +217,10 @@ npm start
 
 Unset variables and platforms not configured in the panel fall back to the default command name.
 
+`agentlray sessions new [message...] --platform <p> [--dir <cwd>] [--run]` generates (and optionally executes) a **new session** command — spawning the platform CLI to open a brand-new session with a prompt and a working directory. Creatable platforms and their command shapes: codex (`codex exec --full-auto '<prompt>'`), claude-code (`claude --dangerously-skip-permissions -p '<prompt>'`), omp (`omp --auto-approve '<prompt>'`), gemini (`gemini -p --approval-mode=yolo '<prompt>'`), hermes (`hermes --yolo -z '<prompt>'`). **dsh is an interactive TUI and cannot take a prompt headlessly → new is not supported** (reports "no native create command"). The prompt is the positional args after `new` joined with a space, and may be empty (empty = no prompt / interactive); the framework appends it as the last bare argument. By default it only prints the command; with `--run` it actually does a **fire-and-forget** spawn (output discarded, process untracked, no wait for exit — output lives on the platform CLI side, this tool does not track it). cwd is prefixed with `cd '<cwd>' &&` (POSIX) / `Set-Location` (PowerShell); `--dir` overrides, defaulting to the platform's default directory. Binary resolution matches resume (env var > cliBins > default command name).
+
+> **Where the command shapes come from.** Each shape was fixed against that CLI's own `--help` where the CLI was installed: omp v18.8.4 (positional `MESSAGES` argument + `--auto-approve`), Claude Code 2.1.282 (`-p/--print` is a **boolean** switch — the prompt is a positional argument — plus `--dangerously-skip-permissions`), hermes (the prompt must go through **`-z/--oneshot`**; a bare positional argument is rejected as an unknown subcommand, and `-z` requires a value — so the no-prompt case falls back to `hermes --yolo`, i.e. the interactive form). **codex and gemini are not verified** — neither CLI was installed on the machine where this was built, so they keep the inferred shape from the design doc and may need adjusting once a real CLI is available. In particular, gemini's `-p` may expect the prompt as *its* value (the design doc wrote `gemini -p '<prompt>' --approval-mode=yolo`), whereas the framework always appends the prompt last — if that turns out to be the case, the shape has to become `gemini --approval-mode=yolo -p '<prompt>'`. Until a real gemini CLI is available this stays unverified.
+
 ### Status time configuration
 
 Session status (awaiting-input / working / waiting / stopped) depends on three time windows, defaulting to 2 min / 30 min / 12 h. Configure them under "Status time configuration" in the settings panel (units: minutes / hours); saving writes server-side `~/.agentlray/settings.json` (status section) and takes effect for subsequent status evaluation. Terminal `agentlray sessions list` and the web dashboard share the same config.
@@ -226,6 +248,7 @@ AgentLRay lets you plug in extra platforms without changing the source: write a 
 | `watchParse(rec, line?)` | live SSE tail (needs `find` too; without it `/api/watch` returns 400) |
 | `needsAgent` | OpenClaw-style per-agent platform (detail/list need `agent`; excluded from OTLP) |
 | `resume = { bin, args(id, opts) }` | CLI `sessions resume` for this platform |
+| `create = { bin, args(opts) }` | CLI `sessions new` for this platform (opts = `{ cwd, message }`; the prompt is appended last by the framework) |
 | `version` | contract version (starts at 1) |
 
 **CLI:**
@@ -239,7 +262,7 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # same
 
 **Web UI:** built-in and custom platforms appear in the same platform bar (both React and legacy UI). A custom platform whose file fails to load shows a broken badge with its error and takes no part in queries.
 
-**Resume stays opt-in:** a custom platform gets CLI `sessions resume` only when the adapter declares `resume = { bin, args(id, opts) }`; without it, resume reports "no native resume command". The spawned binary resolves via env var `AGENTLRAY_<PLATFORM_ID>_BIN` > `~/.agentlray/settings.json`'s `cliBins` `<id>` key > the adapter's default `bin`.
+**Resume / create stay opt-in:** a custom platform gets CLI `sessions resume` only when the adapter declares `resume = { bin, args(id, opts) }` (otherwise "no native resume command"); it gets CLI `sessions new` only when it declares `create = { bin, args(opts) }` (otherwise "no native create command"). The spawned binary resolves via env var `AGENTLRAY_<PLATFORM_ID>_BIN` > `~/.agentlray/settings.json`'s `cliBins` `<id>` key > the adapter's default `bin`.
 
 **Trust:** an adapter executes with your full user permissions (equivalent to running a script yourself). Only place trusted files; when in doubt use `AGENTLRAY_NO_PLUGINS=1`. Define `defaultDir()` inside the adapter and read your own env if needed — the generic `?dir=` / `--dir` override still applies.
 
@@ -266,6 +289,7 @@ A complete runnable, annotated sample adapter (flat JSONL platform, with `find` 
 | `GET /api/gemini/sessions` | List Gemini CLI sessions |
 | `GET /api/gemini/sessions/:id` | Get Gemini CLI session messages |
 | `GET /api/platforms` | List all platforms (built-in + custom + broken) with capability bits, labels and load errors |
+| `POST /api/:platform/sessions/new` | Spawn the platform CLI to start a new session (`{ "message": "...", "cwd": "..." }`, both optional). Fire-and-forget: answers `{ triggered, platform, bin, args, command }` once the spawn is triggered. 404 unknown platform, 422 platform without a create contract (dsh / openclaw), 400 cwd missing or not a directory |
 | `GET /api/spawn-map` | Build agent spawn relationship map |
 | `GET /api/insights` | Aggregate analytics (tool stats, error clusters, trends) |
 | `GET /api/prompts` | Real human prompts per session, grouped by directory |

@@ -118,13 +118,28 @@ function isAlive(pid) {
   }
 }
 
-test('sessions --help 输出 list/show/resume 用法', async () => {
+// 轮询等待文件落盘（fire-and-forget spawn 的 detach 子进程异步写日志时使用）。
+async function waitForFile(filePath, { timeoutMs = 2000, stepMs = 50 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      await fsp.access(filePath);
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, stepMs));
+    }
+  }
+  await fsp.access(filePath); // 未按时出现 → 抛错暴露
+}
+
+test('sessions --help 输出 list/show/resume/new 用法', async () => {
   const home = await makeTmpHome();
   const res = runCli(home, ['sessions', '--help']);
   assert.equal(res.status, 0);
   assert.match(res.stdout, /sessions list/);
   assert.match(res.stdout, /sessions show/);
   assert.match(res.stdout, /sessions resume/);
+  assert.match(res.stdout, /sessions new/);
 });
 
 test('sessions list 同时查询多平台（--platform 逗号多值）', async () => {
@@ -891,4 +906,121 @@ test('sessions resume 缺省用页面持久化的单平台；不支持续跑的�
   const nope = runCli(home, ['sessions', 'resume', '--id', 'oc-1111', '--json']);
   assert.equal(nope.status, 1);
   assert.match(nope.stderr, /no native resume command/);
+});
+
+// --- new（新建会话）---
+
+test('sessions new 生成 create 命令串（打印模式，不 spawn）', async () => {
+  const home = await makeTmpHome();
+  const res = runCli(home, ['sessions', 'new', '做个任务', '--platform', 'codex', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.schemaVersion, 1);
+  assert.equal(doc.kind, 'new');
+  assert.equal(doc.platform, 'codex');
+  assert.equal(doc.message, '做个任务');
+  assert.equal(doc.executed, false);
+  // 前置参数 exec --full-auto + 提示词末位裸参
+  assert.deepEqual(doc.args, ['exec', '--full-auto', '做个任务']);
+  assert.match(doc.command, /exec --full-auto/);
+  assert.match(doc.command, /'做个任务'$/);
+});
+
+test('sessions new 非 json 直接打印命令串', async () => {
+  const home = await makeTmpHome();
+  const res = runCli(home, ['sessions', 'new', '修 bug', '--platform', 'codex', '--dir', '/tmp/x']);
+  assert.equal(res.status, 0);
+  assert.equal(res.stdout.trim(), "cd '/tmp/x' && codex exec --full-auto '修 bug'");
+});
+
+test('sessions new 空提示词 = 无 message 参数（开交互式/裸启）', async () => {
+  const home = await makeTmpHome();
+  const res = runCli(home, ['sessions', 'new', '--platform', 'codex', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.message, '');
+  assert.deepEqual(doc.args, ['exec', '--full-auto']);
+});
+
+test('sessions new 平台无 create 契约（dsh）报「不支持新建」退出 1', async () => {
+  const home = await makeTmpHome();
+  const res = runCli(home, ['sessions', 'new', '--platform', 'dsh', '--json']);
+  assert.equal(res.status, 1);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'error');
+  assert.equal(doc.error.code, 'usage');
+  assert.match(doc.error.message, /no native create command/);
+  assert.match(res.stderr, /no native create command/);
+});
+
+test('sessions new --run 真实 fire-and-forget spawn 假 codex bin（参数与 cwd）', async () => {
+  const home = await makeTmpHome();
+  const fakeLog = path.join(home, 'fake-new.log');
+  const bindir = await makeFakeBin(home, 'codex', 0, fakeLog);
+  const workdir = path.join(home, 'work');
+  await fsp.mkdir(workdir, { recursive: true });
+
+  const res = runCli(
+    home,
+    ['sessions', 'new', '建个会话', '--platform', 'codex', '--dir', workdir, '--run', '--json'],
+    { AGENTLRAY_CODEX_BIN: path.join(bindir, 'codex') }
+  );
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.executed, true);
+  assert.equal(doc.bin, path.join(bindir, 'codex'));
+  assert.deepEqual(doc.args, ['exec', '--full-auto', '建个会话']);
+  assert.equal(doc.exitCode, null); // fire-and-forget：不跟踪退出码
+  // fire-and-forget（detached+unref）：CLI 触发后即退出，detach 的子进程异步写入
+  // 日志——轮询等待文件落盘（最长 ~2s），不与 resume --run（阻塞等 close）同等待方式。
+  await waitForFile(fakeLog);
+  const log = await fsp.readFile(fakeLog, 'utf8');
+  assert.match(log, /arg:exec/);
+  assert.match(log, /arg:--full-auto/);
+  assert.match(log, /arg:建个会话/);
+  assert.match(log, new RegExp(`cwd:${workdir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});
+
+test('sessions new 缺省用页面持久化的单平台（未传 --platform）', async () => {
+  const home = await makeTmpHome();
+  await writeUiSettings(home, { platform: 'codex', selectedPlatforms: [] });
+  const res = runCli(home, ['sessions', 'new', '默认平台', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'new');
+  assert.equal(doc.platform, 'codex');
+
+  // 缺省平台无可建契约（openclaw）→ 报错
+  await writeUiSettings(home, { platform: 'openclaw', selectedPlatforms: [] });
+  const nope = runCli(home, ['sessions', 'new', 'x', '--json']);
+  assert.equal(nope.status, 1);
+  assert.match(nope.stderr, /no native create command/);
+});
+
+test('sessions new 自定义平台声明 create 时生成 create 命令（bin=create.bin）', async () => {
+  const home = await makeTmpHome();
+  const dir = path.join(home, '.agentlray', 'platforms');
+  await fsp.mkdir(dir, { recursive: true });
+  const source = `module.exports = {
+  id: 'my-copilot',
+  label: 'My Copilot',
+  defaultDir: () => '/fixtures/my-copilot',
+  list: async () => [],
+  parse: async () => null,
+  getSession: async () => null,
+  create: {
+    bin: 'my-copilot-cli',
+    args: (o) => ['--new', o.cwd || ''],
+  },
+};
+`;
+  await fsp.writeFile(path.join(dir, 'my-copilot.js'), source);
+
+  const res = runCli(home, ['sessions', 'new', 'go', '--platform', 'my-copilot', '--json']);
+  assert.equal(res.status, 0);
+  const doc = JSON.parse(res.stdout);
+  assert.equal(doc.kind, 'new');
+  assert.equal(doc.bin, 'my-copilot-cli');
+  assert.deepEqual(doc.args, ['--new', '/fixtures/my-copilot', 'go']);
+  assert.equal(doc.command, "cd '/fixtures/my-copilot' && my-copilot-cli --new /fixtures/my-copilot go");
 });

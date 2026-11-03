@@ -230,6 +230,7 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
         needsAgent: false,
       },
       resume: true,
+      create: false,
       broken: false,
     });
 
@@ -247,6 +248,7 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
       needsAgent: false,
     });
     assert.equal(broken.resume, false);
+    assert.equal(broken.create, false);
     assert.match(broken.error, /boom from broken/);
   });
 

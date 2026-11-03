@@ -20,13 +20,13 @@ const BUILTIN_CAPS: PlatformCapabilities = {
 };
 
 export const FALLBACK_PLATFORM_INFOS: PlatformInfo[] = [
-  { id: 'openclaw', label: 'OpenClaw', builtin: true, capabilities: { ...BUILTIN_CAPS, list: false, needsAgent: true }, resume: false, broken: false },
-  { id: 'codex', label: 'Codex', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
-  { id: 'claude-code', label: 'Claude Code', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
-  { id: 'hermes', label: 'Hermes', builtin: true, capabilities: { list: true, find: false, parse: false, getSession: true, collectFiles: false, watchParse: false, needsAgent: false }, resume: true, broken: false },
-  { id: 'omp', label: 'OMP', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
-  { id: 'dsh', label: 'DeepSeek Harness', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
-  { id: 'gemini', label: 'Gemini CLI', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, broken: false },
+  { id: 'openclaw', label: 'OpenClaw', builtin: true, capabilities: { ...BUILTIN_CAPS, list: false, needsAgent: true }, resume: false, create: false, broken: false },
+  { id: 'codex', label: 'Codex', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
+  { id: 'claude-code', label: 'Claude Code', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
+  { id: 'hermes', label: 'Hermes', builtin: true, capabilities: { list: true, find: false, parse: false, getSession: true, collectFiles: false, watchParse: false, needsAgent: false }, resume: true, create: true, broken: false },
+  { id: 'omp', label: 'OMP', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
+  { id: 'dsh', label: 'DeepSeek Harness', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: false, broken: false },
+  { id: 'gemini', label: 'Gemini CLI', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
 ];
 
 const EMPTY_CAPABILITIES: PlatformCapabilities = {
@@ -44,6 +44,11 @@ export function selectablePlatformIds(infos: PlatformInfo[]): string[] {
 /** 可查询平台条目（非 broken 且有 id），保留服务端顺序。 */
 export function selectablePlatforms(infos: PlatformInfo[]): Array<PlatformInfo & { id: string }> {
   return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null);
+}
+
+/** 可新建会话的平台（非 broken、有 id、create===true），保留服务端顺序。 */
+export function createCapablePlatforms(infos: PlatformInfo[]): Array<PlatformInfo & { id: string }> {
+  return selectablePlatforms(infos).filter((p) => p.create);
 }
 
 /** 自定义平台（非内置、非 broken），按服务端顺序。 */

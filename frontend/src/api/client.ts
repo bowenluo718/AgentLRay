@@ -194,6 +194,25 @@ export function getResumeCommand(
   );
 }
 
+/** POST /api/:platform/sessions/new — 看板「新建任务」触发新建会话。
+ * 命令串与 spawn 逻辑与 CLI（bin/sessions.js new）同源（后端 lib/new.js 单一真源），
+ * 前端不本地拼命令，只消费后端返回（供展示/手动复制）。 */
+export interface CreateSessionResult {
+  triggered: boolean;
+  platform: string;
+  bin: string;
+  args: string[];
+  command: string;
+}
+
+/** 触发平台新建会话（fire-and-forget）；message/cwd 均可空。 */
+export function createSession(
+  platform: Platform,
+  body: { message?: string; cwd?: string } = {}
+): Promise<CreateSessionResult> {
+  return requestJson(`/api/${encodeURIComponent(platform)}/sessions/new`, 'POST', body);
+}
+
 /** Spawned sub-agents of a session (omp / claude-code only). */
 export function getSessionChildren(
   platform: 'omp' | 'claude-code',

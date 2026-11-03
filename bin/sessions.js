@@ -16,6 +16,7 @@ const { spawn } = require('child_process');
 const { PLATFORMS } = require('../lib/platforms');
 const { resolveDir } = require('../lib/config');
 const { hasResumeContract, buildResumeCommand } = require('../lib/resume');
+const { hasCreateContract, buildNewCommand, spawnNewSession } = require('../lib/new');
 const { setStatusConfig } = require('../lib/status');
 const { loadStatusConfig } = require('../lib/status-config');
 const { findOmpSessionFile } = require('../lib/platforms/omp');
@@ -38,6 +39,7 @@ const HELP = `Usage:
                             [--tail N] [--full] [--json]
   agentlray sessions resume [--platform <p>] --id <SESSION_ID>
                             [--dir PATH] [--cwd PATH] [--message TEXT] [--run] [--json]
+  agentlray sessions new    [message...] [--platform <p>] [--dir PATH] [--run] [--json]
 
 list:   按条件查询会话列表，支持一次查多个平台：--platform 逗号分隔多值（omp,codex）
         或 all（全部 7 平台）。openclaw 未传 --agent 时默认查询该平台全部 agents 的
@@ -57,16 +59,24 @@ resume: 生成该会话在原 CLI 中的续跑命令（codex resume / claude --r
         并在提示中给出持有进程 pid，请先结束该实例（退出其终端令会话 dispose）再
         续跑。内置仅 codex/claude-code/omp 有原生续跑契约；自定义平台需适配器声明
         resume（bin + args(id,opts)），缺省则 resume 报错。
+new:   生成并（可选）执行「新建会话」命令（spawn 平台 CLI 开一个全新会话，
+       带提示词 + 工作目录；默认只打印命令不执行，--run 才真正 fire-and-forget
+       spawn，输出丢弃、不跟踪进程、不等待退出）。内置 codex / claude-code / omp /
+       gemini / hermes 可建（dsh 是交互式 TUI，无法 headless 传提示词 → 不支持
+       新建）；自定义平台需适配器声明 create（bin + args(opts)），缺省则 new 报错。
+       提示词 = new 后剩余位置参数 join(' ')，可空（空 = 无提示词裸启/开交互式）。
 
 公共参数：
-  --platform <p>  可选。list/show 支持逗号分隔多平台或 all（全部平台）；resume 支持
-                  内置 codex|claude-code|omp 或声明了 resume 的自定义平台。缺省使用页面持久化的平台数据（看板
+  --platform <p>  可选。list/show 支持逗号分隔多平台或 all（全部平台）；resume/new 支持
+                  内置 codex|claude-code|omp（resume）或 codex|claude-code|omp|gemini|hermes
+                  （new）或声明了对应契约的自定义平台。缺省使用页面持久化的平台数据（看板
                   /api/settings 落盘的 ~/.agentlray/settings.json）：list 用持久化的多选集合（单平台模式用
-                  platform，未持久化或全选时 = all）；show/resume 用持久化的单平台，无该数据则
+                  platform，未持久化或全选时 = all）；show/resume/new 用持久化的单平台，无该数据则
                   报错要求显式指定。
   --id <ID>       会话 id（show/resume）
   --agent <name>  openclaw 下的 agent 名（缺省 = 该平台全部 agents 的合并会话；其他平台忽略）
-  --dir <path>    覆盖平台默认数据目录（仅单平台查询有效；多平台各自用默认目录）
+  --dir <path>    list/show 覆盖平台默认数据目录（仅单平台查询有效；多平台各自用默认目录）；
+                  new 作为执行目录 cwd（缺省取平台默认目录 defaultDir()）
   --status <s,…>  按状态过滤 list：awaiting-input|working|waiting|stopped，可逗号多值
   --match <text>  按 title / 首条用户消息 / 最后一条消息 / 会话 id 子串匹配（忽略大小写）
   --since <ISO>   list 只保留 lastActivity（缺省回退 timestamp）≥ 该时刻的会话
@@ -77,10 +87,10 @@ resume: 生成该会话在原 CLI 中的续跑命令（codex resume / claude --r
   --full          show 输出完整消息文本（默认每条文本截断到 2000 字符）
   --cwd <path>    resume 使用的执行目录（默认取会话记录 cwd）
   --message <txt> resume 追加的续发消息（作为提示词参数传给平台 CLI）
-  --run           resume 真正执行，而非只打印命令
+  --run           resume 真正执行，而非只打印命令；new 真正 fire-and-forget spawn
   --json          机器可读 JSON 输出（错误为 {schemaVersion:1,kind:"error",...}）
 
-Exit 0: 命令执行成功（resume 指已生成/已执行，非任务成功）。Exit 1: 参数或运行时错误。
+Exit 0: 命令执行成功（resume/new 指已生成/已触发，非任务成功）。Exit 1: 参数或运行时错误。
 `;
 
 // --- 小工具 ---
@@ -725,6 +735,69 @@ async function resumeSession(opts, json) {
   process.exitCode = result.code;
 }
 
+// --- new ---
+
+// 新建会话（create）参数生成器与命令串构建统一在 lib/new.js（NEW_BINS +
+// hasCreateContract + buildNewCommand + spawnNewSession），CLI 与 web「新建任务」共用。
+async function newSession(opts, json) {
+  const platform = resolvePlatform(opts.platform);
+  // 无新建契约的平台快速失败（内置五平台，或自定义 create opt-in）。
+  if (!hasCreateContract(platform)) {
+    throw new Error(
+      `Platform '${platform.id}' has no native create command. Only codex / claude-code / omp / gemini / hermes, or custom platforms declaring create, are supported.`
+    );
+  }
+  // message = new 后剩余位置参数 join(' ')，可空（空 = 无提示词裸启/开交互式）。
+  const message = opts.message != null ? opts.message : null;
+  // cwd = --dir 覆盖，否则平台默认目录（lib/config.js resolveDir：非绝对/含 .. 回退默认）。
+  const cwd = resolveDir(opts.dir, platform.defaultDir());
+
+  if (!opts.run) {
+    const { bin, args, command } = await buildNewCommand(platform, { cwd, message });
+    if (json) {
+      process.stdout.write(
+        `${JSON.stringify({
+          schemaVersion: 1,
+          kind: 'new',
+          platform: platform.id,
+          message,
+          cwd,
+          bin,
+          args,
+          command,
+          executed: false,
+        })}\n`
+      );
+      return;
+    }
+    process.stdout.write(`${command}\n`);
+    return;
+  }
+
+  // --run：fire-and-forget spawn（lib/new.js），spawn error → 抛错退出码 1。
+  const result = await spawnNewSession(platform, { cwd, message });
+  if (json) {
+    process.stdout.write(
+      `${JSON.stringify({
+        schemaVersion: 1,
+        kind: 'new',
+        platform: platform.id,
+        message,
+        cwd,
+        bin: result.bin,
+        args: result.args,
+        command: result.command,
+        executed: true,
+        // fire-and-forget：不跟踪退出码；如实标注不提供查询/终止（进程生命周期管理明确不做）。
+        exitCode: null,
+      })}\n`
+    );
+    return;
+  }
+  process.stdout.write(`已触发新建会话：${result.command}\n`);
+  process.stdout.write(`输出在平台 CLI 侧，本工具不跟踪该进程。\n`);
+}
+
 // --- entry ---
 
 const OPTION_DEFS = {
@@ -746,8 +819,32 @@ const OPTION_DEFS = {
   '--json': { key: 'json', type: 'boolean' },
 };
 
+// 从 new 子命令的 rest 中抽取「提示词消息」（非选项的位置参数），同时保留选项参数
+// 供 parseOptions 解析。选项 flag 及其消费的值（string 型取下一个非 -- 参数）被剔除；
+// 其余未识别的 token（含消息正文）并入 positionals。消息可空。
+function splitNewArgs(rest) {
+  const positionals = [];
+  const filtered = [];
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    const eq = arg.indexOf('=');
+    const flag = eq === -1 ? arg : arg.slice(0, eq);
+    const def = OPTION_DEFS[flag];
+    if (def) {
+      filtered.push(arg);
+      if (def.type === 'string' && eq === -1 && i + 1 < rest.length && !/^--/.test(rest[i + 1])) {
+        filtered.push(rest[i + 1]); // 消费选项值（如 --dir /tmp 的 /tmp）
+        i++;
+      }
+      continue;
+    }
+    positionals.push(arg); // 未知 token / 位置参数 → 消息正文
+  }
+  return { positionals, filtered };
+}
+
 async function main(args, _mode = 'sessions') {
-  // 子命令位于第一个位置参数（list | show | resume | help）；mode 恒为 'sessions'。
+  // 子命令位于第一个位置参数（list | show | resume | new | help）；mode 恒为 'sessions'。
   const command = (args[0] || '').toLowerCase() === 'continue' ? 'resume' : (args[0] || '');
   const rest = args.slice(1);
   let json = rest.includes('--json');
@@ -756,15 +853,18 @@ async function main(args, _mode = 'sessions') {
       process.stdout.write(HELP);
       return;
     }
-    if (!['list', 'show', 'resume'].includes(command)) {
-      const e = new Error(`Unknown subcommand '${command}'. Expected list | show | resume.`);
+    if (!['list', 'show', 'resume', 'new'].includes(command)) {
+      const e = new Error(`Unknown subcommand '${command}'. Expected list | show | resume | new.`);
       e.usage = true;
       throw e;
     }
     // 入口幂等迁移旧独立设置文件 → ~/.agentlray/settings.json（Q-B：CLI 单独运行时
     // 升级也能读到页面/旧文件落的配置；settings.json 已存在则无操作）。
     await migrateLegacySettings();
-    const opts = parseOptions(rest, OPTION_DEFS);
+    // new 的提示词 = 位置参数 join(' ')，可空；先拆分再解析选项。
+    const newSplit = command === 'new' ? splitNewArgs(rest) : { filtered: rest, positionals: [] };
+    const opts = parseOptions(newSplit.filtered, OPTION_DEFS);
+    if (command === 'new') opts.message = newSplit.positionals.join(' ');
     json = Boolean(opts.json);
     // --platform 非必填：缺省使用页面持久化的平台数据（看板 /api/settings 落盘的文件）。
     if (opts.platform == null) opts.platform = await resolveDefaultPlatform(command);
@@ -779,10 +879,19 @@ async function main(args, _mode = 'sessions') {
     }
     if (command === 'list') await listSessions(opts, json);
     else if (command === 'show') await showSession(opts, json);
+    else if (command === 'new') await newSession(opts, json);
     else await resumeSession(opts, json);
   } catch (error) {
     emitError(json, error.message, error.usage === true);
   }
 }
 
-module.exports = { main, HELP, resumeSession, listSessions, showSession, resolveExecutablePath };
+module.exports = {
+  main,
+  HELP,
+  resumeSession,
+  listSessions,
+  showSession,
+  newSession,
+  resolveExecutablePath,
+};
