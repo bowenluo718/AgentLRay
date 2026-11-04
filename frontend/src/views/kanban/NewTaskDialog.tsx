@@ -15,7 +15,7 @@
 //   校验并按字段展示错误。
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Check, ChevronsUpDown, Folder } from 'lucide-react';
 import { toast } from 'sonner';
 import { createSession } from '@/api/client';
@@ -57,6 +57,8 @@ import { useSessionsList } from '@/views/sessions/queries';
 function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // Command 根 ref：滚轮滚动需要手动滚动其内部 [cmdk-list]（见 onWheel）。
+  const commandRef = useRef<HTMLDivElement>(null);
   const { data } = useSessionsList();
   const raw = data ?? [];
   const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
@@ -86,6 +88,22 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
     () => (query ? projects.filter((p) => p.toLowerCase().includes(query.toLowerCase())) : projects),
     [projects, query]
   );
+  // 下拉滚轮滚动：本弹窗是 Radix 模态 Dialog，其滚动锁定（react-remove-scroll）会把
+  // portal 内可滚动元素的滚轮事件一律 preventDefault（Popover 内容渲染在 Dialog 子树
+  // 外的 portal 里，滚轮不经过锁定容器的捕获处理器，被 document 冒泡阶段当作「背景
+  // 事件」吞掉），导致只能拖滚动条、滚轮无效。这里在 Command 根上捕获滚轮，手动滚动
+  // 内部列表并 preventDefault，绕开该拦截；列表未溢出时不拦截（不干扰其它滚动）。
+  const handleWheel = (e: React.WheelEvent) => {
+    const list = commandRef.current?.querySelector<HTMLElement>('[cmdk-list]');
+    if (!list) return;
+    const { scrollTop, scrollHeight, clientHeight } = list;
+    if (scrollHeight <= clientHeight) return;
+    const next = Math.min(Math.max(scrollTop + e.deltaY, 0), scrollHeight - clientHeight);
+    if (next !== scrollTop) {
+      e.preventDefault();
+      list.scrollTop = next;
+    }
+  };
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/* Anchor 指向整个输入容器：--radix-popover-trigger-width 以容器宽为基准，
@@ -114,7 +132,7 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
         </div>
       </PopoverAnchor>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        <Command>
+        <Command ref={commandRef} onWheel={handleWheel}>
           <CommandInput placeholder="搜索项目…" value={query} onValueChange={setQuery} />
           <CommandList>
             <CommandEmpty>无匹配项目</CommandEmpty>
