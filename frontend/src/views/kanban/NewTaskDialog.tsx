@@ -16,7 +16,7 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { ChevronsUpDown, Folder } from 'lucide-react';
+import { Check, ChevronsUpDown, Folder } from 'lucide-react';
 import { toast } from 'sonner';
 import { createSession } from '@/api/client';
 import type { Platform } from '@/api/types';
@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 import { createCapablePlatforms, selectablePlatforms, useAppStore } from '@/store';
 import { UNKNOWN_PROJECT, buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
 import { useSessionsList } from '@/views/sessions/queries';
@@ -69,6 +70,19 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
     }
     return map;
   }, [raw, projectValues]);
+  // 完整 cwd 路径 → 项目显示值（valueToCwd 的反向映射）：把输入框当前值反查成
+  // 下拉里的项目项，用于标记「已选中」。显示值与 cwd 一一对应（同名末段项目
+  // 已升级为完整路径显示消歧），故反查唯一。
+  const cwdToValue = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of raw) {
+      const v = projectValues.get(s);
+      if (v && v !== UNKNOWN_PROJECT && s.cwd) map.set(s.cwd, v);
+    }
+    return map;
+  }, [raw, projectValues]);
+  // 当前输入值对应的项目显示值；输入值不属于已识别项目时为 undefined（下拉全不选中）。
+  const selectedValue = useMemo(() => cwdToValue.get(value.trim()), [cwdToValue, value]);
   const projects = useMemo(
     () => buildProjectOptions(projectValues, raw).map((o) => o.value).filter((v) => v !== UNKNOWN_PROJECT),
     [projectValues, raw]
@@ -110,20 +124,29 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
           <CommandList>
             <CommandEmpty>无匹配项目</CommandEmpty>
             <CommandGroup>
-              {filtered.map((p) => (
-                <CommandItem
-                  key={p}
-                  value={p}
-                  onSelect={(v) => {
-                    onChange(valueToCwd.get(v) ?? v);
-                    setOpen(false);
-                    setQuery('');
-                  }}
-                >
-                  <Folder className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                  {p}
-                </CommandItem>
-              ))}
+              {filtered.map((p) => {
+                const current = p === selectedValue;
+                return (
+                  <CommandItem
+                    key={p}
+                    value={p}
+                    aria-current={current ? 'true' : undefined}
+                    // 「已选中」（当前输入值对应的项目）与键盘导航 active 态
+                    // （cmdk 的 data-selected=true → 中性灰底）区分开：选中态用
+                    // primary 配色 + 勾选标记，二者可同时出现而不互相覆盖。
+                    className={cn(current && 'bg-primary/10 font-medium text-primary')}
+                    onSelect={(v) => {
+                      onChange(valueToCwd.get(v) ?? v);
+                      setOpen(false);
+                      setQuery('');
+                    }}
+                  >
+                    <Folder className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    {p}
+                    {current ? <Check className="ml-auto h-3.5 w-3.5 text-primary" /> : null}
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>
