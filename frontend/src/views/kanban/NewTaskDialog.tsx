@@ -15,7 +15,7 @@
 //   校验并按字段展示错误。
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronsUpDown, Folder } from 'lucide-react';
 import { toast } from 'sonner';
 import { createSession } from '@/api/client';
@@ -59,6 +59,9 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
   const [query, setQuery] = useState('');
   // Command 根 ref：滚轮滚动需要手动滚动其内部 [cmdk-list]（见 onWheel）。
   const commandRef = useRef<HTMLDivElement>(null);
+  // 下拉面板根 ref / 触发按钮 ref：判断焦点是否落在下拉面板内（见下方焦点放行逻辑）。
+  const panelRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const { data } = useSessionsList();
   const raw = data ?? [];
   const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
@@ -104,6 +107,38 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
       list.scrollTop = next;
     }
   };
+  // ── 焦点放行：Radix 焦点陷阱与 portal 下拉面板的冲突 ──────────────────────────
+  // 本弹窗是 Radix 模态 Dialog，其焦点陷阱（FocusScope）监听 document 上的
+  // focusin/focusout：焦点一旦离开弹窗的 DOM 子树，就把焦点抢回弹窗内最后一个聚焦的
+  // 元素。而下拉面板（Popover 内容）经 Portal 渲染到 document.body，不在弹窗子树内，
+  // 于是面板里的搜索框一点就失焦——无法聚焦、无法输入、无法搜索。
+  // （同一弹窗里的平台 Select 正常：它与 Dialog 共用同一份 @radix-ui/react-focus-scope，
+  //  焦点作用域栈能互相让位；Popover 依赖的是另一份版本，两个作用域栈彼此不可见。）
+  // 下拉面板是弹窗的合法子层，焦点在「弹窗内 ↔ 下拉面板」之间移动时应当放行，故在两处
+  // 边界拦截冒泡，使事件不再到达 document，焦点陷阱便不会把焦点抢回弹窗：
+  //   - focusin：焦点进入面板，事件冒泡经面板根 → 在面板根拦截；
+  //   - focusout：焦点离开弹窗内元素、移入面板，事件冒泡经弹窗根 → 在弹窗根拦截。
+  // 面板之外的焦点移动不受影响，弹窗其余部分仍照常受焦点陷阱约束。
+  const handlePanelFocus = (e: React.FocusEvent) => {
+    e.stopPropagation();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    // 弹窗根：触发按钮向上找到 role=dialog 的祖先（即 Radix DialogContent）。下拉面板
+    // 被 portal 出去，故「焦点是否移入面板」的判定只能落在弹窗根这一层。
+    const dialogEl = triggerRef.current?.closest<HTMLElement>('[role="dialog"]');
+    if (!dialogEl) return;
+    const onFocusOut = (e: FocusEvent) => {
+      const next = e.relatedTarget as Node | null;
+      // 焦点从弹窗内元素移入下拉面板：阻止 focusout 冒泡到 document（焦点陷阱据此会
+      // 把焦点抢回弹窗内，搜索框刚获得焦点就再次失焦）。
+      if (next && panelRef.current?.contains(next)) e.stopPropagation();
+    };
+    dialogEl.addEventListener('focusout', onFocusOut);
+    return () => dialogEl.removeEventListener('focusout', onFocusOut);
+  }, [open]);
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/* Anchor 指向整个输入容器：--radix-popover-trigger-width 以容器宽为基准，
@@ -120,6 +155,7 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
           />
           <PopoverTrigger asChild>
             <Button
+              ref={triggerRef}
               type="button"
               variant="ghost"
               size="icon"
@@ -131,7 +167,12 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
           </PopoverTrigger>
         </div>
       </PopoverAnchor>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+      <PopoverContent
+        ref={panelRef}
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        align="start"
+        onFocus={handlePanelFocus}
+      >
         <Command ref={commandRef} onWheel={handleWheel}>
           <CommandInput placeholder="搜索项目…" value={query} onValueChange={setQuery} />
           <CommandList>
