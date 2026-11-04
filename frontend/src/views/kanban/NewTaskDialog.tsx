@@ -15,8 +15,8 @@
 //   校验并按字段展示错误。
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
-import { ChevronsUpDown, Folder } from 'lucide-react';
+import { useMemo, useRef, useState } from 'react';
+import { Check, ChevronsUpDown, Folder } from 'lucide-react';
 import { toast } from 'sonner';
 import { createSession } from '@/api/client';
 import type { Platform } from '@/api/types';
@@ -45,6 +45,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 import { createCapablePlatforms, selectablePlatforms, useAppStore } from '@/store';
 import { UNKNOWN_PROJECT, buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
 import { useSessionsList } from '@/views/sessions/queries';
@@ -56,19 +57,29 @@ import { useSessionsList } from '@/views/sessions/queries';
 function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  // Command 根 ref：滚轮滚动需要手动滚动其内部 [cmdk-list]（见 onWheel）。
+  const commandRef = useRef<HTMLDivElement>(null);
   const { data } = useSessionsList();
   const raw = data ?? [];
   const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
-  // 项目显示值 → 完整 cwd 路径。resolveProjectValues 保证同名末段项目的 cwd 一致
-  // （末段重复时已升级为完整路径显示消歧），故显示值 → 任意同显示值会话的 cwd 即可。
-  const valueToCwd = useMemo(() => {
-    const map = new Map<string, string>();
+  // 项目显示值 ↔ 完整 cwd 路径的双向映射：valueToCwd 用于下拉回填（显示值 → cwd），
+  // cwdToValue 用于把输入框当前值反查为下拉中的项目项（cwd → 显示值）。
+  // resolveProjectValues 保证同名末段项目的 cwd 一致（末段重复时已升级为完整路径
+  // 显示消歧），故两个方向都是一一对应。
+  const { valueToCwd, cwdToValue } = useMemo(() => {
+    const toCwd = new Map<string, string>();
+    const toValue = new Map<string, string>();
     for (const s of raw) {
       const v = projectValues.get(s);
-      if (v && v !== UNKNOWN_PROJECT && s.cwd) map.set(v, s.cwd);
+      if (v && v !== UNKNOWN_PROJECT && s.cwd) {
+        toCwd.set(v, s.cwd);
+        toValue.set(s.cwd, v);
+      }
     }
-    return map;
+    return { valueToCwd: toCwd, cwdToValue: toValue };
   }, [raw, projectValues]);
+  // 当前输入值对应的项目显示值；输入值不属于已识别项目时为 undefined（下拉全不选中）。
+  const selectedValue = useMemo(() => cwdToValue.get(value.trim()), [cwdToValue, value]);
   const projects = useMemo(
     () => buildProjectOptions(projectValues, raw).map((o) => o.value).filter((v) => v !== UNKNOWN_PROJECT),
     [projectValues, raw]
@@ -77,6 +88,22 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
     () => (query ? projects.filter((p) => p.toLowerCase().includes(query.toLowerCase())) : projects),
     [projects, query]
   );
+  // 下拉滚轮滚动：本弹窗是 Radix 模态 Dialog，其滚动锁定（react-remove-scroll）会把
+  // portal 内可滚动元素的滚轮事件一律 preventDefault（Popover 内容渲染在 Dialog 子树
+  // 外的 portal 里，滚轮不经过锁定容器的捕获处理器，被 document 冒泡阶段当作「背景
+  // 事件」吞掉），导致只能拖滚动条、滚轮无效。这里在 Command 根上捕获滚轮，手动滚动
+  // 内部列表并 preventDefault，绕开该拦截；列表未溢出时不拦截（不干扰其它滚动）。
+  const handleWheel = (e: React.WheelEvent) => {
+    const list = commandRef.current?.querySelector<HTMLElement>('[cmdk-list]');
+    if (!list) return;
+    const { scrollTop, scrollHeight, clientHeight } = list;
+    if (scrollHeight <= clientHeight) return;
+    const next = Math.min(Math.max(scrollTop + e.deltaY, 0), scrollHeight - clientHeight);
+    if (next !== scrollTop) {
+      e.preventDefault();
+      list.scrollTop = next;
+    }
+  };
   return (
     <Popover open={open} onOpenChange={setOpen}>
       {/* Anchor 指向整个输入容器：--radix-popover-trigger-width 以容器宽为基准，
@@ -105,25 +132,34 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
         </div>
       </PopoverAnchor>
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
-        <Command>
+        <Command ref={commandRef} onWheel={handleWheel}>
           <CommandInput placeholder="搜索项目…" value={query} onValueChange={setQuery} />
           <CommandList>
             <CommandEmpty>无匹配项目</CommandEmpty>
             <CommandGroup>
-              {filtered.map((p) => (
-                <CommandItem
-                  key={p}
-                  value={p}
-                  onSelect={(v) => {
-                    onChange(valueToCwd.get(v) ?? v);
-                    setOpen(false);
-                    setQuery('');
-                  }}
-                >
-                  <Folder className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                  {p}
-                </CommandItem>
-              ))}
+              {filtered.map((p) => {
+                const current = p === selectedValue;
+                return (
+                  <CommandItem
+                    key={p}
+                    value={p}
+                    aria-current={current ? 'true' : undefined}
+                    // 「已选中」（当前输入值对应的项目）与键盘导航 active 态
+                    // （cmdk 的 data-selected=true → 中性灰底）区分开：选中态用
+                    // primary 配色 + 勾选标记，二者可同时出现而不互相覆盖。
+                    className={cn(current && 'bg-primary/10 font-medium text-primary')}
+                    onSelect={(v) => {
+                      onChange(valueToCwd.get(v) ?? v);
+                      setOpen(false);
+                      setQuery('');
+                    }}
+                  >
+                    <Folder className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    {p}
+                    {current ? <Check className="ml-auto h-3.5 w-3.5 text-primary" /> : null}
+                  </CommandItem>
+                );
+              })}
             </CommandGroup>
           </CommandList>
         </Command>
