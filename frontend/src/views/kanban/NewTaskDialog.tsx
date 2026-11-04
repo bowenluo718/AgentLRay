@@ -60,26 +60,21 @@ function ProjectCombobox({ value, onChange }: { value: string; onChange: (v: str
   const { data } = useSessionsList();
   const raw = data ?? [];
   const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);
-  // 项目显示值 → 完整 cwd 路径。resolveProjectValues 保证同名末段项目的 cwd 一致
-  // （末段重复时已升级为完整路径显示消歧），故显示值 → 任意同显示值会话的 cwd 即可。
-  const valueToCwd = useMemo(() => {
-    const map = new Map<string, string>();
+  // 项目显示值 ↔ 完整 cwd 路径的双向映射：valueToCwd 用于下拉回填（显示值 → cwd），
+  // cwdToValue 用于把输入框当前值反查为下拉中的项目项（cwd → 显示值）。
+  // resolveProjectValues 保证同名末段项目的 cwd 一致（末段重复时已升级为完整路径
+  // 显示消歧），故两个方向都是一一对应。
+  const { valueToCwd, cwdToValue } = useMemo(() => {
+    const toCwd = new Map<string, string>();
+    const toValue = new Map<string, string>();
     for (const s of raw) {
       const v = projectValues.get(s);
-      if (v && v !== UNKNOWN_PROJECT && s.cwd) map.set(v, s.cwd);
+      if (v && v !== UNKNOWN_PROJECT && s.cwd) {
+        toCwd.set(v, s.cwd);
+        toValue.set(s.cwd, v);
+      }
     }
-    return map;
-  }, [raw, projectValues]);
-  // 完整 cwd 路径 → 项目显示值（valueToCwd 的反向映射）：把输入框当前值反查成
-  // 下拉里的项目项，用于标记「已选中」。显示值与 cwd 一一对应（同名末段项目
-  // 已升级为完整路径显示消歧），故反查唯一。
-  const cwdToValue = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of raw) {
-      const v = projectValues.get(s);
-      if (v && v !== UNKNOWN_PROJECT && s.cwd) map.set(s.cwd, v);
-    }
-    return map;
+    return { valueToCwd: toCwd, cwdToValue: toValue };
   }, [raw, projectValues]);
   // 当前输入值对应的项目显示值；输入值不属于已识别项目时为 undefined（下拉全不选中）。
   const selectedValue = useMemo(() => cwdToValue.get(value.trim()), [cwdToValue, value]);
