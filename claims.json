@@ -60,8 +60,8 @@
       "metric": "defaultDir() relative to HOME compared with the usage-reference paths",
       "method": "PLATFORMS[id].defaultDir() is resolved relative to HOME and compared with docs/usage.md; README links to that configuration section.",
       "repro": "node scripts/claims-receipts.mjs default-dirs",
-      "evidence": "lib/config.js",
-      "as_of": "2026-09-24",
+      "evidence": "平台目录真源在各平台目录声明（lib/platforms/builtin/<id>/dirs.js 与 platforms/<id>/dirs.js），经 @agentlray/shared/config 的 resolveDirs 解析",
+      "as_of": "2026-11-08",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs default-dirs",
         "expect": {

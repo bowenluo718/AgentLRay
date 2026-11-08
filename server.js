@@ -1,7 +1,9 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, CODEX_DIR, CLAUDE_CODE_DIR, HERMES_DIR, OMP_DIR, DSH_DIR, GEMINI_DIR } = require('./lib/config');
+// 平台数据库目录已下沉各平台文件（dirs.js 声明，经 @agentlray/shared/config 解析），
+// 此处仅取已挂载平台做启动日志展示，不再依赖 lib/config 的平台常量。
+const { PLATFORMS } = require('./lib/platforms');
 const mountInsightsRoutes = require('./lib/routes/insights');
 const mountPromptRoutes = require('./lib/routes/prompts');
 const mountSearchRoutes = require('./lib/routes/search');
@@ -89,13 +91,15 @@ async function boot() {
   }
   app.listen(PORT, HOST, () => {
     console.log(`AgentLRay listening on http://${HOST}:${PORT}`);
-    console.log(`  OpenClaw:    ${DATA_DIR}`);
-    console.log(`  Codex:       ${CODEX_DIR}`);
-    console.log(`  Claude Code: ${CLAUDE_CODE_DIR}`);
-    console.log(`  Hermes:      ${path.join(HERMES_DIR, 'state.db')}`);
-    console.log(`  OMP:         ${OMP_DIR}`);
-    console.log(`  DeepSeek Harness: ${DSH_DIR}`);
-    console.log(`  Gemini CLI:  ${GEMINI_DIR}`);
+    for (const [id, p] of Object.entries(PLATFORMS)) {
+      let dir;
+      try {
+        dir = typeof p.defaultDir === 'function' ? p.defaultDir() : null;
+      } catch {
+        dir = null;
+      }
+      if (dir) console.log(`  ${(p.label || id).padEnd(16)}: ${dir}`);
+    }
   });
 }
 

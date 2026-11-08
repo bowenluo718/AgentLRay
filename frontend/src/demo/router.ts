@@ -42,6 +42,7 @@ function demoPlatform(
   dirHint: string,
   dirParam: string,
   color: string,
+  defaultDir: string,
 ): PlatformInfo {
   return {
     id,
@@ -61,15 +62,16 @@ function demoPlatform(
     dirSettingLabel: dirLabel,
     dirSettingHint: dirHint,
     dirParam,
+    defaultDir,
     color,
     broken: false,
   };
 }
 
 const DEMO_PLATFORMS: PlatformInfo[] = [
-  demoPlatform('codex', 'Codex', { spawn: true }, 'codexDir', 'Codex 会话目录', 'Codex 会话日志目录', 'dirCodex', '#58a6ff'),
-  demoPlatform('claude-code', 'Claude Code', { spawn: true, children: true }, 'claudeCodeDir', 'Claude Code 会话目录', 'Claude Code 项目会话目录', 'dirClaude', '#d2a8ff'),
-  demoPlatform('omp', 'OMP', { spawn: true, children: true }, 'ompDir', 'OMP 会话目录', 'OMP（oh-my-pi）会话目录', 'dirOmp', '#ffd33d'),
+  demoPlatform('codex', 'Codex', { spawn: true }, 'codexDir', 'Codex 会话目录', 'Codex 会话日志目录', 'dirCodex', '#58a6ff', '~/.codex/sessions'),
+  demoPlatform('claude-code', 'Claude Code', { spawn: true, children: true }, 'claudeCodeDir', 'Claude Code 会话目录', 'Claude Code 项目会话目录', 'dirClaude', '#d2a8ff', '~/.claude/projects'),
+  demoPlatform('omp', 'OMP', { spawn: true, children: true }, 'ompDir', 'OMP 会话目录', 'OMP（oh-my-pi）会话目录', 'dirOmp', '#ffd33d', '~/.omp/agent/sessions'),
 ];
 
 interface DemoFixtures {

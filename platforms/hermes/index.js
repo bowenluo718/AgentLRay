@@ -1,7 +1,7 @@
 'use strict';
 // 内置平台 hermes 适配器（P1 从 lib/platforms/index.js 逐字搬迁 + 声明字段）。
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
-const { HERMES_DIR } = require('@agentlray/shared/config');
+const { session: HERMES_DIR } = require('./dirs');
 const { listHermesSessions, getHermesSession, searchHermesSessions } = require('./parse');
 const { computeHermesInsights } = require('./insights');
 const { extractHermesPromptGroups } = require('./prompts');

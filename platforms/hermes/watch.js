@@ -2,7 +2,8 @@
 // 平台专属 hermes 实时 SSE 尾随（从 lib/platforms/watch-impl.js 抽出）。
 // WAL 文件监听型 SSE（SQLite 支撑，adapter 的 watch hook 包装此函数）。
 const fs = require('fs');
-const { HERMES_DIR, resolveDir } = require('@agentlray/shared/config');
+const { resolveDir } = require('@agentlray/shared/config');
+const { session: HERMES_DIR } = require('./dirs');
 const { getHermesDbPath, openHermesDbForWatch, normalizeHermesMessage } = require('./parse');
 const { sseInit } = require('@agentlray/shared/watch');
 

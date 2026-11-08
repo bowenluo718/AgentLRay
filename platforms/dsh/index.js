@@ -3,7 +3,7 @@
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
 const fsp = require('fs/promises');
 const path = require('path');
-const { DSH_DIR } = require('@agentlray/shared/config');
+const { session: DSH_DIR } = require('./dirs');
 const { findDshSessionFile, chooseDshLogFile, listDshSessions, normalizeDshEvents, parseDshSessionFile } = require('./parse');
 const { searchDshFile } = require('./search');
 const { extractDshPrompts } = require('./prompts');

@@ -19,17 +19,15 @@ import { useSessionSse } from './useSessionSse';
 
 // Every platform probed empty (#13): guide the user to where logs are
 // expected instead of showing feature marketing over a blank list.
-const PLATFORM_DEFAULT_PATHS: [string, string][] = [
-  ['OpenClaw', '~/.openclaw/agents'],
-  ['Codex', '~/.codex/sessions'],
-  ['Claude Code', '~/.claude/projects'],
-  ['Hermes', '~/.hermes'],
-  ['OMP', '~/.omp/agent/sessions'],
-  ['DeepSeek Harness', '~/.dsh/sessions'],
-  ['Gemini CLI', '~/.gemini/tmp'],
-];
+// 平台默认路径由服务端 /api/platforms 下发（defaultDir），不再本地持有。
 
 function AllEmptyState() {
+  // 平台清单由服务端 GET /api/platforms 下发（含 defaultDir 绝对路径），
+  // 前端不再本地持有平台默认路径（真源在平台文件）。
+  const platforms = useAppStore((s) => s.platforms);
+  const rows = (platforms || [])
+    .filter((p) => p.mounted && p.id && p.label && p.defaultDir)
+    .map((p) => ({ name: p.label as string, dir: p.defaultDir as string }));
   return (
     <div className="mx-auto max-w-3xl space-y-4 py-8" data-testid="all-empty-state">
       <h3 className="text-base font-semibold">没有找到任何会话日志</h3>
@@ -41,7 +39,7 @@ function AllEmptyState() {
         </p>
         <table className="w-full text-left">
           <tbody>
-            {PLATFORM_DEFAULT_PATHS.map(([name, dir]) => (
+            {rows.map(({ name, dir }) => (
               <tr key={name} className="border-b border-border/50">
                 <td className="py-1 pr-4 text-foreground">{name}</td>
                 <td className="py-1">

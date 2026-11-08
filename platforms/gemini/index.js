@@ -3,7 +3,7 @@
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
 const fsp = require('fs/promises');
 const path = require('path');
-const { GEMINI_DIR } = require('@agentlray/shared/config');
+const { session: GEMINI_DIR } = require('./dirs');
 const {
   findGeminiSessionFile,
   readGeminiMetadataLine,

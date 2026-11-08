@@ -76,6 +76,8 @@ export interface PlatformInfo {
   dirSettingHint: string | null;
   /** 多平台/搜索/审计聚合时该平台目录的 query 参数名（如 dirOpenclaw）。 */
   dirParam: string | null;
+  /** 默认数据目录绝对路径（服务端按平台目录声明解析），空态展示用。 */
+  defaultDir: string | null;
   /** 平台品牌色（hex），前端缺省色兜底。 */
   color: string | null;
   broken: boolean;

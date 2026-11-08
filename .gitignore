@@ -4,10 +4,6 @@ node_modules/
 .DS_Store
 .*/
 
-# 测试夹具中的点目录必须入库：dsh 的版本化夹具（session.v3/v4.jsonl.zstd）
-# 决定 dsh 解析与备份用例的可复现性，不能因上述点目录规则被排除。
-!test/fixtures/home/.dsh/
-!test/fixtures/home/.dsh/**
 
 frontend/node_modules/
 frontend/dist/
@@ -15,3 +11,10 @@ frontend/dist/
 output/
 .playwright-cli/
 *.tgz
+
+# 测试夹具目录 test/fixtures/home 必须整体入库（含各平台点目录与 dsh 版本化夹具），
+# 不能因上面的 .*/ 点目录规则被排除。
+!test/fixtures/home/
+!test/fixtures/home/.*/
+!test/fixtures/home/.*/**
+!test/fixtures/home/*.*/**

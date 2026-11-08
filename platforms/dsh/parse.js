@@ -1,7 +1,7 @@
 'use strict';
 const fsp = require('fs/promises');
 const path = require('path');
-const { DSH_DIR } = require('@agentlray/shared/config');
+const { session: DSH_DIR } = require('./dirs');
 const { withMetadataCache, makeMessage, topToolsOf, captureLastMessage } = require('@agentlray/shared/helpers');
 const {
   createTailState,

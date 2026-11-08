@@ -16,6 +16,7 @@ AgentLRay 在 Windows 上因 HOME 硬编码、POSIX 命令串、裸命令 spawn�
 - **为何**：`process.env.HOME` 在 Windows 不存在（应为 `USERPROFILE`），回退 `/root` 导致所有默认目录/配置指向不存在的路径。`os.homedir()` 是 Node 跨平台权威 API（Win/macOS/Linux 全对），顺带修 macOS 无 HOME 隐患。
 - **为何保留 `AGENTLRAY_HOME`**：支持便携部署与测试隔离。
 - **为何散点（~/.claude.json 等）不用 config.js 的 HOME**：`~/.claude/*` 是 claude CLI 自身文件，与 agentlray 数据目录（`~/.agentlray/`）语义不同，各自独立 `os.homedir()` 更符合各自语义，避免把不同归属的路径混在一个「agentlray 家目录」下。
+  - **修订（design-platform-dir-decl，2026-11-08）**：平台目录/名词已解耦到各平台文件的 `dirs.js` 分段声明（root `home` 即本条的 `os.homedir()` 语义，root `agentlray` 即 `AGENTLRAY_HOME`），经 `@agentlray/shared/config` 的 `resolveDirs` 统一解析；`lib/config.js` 不再持有平台目录。本条"D1 散点独立于 agentlray home"保留为正式规则（root `home`），claude 的散点同时收进平台目录声明。
 
 ### D2：平台默认目录不建 Windows 映射表
 

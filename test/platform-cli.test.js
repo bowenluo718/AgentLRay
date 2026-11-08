@@ -101,11 +101,11 @@ module.exports = {
 writeAdapter('01-throw.js', "throw new Error('boom-from-platform-cli');");
 writeAdapter('02-smoke.js', SMOKE_ADAPTER);
 
-const { listPlatformInfo } = require('../lib/platforms');
-
-// 冒烟会话数据：sess-1（10-25）与 sess-2（10-27，更新）→ firstId 应为 sess-2。
-// 注意：writeSessionJsonl 内部会 JSON.stringify，这里传原始对象，避免双重编码。
+// 当前进程与 CLI 子进程都读 SMOKE_COPILOT_DIR 求 smoke-copilot 的 defaultDir()；
+// 必须在 require platforms（联到 adapter defaultDir()）前设好，否则 listPlatformInfo
+// 的 defaultDir 在当前进程为 null、CLI 侧为实际路径，deepEqual 失配。
 const smokeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-platform-data-'));
+process.env.SMOKE_COPILOT_DIR = smokeDir;
 writeSessionJsonl(smokeDir, 'sess-1', [
   { id: 'm1', type: 'user', timestamp: '2026-10-25T01:00:00.000Z', content: '你好' },
   { id: 'm2', type: 'assistant', timestamp: '2026-10-25T01:00:05.000Z', content: '你好！' },
@@ -113,6 +113,8 @@ writeSessionJsonl(smokeDir, 'sess-1', [
 writeSessionJsonl(smokeDir, 'sess-2', [
   { id: 'n1', type: 'user', timestamp: '2026-10-27T01:00:00.000Z', content: '列表' },
 ]);
+
+const { listPlatformInfo } = require('../lib/platforms');
 
 test('platform list --json 与 listPlatformInfo()（/api/platforms 同源）完全一致', () => {
   const res = runCli(tmpHome, ['platform', 'list', '--json'], { SMOKE_COPILOT_DIR: smokeDir });

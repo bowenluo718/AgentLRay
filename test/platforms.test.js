@@ -274,6 +274,7 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
         dirSettingLabel: null,
         dirSettingHint: null,
         dirParam: null,
+        defaultDir: dataDir,
         color: null,
         broken: false,
       },

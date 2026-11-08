@@ -3,7 +3,7 @@
 // 共享依赖一律用裸名 ../../shared/<sub>；平台内文件用相对路径。
 const fsp = require('fs/promises');
 const path = require('path');
-const { GEMINI_DIR } = require('@agentlray/shared/config');
+const { session: GEMINI_DIR } = require('./dirs');
 const { withMetadataCache, makeMessage, topToolsOf, captureLastMessage } = require('@agentlray/shared/helpers');
 const { createTailState, noteAssistant, notePrompt, finishTail, fileMtimeMs } = require('@agentlray/shared/tail-state');
 const { foldGeminiRecords, stringifyToolResult } = require('@agentlray/shared/gemini-format');
