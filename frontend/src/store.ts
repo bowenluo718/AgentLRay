@@ -9,41 +9,50 @@ import { DEMO } from '@/demo/flag';
 // 仅当拉取失败（如后端不可达）时降级到下面的内置 7 平台表，与 legacy
 // public/js/app.js 的内置表一致，避免页面在端点故障下完全不可用。
 
+// 能力位缺省：核心位按平台覆写；新增 hook 位（children/spawn/watch/search/…）离线降级统一 false。
+const BASE_CAPS: PlatformCapabilities = {
+  list: false, find: false, parse: false, getSession: false, collectFiles: false, watchParse: false,
+  needsAgent: false, listForAgent: false, listAllAgents: false, listAgents: false, children: false,
+  spawn: false, watch: false, search: false, insights: false, prompts: false, toolAudit: false,
+  backup: false, inspect: false, otlp: false,
+};
+
+// 内置平台降级表（除 openclaw）的「常规可查询」能力位。
 const BUILTIN_CAPS: PlatformCapabilities = {
-  list: true,
-  find: true,
-  parse: true,
-  getSession: true,
-  collectFiles: true,
-  watchParse: true,
-  needsAgent: false,
+  ...BASE_CAPS,
+  list: true, find: true, parse: true, getSession: true, collectFiles: true, watchParse: true,
 };
 
 export const FALLBACK_PLATFORM_INFOS: PlatformInfo[] = [
-  { id: 'openclaw', label: 'OpenClaw', builtin: true, capabilities: { ...BUILTIN_CAPS, list: false, needsAgent: true }, resume: false, create: false, broken: false },
-  { id: 'codex', label: 'Codex', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
-  { id: 'claude-code', label: 'Claude Code', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
-  { id: 'hermes', label: 'Hermes', builtin: true, capabilities: { list: true, find: false, parse: false, getSession: true, collectFiles: false, watchParse: false, needsAgent: false }, resume: true, create: true, broken: false },
-  { id: 'omp', label: 'OMP', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
-  { id: 'dsh', label: 'DeepSeek Harness', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: false, broken: false },
-  { id: 'gemini', label: 'Gemini CLI', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false },
+  {
+    id: 'openclaw', label: 'OpenClaw', origin: 'package', builtin: true,
+    capabilities: { ...BASE_CAPS, list: false, needsAgent: true, listForAgent: true, listAllAgents: true, listAgents: true, spawn: true },
+    resume: false, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false,
+    overrides: null, replacementPending: false, bin: null,
+    dirSettingKey: 'openclawDir', dirSettingLabel: 'OpenClaw 会话目录', dirSettingHint: 'OpenClaw agent 的会话日志位置；留空用默认目录', dirParam: 'dirOpenclaw',
+    color: '#3fb950',
+  },
+  { id: 'codex', label: 'Codex', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'codex', dirSettingKey: 'codexDir', dirSettingLabel: 'Codex 会话目录', dirSettingHint: 'Codex 会话日志目录', dirParam: 'dirCodex', color: '#58a6ff' },
+  { id: 'claude-code', label: 'Claude Code', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'claude', dirSettingKey: 'claudeCodeDir', dirSettingLabel: 'Claude Code 会话目录', dirSettingHint: 'Claude Code 项目会话目录', dirParam: 'dirClaude', color: '#d2a8ff' },
+  { id: 'hermes', label: 'Hermes', origin: 'package', builtin: true, capabilities: { ...BASE_CAPS, list: true, getSession: true, watch: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'hermes', dirSettingKey: 'hermesDir', dirSettingLabel: 'Hermes 数据目录', dirSettingHint: 'Hermes 数据目录', dirParam: 'dirHermes', color: '#f78166' },
+  { id: 'omp', label: 'OMP', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'omp', dirSettingKey: 'ompDir', dirSettingLabel: 'OMP 会话目录', dirSettingHint: 'OMP（oh-my-pi）会话目录', dirParam: 'dirOmp', color: '#ffd33d' },
+  { id: 'dsh', label: 'DeepSeek Harness', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'dsh', dirSettingKey: 'dshDir', dirSettingLabel: 'DeepSeek Harness 会话目录', dirSettingHint: 'DeepSeek Harness 会话目录（同时识别 DSH_HOME）', dirParam: 'dirDsh', color: '#4d6bfe' },
+  { id: 'gemini', label: 'Gemini CLI', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'gemini', dirSettingKey: 'geminiDir', dirSettingLabel: 'Gemini CLI 临时目录', dirSettingHint: 'Gemini CLI 项目临时目录', dirParam: 'dirGemini', color: '#4285f4' },
 ];
 
-const EMPTY_CAPABILITIES: PlatformCapabilities = {
-  list: false, find: false, parse: false, getSession: false, collectFiles: false, watchParse: false, needsAgent: false,
-};
+const EMPTY_CAPABILITIES: PlatformCapabilities = { ...BASE_CAPS };
 
 // —— 平台列表派生 ——
 // 入参为 store.platforms 的运行时列表；组件经 useAppStore((s) => s.platforms) 取数后调用。
 
-/** 可查询平台 id（非 broken 且有 id），保留服务端顺序。 */
+/** 可查询平台 id（非 broken、有 id、已挂载），保留服务端顺序。 */
 export function selectablePlatformIds(infos: PlatformInfo[]): string[] {
-  return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null).map((p) => p.id);
+  return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null && p.mounted !== false).map((p) => p.id);
 }
 
-/** 可查询平台条目（非 broken 且有 id），保留服务端顺序。 */
+/** 可查询平台条目（非 broken、有 id、已挂载），保留服务端顺序。 */
 export function selectablePlatforms(infos: PlatformInfo[]): Array<PlatformInfo & { id: string }> {
-  return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null);
+  return infos.filter((p): p is PlatformInfo & { id: string } => !p.broken && p.id != null && p.mounted !== false);
 }
 
 /** 可新建会话的平台（非 broken、有 id、create===true），保留服务端顺序。 */
@@ -107,6 +116,20 @@ export const SUMMARY_COLLAPSED_KEY = 'axr-summary-collapsed';
 export const HIDE_TRIVIAL_KEY = 'axr-hide-trivial';
 export const LIB_SORT_KEY = 'axr-lib-sort';
 
+/** 持久化文件顶层的 UI 保留键：loadPersisted 复制目录设置时须跳过（settings 为扁平
+ *  spread，这些键不属于目录设置）。 */
+const PERSISTED_RESERVED_KEYS = new Set([
+  'platform',
+  'selectedPlatforms',
+  'groupBy',
+  'projectFilter',
+  'collapsedGroups',
+  'sidebarCollapsed',
+  'sidebarWidth',
+  'view',
+  'theme',
+]);
+
 /** 无持久化偏好时的初始主题：跟随系统深浅色一次（此后由用户手动切换固定）。 */
 function systemTheme(): Theme {
   try {
@@ -143,26 +166,32 @@ export const EMPTY_SETTINGS: DirSettings = {
   geminiDir: '',
 };
 
-export function dirForPlatform(settings: DirSettings, platform: Platform): string {
-  switch (platform) {
-    case 'openclaw':
-      return settings.openclawDir;
-    case 'codex':
-      return settings.codexDir;
-    case 'claude-code':
-      return settings.claudeCodeDir;
-    case 'hermes':
-      return settings.hermesDir;
-    case 'omp':
-      return settings.ompDir;
-    case 'dsh':
-      return settings.dshDir;
-    case 'gemini':
-      return settings.geminiDir;
-    default:
-      // 自定义平台无每平台目录配置（目录由适配器 defaultDir 决定）。
-      return '';
+/**
+ * 按平台目录设置键读取目录配置。键来自 PlatformInfo.dirSettingKey
+ * （如 openclaw → openclawDir），平台缺省目录不可配（dirSettingKey 为 null）
+ * 或未配置时返回空串 = 用适配器 defaultDir()。
+ */
+export function dirBySettingKey(settings: Record<string, string>, info: PlatformInfo | undefined): string {
+  const key = info?.dirSettingKey;
+  return key && typeof settings[key] === 'string' ? (settings[key] as string) : '';
+}
+
+/** 按 id 查平台条目（运行时可查询列表，含未挂载/broken），找不到返回 undefined。 */
+export function platformInfoById(platforms: PlatformInfo[], id: string | null | undefined): PlatformInfo | undefined {
+  if (!id) return undefined;
+  return platforms.find((p) => p.id === id);
+}
+
+/** 聚合查询（GET /api/sessions platform=… / /api/search）的目录覆盖参数：
+ *  把各可查询平台的设置目录值按 dirParam 组装成 { dirCodex: '/path', … }。 */
+export function dirsByParam(settings: Record<string, string>, platforms: PlatformInfo[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const p of platforms) {
+    if (p.broken || p.mounted === false || !p.dirParam) continue;
+    const dir = dirBySettingKey(settings, p);
+    if (dir) out[p.dirParam] = dir;
   }
+  return out;
 }
 
 function loadPersisted(): {
@@ -212,13 +241,13 @@ function loadPersisted(): {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      result.settings.openclawDir = typeof parsed.openclawDir === 'string' ? parsed.openclawDir : '';
-      result.settings.codexDir = typeof parsed.codexDir === 'string' ? parsed.codexDir : '';
-      result.settings.claudeCodeDir = typeof parsed.claudeCodeDir === 'string' ? parsed.claudeCodeDir : '';
-      result.settings.hermesDir = typeof parsed.hermesDir === 'string' ? parsed.hermesDir : '';
-      result.settings.ompDir = typeof parsed.ompDir === 'string' ? parsed.ompDir : '';
-      result.settings.dshDir = typeof parsed.dshDir === 'string' ? parsed.dshDir : '';
-      result.settings.geminiDir = typeof parsed.geminiDir === 'string' ? parsed.geminiDir : '';
+      // 目录设置宽度为 Record<string, string>：复制除 UI 保留键外的字符串值
+      // （含内置 openclawDir/codexDir/… 与自定义平台 dirSettingKey 键）。
+      // 持久化文件为扁平结构（settings spread + UI 偏好），保留键须跳过。
+      for (const [key, value] of Object.entries(parsed)) {
+        if (PERSISTED_RESERVED_KEYS.has(key)) continue;
+        if (typeof value === 'string') result.settings[key] = value;
+      }
       // 持久化的单平台接受任意非空字符串（可能是自定义平台 id，加载时无法对运行时
       // 列表校验；由 setPlatforms 在列表就绪后收敛）。旧存储无该键 → 默认平台。
       if (typeof parsed.platform === 'string' && parsed.platform.trim() !== '') {

@@ -8,7 +8,14 @@ import { fetchPlatforms, getSessionDetail, getSessions, getSessionsAll } from '@
 import type { DirSettings } from '@/api/client';
 import type { Platform, SessionDetail, SessionSummary } from '@/api/types';
 import { DEMO } from '@/demo/flag';
-import { FALLBACK_PLATFORM_INFOS, dirForPlatform, selectablePlatformIds, useAppStore } from '@/store';
+import {
+  FALLBACK_PLATFORM_INFOS,
+  dirBySettingKey,
+  dirsByParam,
+  platformInfoById,
+  selectablePlatformIds,
+  useAppStore,
+} from '@/store';
 
 /** 平台列表查询：拉取 GET /api/platforms 并写入 store（含 broken）。展示侧从
  *  store.platforms 读取派生；拉取失败时 store 保持内置降级表并记录错误信息。 */
@@ -41,14 +48,16 @@ export interface ListScope {
 
 export function sessionsListOptions(scope: ListScope) {
   const { platform, agent, settings } = scope;
+  // 目录值 = 该平台 dirSettingKey 对应的设置（无 dirSettingKey 平台取适配器 defaultDir）。
+  const dir = dirBySettingKey(settings, platformInfoById(useAppStore.getState().platforms, platform)) || undefined;
   return {
     // Prefix ['sessions', platform] per contract; agent affects the result set.
-    // openclaw 的 agent 空串 = 该平台全部 agents 的合并会话（后端 /api/openclaw/sessions）。
+    // needsAgent 平台的 agent 空串 = 该平台全部 agents 的合并会话（后端通用路由处理）。
     queryKey: ['sessions', platform, agent] as const,
     queryFn: (): Promise<SessionSummary[]> =>
       getSessions(platform, {
         agent: agent || undefined,
-        dir: dirForPlatform(settings, platform) || undefined,
+        dir,
       }),
     enabled: true,
   };
@@ -63,12 +72,14 @@ export function sessionsAllListOptions(scope: {
 }) {
   const { platformIds, settings, selectableCount } = scope;
   // 「全部」判定：选择数与运行时可查询平台数一致 → 交给后端 platform=all
-  // （含 openclaw per-agent 展开）；否则按所选子集逗号拼接。
+  // （含 needsAgent 平台 per-agent 展开）；否则按所选子集逗号拼接。
   const all = platformIds.length > 0 && platformIds.length >= selectableCount;
   return {
     queryKey: ['sessions', 'multi', all ? 'all' : [...platformIds].sort().join(':')] as const,
     queryFn: async (): Promise<SessionSummary[]> => {
-      const result = await getSessionsAll({ platforms: all ? [] : platformIds, dirs: settings });
+      // 目录覆盖按各平台 dirParam 组装（store 平台列表为运行时真源）。
+      const dirsByPlatform = dirsByParam(settings, useAppStore.getState().platforms);
+      const result = await getSessionsAll({ platforms: all ? [] : platformIds, dirsByPlatform });
       const flat: SessionSummary[] = [];
       for (const block of result.platforms) {
         for (const session of block.sessions) {
@@ -105,12 +116,14 @@ export function sessionDetailOptions(scope: {
   settings: DirSettings;
 }) {
   const { platform, sessionId, agent, settings } = scope;
+  const dir =
+    dirBySettingKey(settings, platformInfoById(useAppStore.getState().platforms, platform)) || undefined;
   return {
     queryKey: ['session', platform, sessionId] as const,
     queryFn: (): Promise<SessionDetail> =>
       getSessionDetail(platform, sessionId, {
         agent: agent || undefined,
-        dir: dirForPlatform(settings, platform) || undefined,
+        dir,
       }),
     enabled: !!sessionId,
   };

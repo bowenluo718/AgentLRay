@@ -229,9 +229,19 @@ npm start
 
 ## 自定义平台（Custom platforms）
 
-AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配器**放进 `~/.agentlray/platforms/`，启动时加载器逐文件校验并把合法适配器并入平台注册表；所有 generic 表面（会话路由 / search / prompts / tool-audit / watch / export / CLI）按**能力位**自动接入。校验失败或 id 冲突的文件标记 **broken**（页面与 `agentlray platform list` 可见），绝不拖垮启动。
+AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配器**放进平台目录，启动时加载器逐文件校验并把合法适配器并入平台注册表；所有 generic 表面（会话路由 / search / prompts / tool-audit / watch / export / CLI）按**能力位**自动接入。校验失败或 id 冲突的文件标记 **broken**（页面与 `agentlray platform list` 可见），绝不拖垮启动。
 
-**启用 / 禁用：** 文件在 `~/.agentlray/platforms/*.js` 即启用，删除/移走即禁用，无 per-platform 开关。按文件名字母序加载；`id` 与内置（如 `codex`）或先前自定义冲突 → 该文件 broken。`AGENTLRAY_NO_PLUGINS=1` 为全局逃生（跳过全部加载）。
+**三种来源**（按序加载，声明了替代时后者可覆盖同 id 的前者）：
+
+| 来源 | 目录 | origin |
+|---|---|---|
+| 包内置（package） | 随包分发 | `package` |
+| 项目（project） | `$AGENTLRAY_PROJECT_PLATFORMS_DIR` 或仓库 `platforms/` 目录 | `project` |
+| 用户（user） | `$AGENTLRAY_PLATFORMS_DIR` 或 `~/.agentlray/platforms/` | `user` |
+
+**启用 / 禁用：** 文件在非包的平台目录里即启用，删除/移走即禁用，无 per-platform 开关。按文件名字母序加载；`id` 与内置（如 `codex`）或先前自定义冲突 → 该文件 broken。`AGENTLRAY_NO_PLUGINS=1` 为全局逃生（跳过 project 与 user 两个来源，仅保留 package）。
+
+**替代包内置（先声明后覆盖）：** project/user 中与内置同 id 的适配器，仅当替代已**声明**才被允许覆盖内置——声明途径为 `settings.json` 的 `platforms.replaced`（经 `platform replace <id>` 写入），或项目目录 `platforms/manifest.json` 的 `replaces` 数组（与 `settings.replaced` 求并集；manifest 缺失/损坏忽略不失败）。未声明替代时同 id 文件 broken，并提示先 `platform export <id>` / `platform replace <id>`。已声明但尚未有文件覆盖时，内置仍生效并标记 `replacementPending`。
 
 **必需契约**（加载器校验）：`id`（正则 `^[a-z0-9][a-z0-9-]*$`）、`label`（字符串）、`defaultDir()` → 会话根目录、`parse(file)` → `{ session, messages }`、`getSession(dir, id)` → `{ session, messages } | null`；`list(dir)` → 最新在前的 `SessionSummary[]`（加载器对 `list: null` 宽容，与 openclaw 一致，但要列会话的平台必须提供）。
 
@@ -250,11 +260,19 @@ AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配
 **CLI：**
 
 ```bash
-agentlray platform list                 # 内置 + 自定义 + broken，与 GET /api/platforms 同源
-agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与加载器同一套校验，dry-run
+agentlray platform list                                                     # 内置 + 项目 + 自定义 + broken，与 GET /api/platforms 同源
+agentlray platform list --json                                              # 每条带 origin/mounted/configuredMounted/restartRequired
+agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json     # 与加载器同一套校验，dry-run
+agentlray platform mount <id> | unmount <id>                                # 启用/停用平台（写 settings.platforms.disabled，重启生效）
+agentlray platform replace <id> | unreplace <id>                            # 声明/撤销替代包内置（写 settings.platforms.replaced，重启生效）
+agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]   # 把包/项目平台迁移为用户薄适配器
 ```
 
-`platform validate` 复用加载器自己的校验，随后真的调用适配器 `list(defaultDir())` 报告会话计数与首条 id——通过即代表该平台可实际列出会话。`list --json` 输出 `{schemaVersion:1, kind:"platforms", platforms:[…]}`；`validate --json` 成功输出 `{schemaVersion:1, kind:"platform-validate", ok:true, platform:{id,label}, sessionCount, firstId, note}`。
+`platform validate` 复用加载器自己的校验，随后真的调用适配器 `list(defaultDir())` 报告会话计数与首条 id——通过即代表该平台可实际列出会话。`list --json` 输出 `{schemaVersion:1, kind:"platforms", platforms:[…]}`（每条含 `origin` / `mounted` / `configuredMounted` / `restartRequired`）；`validate --json` 成功输出 `{schemaVersion:1, kind:"platform-validate", ok:true, platform:{id,label}, sessionCount, firstId, note}`。
+
+`mount` / `unmount` 写 `~/.agentlray/settings.json`（`platforms.disabled`），重启后生效；最后一个可查询平台不可被停用（报 `last-platform`）。`replace` / `unreplace` 写 `platforms.replaced`；`unreplace` 若同 id 的 project/user 文件仍存在会提示（下次加载会 broken）。
+
+**`platform export`** 把包内置（package）或项目（project）平台迁移为**用户薄适配器**，写入平台目录（默认 `~/.agentlray/platforms`，可用 `--out <dir>` 或 `AGENTLRAY_PLATFORMS_DIR` 指定）：生成 `<id>.js`，并默认把 id 加入 `settings.replaced`（`--no-replace` 关闭）、若在 `settings.disabled` 中则移出。薄适配器通过 `AGENTLRAY_PKG_ROOT`（加载器设置的包根）解析真实实现，包升级自动跟随。选项：`--force` 覆盖已存在文件、`--out <dir>` 指定目录、`--json` 输出 `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`。来源已为 user 时拒绝（`export-user-origin`）；文件冲突报 `export-exists`（用 `--force` 覆盖）。因适配器按用户权限执行任意代码，CLI 输出信任提示——只投递可信的适配器文件。**前提：** 生成的薄适配器依赖加载器注入的 `AGENTLRAY_PKG_ROOT`，只能经 AgentLRay 加载；脱离 AgentLRay 直接 `require` 会以 `AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.` 失败。
 
 **Web 前端：** React 与 legacy 两套 UI 都经 `GET /api/platforms` 展示内置 + 自定义平台；加载失败的自定义平台显示 broken 徽标（含错误），不参与查询。
 
@@ -269,9 +287,9 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与�
 | 接口 | 说明 |
 |------|------|
 | `GET /api/status-labels` | 会话四态的统一状态词汇 `{ order, labels }`（两套 UI 的状态徽标/组头单一来源） |
-| `GET /api/agents` | 获取 OpenClaw Agent 列表 |
-| `GET /api/agents/:name/sessions` | 获取指定 Agent 的会话列表 |
-| `GET /api/agents/:name/sessions/:id` | 获取会话消息详情 |
+| `GET /api/agents` | 获取 OpenClaw Agent 列表（legacy 兼容端点：仅当 openclaw 已挂载时注册；openclaw 停用/卸载后 404，下同） |
+| `GET /api/agents/:name/sessions` | 获取指定 Agent 的会话列表（legacy 兼容，生命周期同上） |
+| `GET /api/agents/:name/sessions/:id` | 获取会话消息详情（legacy 兼容，生命周期同上） |
 | `GET /api/codex/sessions` | 获取 Codex 会话列表 |
 | `GET /api/codex/sessions/:id` | 获取 Codex 会话消息详情 |
 | `GET /api/claude-code/sessions` | 获取 Claude Code 会话列表 |
@@ -286,7 +304,7 @@ agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # 与�
 | `GET /api/gemini/sessions/:id` | 获取 Gemini CLI 会话消息详情 |
 | `GET /api/platforms` | 列出全部平台（内置 + 自定义 + broken）：含能力位、label 与加载错误 |
 | `POST /api/:platform/sessions/new` | spawn 平台 CLI 开新会话（body `{ "message": "...", "cwd": "..." }`，均可空）。fire-and-forget：触发成功即返回 `{ triggered, platform, bin, args, command }`。404 平台不存在、422 平台无 create 契约（dsh / openclaw）、400 cwd 不存在或不是目录 |
-| `GET /api/spawn-map` | 获取 Agent spawn 关系图 |
+| `GET /api/spawn-map` | 获取 Agent spawn 关系图（legacy 兼容端点：仅当 openclaw 已挂载时注册；openclaw 停用/卸载后 404，`/api/spawn-tree` 同） |
 | `GET /api/insights` | 聚合分析（工具统计、错误聚类、趋势） |
 | `GET /api/prompts` | 按目录分组的各 session 真人 prompt |
 | `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |

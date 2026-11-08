@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { brokenPlatforms, selectablePlatforms, useAppStore } from '@/store';
+import { brokenPlatforms, dirBySettingKey, platformInfoById, selectablePlatforms, useAppStore } from '@/store';
 import type { GroupBy } from '@/store';
 import { buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
 import { useSessionsList } from '@/views/sessions/queries';
@@ -29,17 +29,6 @@ const chipBase =
   'shrink-0 rounded border px-1.5 py-0.5 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40';
 const chipActive = 'border-primary/60 bg-primary/15 text-foreground';
 const chipIdle = 'border-border bg-transparent text-muted-foreground hover:border-primary/40 hover:text-foreground';
-
-// 内置平台悬停提示；自定义平台无条目 → 用通用提示兜底。
-const PLATFORM_TIPS: Partial<Record<string, string>> = {
-  openclaw: 'OpenClaw 会话（~/.openclaw/agents）',
-  codex: 'Codex 会话（~/.codex/sessions）',
-  'claude-code': 'Claude Code 会话（~/.claude/projects）',
-  hermes: 'Hermes 会话（~/.hermes）',
-  omp: 'oh-my-pi 会话（~/.omp/agent/sessions）',
-  dsh: 'DeepSeek Harness 会话（~/.dsh/sessions）',
-  gemini: 'Gemini CLI 会话（~/.gemini/tmp）',
-};
 
 const GROUP_OPTIONS: { value: GroupBy; label: string }[] = [
   { value: 'platform', label: '按平台' },
@@ -106,7 +95,7 @@ function PlatformNav() {
             type="button"
             aria-pressed={active(p.id)}
             onClick={() => togglePlatform(p.id)}
-            title={PLATFORM_TIPS[p.id] ?? `${p.label ?? p.id} 会话（自定义平台）`}
+            title={p.dirSettingHint ?? `${p.label ?? p.id} 会话`}
             className={cn(chipBase, active(p.id) ? chipActive : chipIdle)}
           >
             {p.label ?? p.id}
@@ -229,14 +218,17 @@ function ProjectFilterNav() {
   );
 }
 
-// OpenClaw stores sessions per agent (~/.openclaw/agents/<name>/sessions)
+// needsAgent 平台详情按 agent 存放（openclaw：~/.openclaw/agents/<name>/sessions）。
 function AgentNav() {
+  const platform = useAppStore((s) => s.platform);
+  const platforms = useAppStore((s) => s.platforms);
   const settings = useAppStore((s) => s.settings);
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const setSelectedAgent = useAppStore((s) => s.setSelectedAgent);
+  const info = platformInfoById(platforms, platform);
   const { data: agents } = useQuery({
-    queryKey: ['agents', settings.openclawDir],
-    queryFn: () => getAgents(settings.openclawDir || undefined),
+    queryKey: ['agents', platform, dirBySettingKey(settings, info)],
+    queryFn: () => getAgents(platform, dirBySettingKey(settings, info) || undefined),
   });
 
   // 空 selectedAgent = 全部 agent 的合并会话（默认）。Radix SelectItem 不接受空串，
@@ -247,13 +239,13 @@ function AgentNav() {
   if (!agents?.length) {
     return (
       <div className="text-[11px] text-muted-foreground">
-        未检测到 OpenClaw agent（~/.openclaw/agents 不存在或为空）
+        未检测到 {info?.label ?? platform} agent（会话目录下无 agent 或目录不存在）
       </div>
     );
   }
   return (
     <Select value={selected} onValueChange={(v) => setSelectedAgent(v === ALL ? '' : v)}>
-      <SelectTrigger className="h-8 text-xs" title="选择要浏览哪个 OpenClaw agent 的会话（默认全部 agent）">
+      <SelectTrigger className="h-8 text-xs" title={`选择要浏览哪个 agent 的会话（默认全部 agent）`}>
         <SelectValue placeholder="选择 agent" />
       </SelectTrigger>
       <SelectContent>
@@ -278,13 +270,14 @@ export function SessionFiltersDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const platform = useAppStore((s) => s.platform);
+  const platformList = useAppStore((s) => s.platforms);
   const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
   const autoRefresh = useAppStore((s) => s.autoRefresh);
   const setAutoRefresh = useAppStore((s) => s.setAutoRefresh);
   const autoScroll = useAppStore((s) => s.autoScroll);
   const setAutoScroll = useAppStore((s) => s.setAutoScroll);
-  // 单选 openclaw 平台时展示 agent 下拉。
-  const showAgent = platform === 'openclaw' && selectedPlatforms.length === 0;
+  // 单选 needsAgent 平台时展示 agent 下拉。
+  const showAgent = platformInfoById(platformList, platform)?.capabilities.needsAgent === true && selectedPlatforms.length === 0;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

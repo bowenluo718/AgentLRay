@@ -1,5 +1,8 @@
-const HELP = `Usage: agentlray inspect --platform <omp|codex|claude-code> <file.jsonl> [--json] [--summary] [--fail-on pending-failures]
-       agentlray evidence --platform <omp|codex|claude-code> <file.jsonl> --sha256 <hash> --line <number> [--offset <bytes>] [--max-bytes <4..16384>] [--json]
+// 帮助文本的平台列表默认取内置三平台；lib/inspect 加载成功后按注册表实际
+// inspect 平台集更新（自定义平台声明 inspect hook 后同样可用）。
+let helpPlatforms = 'omp|codex|claude-code';
+const HELP = () => `Usage: agentlray inspect --platform <${helpPlatforms}> <file.jsonl> [--json] [--summary] [--fail-on pending-failures]
+       agentlray evidence --platform <${helpPlatforms}> <file.jsonl> --sha256 <hash> --line <number> [--offset <bytes>] [--max-bytes <4..16384>] [--json]
 
 Read one stable regular UTF-8 JSONL file (maximum 64 MiB), without starting a server.
 inspect: full report by default; --summary requires --json and bounds references, not aggregate counts.
@@ -23,7 +26,7 @@ function errorDocument(code, message) {
 
 function emitError(json, mode, code, message, help = false) {
   if (json) process.stdout.write(`${JSON.stringify(errorDocument(code, message))}\n`);
-  process.stderr.write(`agentlray ${mode}: ${message}\n${help && !json ? HELP : ''}`);
+  process.stderr.write(`agentlray ${mode}: ${message}\n${help && !json ? HELP() : ''}`);
   process.exitCode = 1;
 }
 
@@ -42,7 +45,7 @@ async function main(args, mode = 'inspect') {
   let positionalOnly = false;
   try {
     if (args.length === 1 && ['--help', '-h'].includes(args[0])) {
-      process.stdout.write(HELP);
+      process.stdout.write(HELP());
       return;
     }
     const allowed =
@@ -89,6 +92,7 @@ async function main(args, mode = 'inspect') {
   let implementation, detail;
   try {
     implementation = require('../lib/inspect');
+    if (implementation.PLATFORMS.length) helpPlatforms = implementation.PLATFORMS.join('|');
     if (summary || mode === 'evidence') detail = require('../lib/inspect-detail');
   } catch {
     emitError(json, mode, 'RULES_UNAVAILABLE', 'Bundled rules unavailable; rebuild or reinstall the package.');

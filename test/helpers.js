@@ -40,6 +40,13 @@ function serverEnv(home, port) {
     GEMINI_DIR: path.join(home, '.gemini', 'tmp'),
     AGENTLRAY_LIBRARY_DIR: path.join(home, '.agentlray', 'library'),
     AGENTLRAY_ARCHIVE_DIR: path.join(home, '.agentlray', 'archive'),
+    // 平台来源目录（P0）：指向隔离家目录下的（必然为空）子目录，确保 server
+    // 子进程不并入用户本机自定义适配器/禁用配置，保持空配置基线。
+    AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
+    AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'platforms'),
+    // 宿主进程若导出 AGENTLRAY_NO_PLUGINS=1（例如排查问题时残留），会跳过 project/user
+    // 来源，使自定义平台相关用例静默失效；测试基线显式清空，只由用例自身设置。
+    AGENTLRAY_NO_PLUGINS: '',
   };
 }
 
@@ -79,6 +86,8 @@ async function spawnOnce(home, port, extraEnv) {
 }
 
 // Starts a hermetic server instance. Returns { base, home, stop }.
+// 每个 server 实例一个全新隔离 HOME（夹具副本 + 随机派生目录），因此「重启后生效」
+// 类用例应各自 startServer() 后重放配置，不要跨实例复用 HOME。
 async function startServer(extraEnv) {
   const home = await makeTmpHome();
   let child = null;

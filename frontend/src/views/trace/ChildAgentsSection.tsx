@@ -9,10 +9,11 @@ import { childAgentLabel, hasChildAgents, useChildrenQuery } from './childAgents
 /** Summary block: one chip per spawned subagent. Hidden when the platform has no children API or the list is empty. */
 export function ChildAgentsSection() {
   const platform = useAppStore((s) => s.detailPlatform);
+  const platforms = useAppStore((s) => s.platforms);
   const setViewingChildAgent = useAppStore((s) => s.setViewingChildAgent);
   const childrenQuery = useChildrenQuery();
   const children = childrenQuery.data ?? [];
-  if (!hasChildAgents(platform) || !children.length) return null;
+  if (!hasChildAgents(platform, platforms) || !children.length) return null;
 
   return (
     <div className="mt-3">
@@ -24,7 +25,7 @@ export function ChildAgentsSection() {
       </h3>
       <div>
         {children.map((c) => {
-          const label = childAgentLabel(c, platform);
+          const label = childAgentLabel(c);
           const tip = [c.title || label, c.agentType].filter(Boolean).join(' · ');
           return (
             <span
@@ -47,14 +48,13 @@ export function ChildAgentsSection() {
 
 /** Banner above the messages list while a child transcript is loaded. */
 export function ChildAgentBanner() {
-  const platform = useAppStore((s) => s.detailPlatform);
   const viewingChildAgent = useAppStore((s) => s.viewingChildAgent);
   const setViewingChildAgent = useAppStore((s) => s.setViewingChildAgent);
   const childrenQuery = useChildrenQuery();
   if (!viewingChildAgent) return null;
 
   const meta = (childrenQuery.data ?? []).find((c) => c.name === viewingChildAgent);
-  const label = meta ? childAgentLabel(meta, platform) : viewingChildAgent;
+  const label = meta ? childAgentLabel(meta) : viewingChildAgent;
   return (
     <div className="mb-2 rounded-lg border border-border px-3 py-2 text-sm">
       🌳 正在查看子 Agent <b>{label}</b> 的执行记录 —{' '}

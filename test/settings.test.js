@@ -35,6 +35,18 @@ test('saveSections 只改写传入 section，未涉及 section 保留', async ()
   assert.equal(typeof onDisk.updatedAt, 'string');
 });
 
+test('saveUiSettings 浅合并 ui section：平台选择变化不覆盖其他 ui 键', async () => {
+  const { saveUiSettings } = require('../lib/ui-settings');
+  await saveSections({ ui: { platform: 'omp', selectedPlatforms: ['omp'], openclawDir: '/data/openclaw' } });
+  await saveUiSettings({ platform: 'codex', selectedPlatforms: ['codex', 'omp'] });
+  const onDisk = await readSettingsFile();
+  assert.deepEqual(onDisk.ui, {
+    openclawDir: '/data/openclaw',
+    platform: 'codex',
+    selectedPlatforms: ['codex', 'omp'],
+  });
+});
+
 test('migrateLegacySettings 幂等聚合 5 个旧文件并删除原文件', async () => {
   const dir = path.join(tmpHome, '.agentlray');
   await fsp.mkdir(dir, { recursive: true });

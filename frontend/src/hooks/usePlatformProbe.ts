@@ -5,9 +5,9 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
-import { getAgents, getSessions } from '@/api/client';
+import { getSessions } from '@/api/client';
 import type { Platform } from '@/api/types';
-import { dirForPlatform, selectablePlatformIds, useAppStore } from '@/store';
+import { dirBySettingKey, platformInfoById, selectablePlatformIds, useAppStore } from '@/store';
 
 export function usePlatformProbe() {
   const settings = useAppStore((s) => s.settings);
@@ -23,10 +23,10 @@ export function usePlatformProbe() {
       const entries = await Promise.all(
         platformIds.map(async (p) => {
           try {
-            const list =
-              p === 'openclaw'
-                ? await getAgents(settings.openclawDir || undefined)
-                : await getSessions(p, { dir: dirForPlatform(settings, p) || undefined });
+            // 统一走通用列表路由；needsAgent 平台缺省 agent = 全部 agent 合并会话，
+            // 探测只关心是否有会话，无需枚举 agent。
+            const dir = dirBySettingKey(settings, platformInfoById(platforms, p)) || undefined;
+            const list = await getSessions(p, { dir });
             return [p, Array.isArray(list) ? list.length : 0] as const;
           } catch {
             return [p, 0] as const; // unreachable = treat as empty

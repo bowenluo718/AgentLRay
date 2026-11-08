@@ -22,6 +22,10 @@ const BIN = path.join(REPO_ROOT, 'bin', 'agentlray.js');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-platform-cli-'));
 process.env.HOME = tmpHome;
+// setup-env.cjs 已全局注入空的 AGENTLRAY_PLATFORMS_DIR；本测试在临时 HOME 下
+// 写入自定义适配器，需在此把两个来源目录重置为 HOME 派生路径，使适配器可被加载。
+process.env.AGENTLRAY_PLATFORMS_DIR = path.join(tmpHome, '.agentlray', 'platforms');
+process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = path.join(tmpHome, 'platforms');
 
 function writeAdapter(name, source) {
   const dir = path.join(tmpHome, '.agentlray', 'platforms');
@@ -266,6 +270,50 @@ test('platform validate 「校验通过但会话不可读」：defaultDir 目录
   assert.equal(data.error.code, 'validate-sessions');
   assert.match(data.error.message, /校验通过但会话不可读/);
   assert.match(data.error.message, /list\(.*\) 抛错/);
+});
+
+// 隔离 HOME，只用于承载 settings.json（平台目录仍继承 tmpHome，适配器文件保持在
+// tmpHome 下一份，避免同 id / list 的用例与其它 validate 用例互相影响）。
+function settingsHome(settings) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-platform-cli-home-'));
+  fs.mkdirSync(path.join(home, '.agentlray'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.agentlray', 'settings.json'), JSON.stringify(settings));
+  return home;
+}
+
+test('platform validate 与加载器同口径：同 id 未声明替代拒绝，已声明替代允许通过', () => {
+  const file = path.join(tmpHome, 'codex-replacement.js');
+  fs.writeFileSync(
+    file,
+    `'use strict';\nmodule.exports = { id: 'codex', label: 'Codex Replacement', defaultDir: () => process.env.SMOKE_COPILOT_DIR, list: async () => [], parse: async () => null, getSession: async () => null };\n`
+  );
+
+  const rejected = runCli(tmpHome, ['platform', 'validate', file, '--json']);
+  assert.equal(rejected.status, 1, '未声明替代时应拒绝同 id');
+  assert.equal(JSON.parse(rejected.stdout).error.code, 'validate');
+  assert.match(JSON.parse(rejected.stdout).error.message, /id 已被占用/);
+
+  const home = settingsHome({ platforms: { replaced: ['codex'] } });
+  const ok = runCli(home, ['platform', 'validate', file, '--json'], { SMOKE_COPILOT_DIR: smokeDir });
+  assert.equal(ok.status, 0, ok.stderr);
+  const data = JSON.parse(ok.stdout);
+  assert.equal(data.ok, true);
+  assert.deepEqual(data.platform, { id: 'codex', label: 'Codex Replacement' });
+});
+
+test('platform validate 允许 list 为 null（与 loader 一致）：跳过会话枚举并给出说明', () => {
+  const file = path.join(tmpHome, 'cli-null-list.js');
+  fs.writeFileSync(
+    file,
+    `'use strict';\nmodule.exports = { id: 'cli-null-list', label: 'Null List', defaultDir: () => process.env.SMOKE_COPILOT_DIR, list: null, parse: async () => null, getSession: async () => null };\n`
+  );
+  const res = runCli(tmpHome, ['platform', 'validate', file, '--json'], { SMOKE_COPILOT_DIR: smokeDir });
+  assert.equal(res.status, 0, res.stderr);
+  const data = JSON.parse(res.stdout);
+  assert.equal(data.ok, true);
+  assert.equal(data.sessionCount, null);
+  assert.equal(data.firstId, null);
+  assert.match(data.sessionsNote, /跳过会话枚举/);
 });
 
 test('platform --help 与未知子命令', () => {

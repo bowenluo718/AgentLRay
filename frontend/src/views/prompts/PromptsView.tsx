@@ -15,8 +15,9 @@ import { Input } from '@/components/ui/input';
 import { clusterPrefillContent } from '@/lib/pure';
 import {
   HIDE_TRIVIAL_KEY,
-  dirForPlatform,
+  dirBySettingKey,
   loadStoredFlag,
+  platformInfoById,
   platformLabel,
   saveStoredFlag,
   useActivePlatform,
@@ -46,8 +47,9 @@ export function PromptsView() {
   const openLibraryForm = useAppStore((s) => s.openLibraryForm);
   const queryClient = useQueryClient();
 
-  const agent = platform === 'openclaw' && selectedAgent ? selectedAgent : undefined;
-  const dir = dirForPlatform(settings, platform) || undefined;
+  const info = platformInfoById(platforms, platform);
+  const agent = info?.capabilities.needsAgent && selectedAgent ? selectedAgent : undefined;
+  const dir = dirBySettingKey(settings, info) || undefined;
 
   // Search — debounced 250ms like legacy; searching disables the trivial filter.
   const [searchInput, setSearchInput] = useState('');
