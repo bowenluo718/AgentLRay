@@ -241,6 +241,7 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
         origin: 'user',
         overrides: null,
         replacementPending: false,
+        replaced: false,
         mounted: true,
         configuredMounted: true,
         restartRequired: false,

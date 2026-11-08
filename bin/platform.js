@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { PLATFORMS, ALL_PLATFORMS, listPlatformInfo } = require('../lib/platforms');
+const { ALL_PLATFORMS, listPlatformInfo } = require('../lib/platforms');
 const { validateAdapter, readProjectManifestReplaces } = require('../lib/platforms/loader');
 const {
   setPlatformMounted,
@@ -25,6 +25,7 @@ const {
   loadPlatformSection,
   savePlatformSection,
   catalogGet,
+  readPlatformStateSync,
 } = require('../lib/platform-config');
 
 // 信任边界提示（validate / export 的 --json/文本输出各出现一次，共用此常量防漂移）。
@@ -48,9 +49,11 @@ list:   列出全部平台，与 GET /api/platforms 同源（lib/platforms.listP
          顺序：内置（注册表插入序）→ 项目/自定义（文件名字母序）→ broken（文件名字母序）。
          broken 附带加载/校验错误便于排查；AGENTLRAY_NO_PLUGINS=1 时自定义缺席、仅一条逃生说明。
 validate: 对给定适配器文件做与加载器同一套校验（导出对象 / id 正则 ^[a-z0-9][a-z0-9-]*$ /
-         label 字符串 / 必需函数 defaultDir、parse、getSession【list 可为 null 语义，不改】/
-         id 不冲突）。通过后再调其 list(defaultDir()) 取会话计数与首条 id；
-         list 缺失、defaultDir 目录不存在或 list 抛错 → 「校验通过但会话不可读」报错。
+         label 字符串 / 必需函数 defaultDir、getSession【list、parse 可为 null 语义】/
+         id 不冲突；已声明替代（settings.replaced ∪ 同目录 manifest.replaces）时允许
+         覆盖包内置）。通过后再调其 list(defaultDir()) 取会话计数与首条 id；
+         list 缺失 → 跳过会话枚举；defaultDir 抛错或 list 抛错/非数组 →
+         「校验通过但会话不可读」报错。
          dry-run：不写 registry、不改 PLATFORMS、不持久化任何状态。
 mount/unmount: 挂载/停用平台——写 settings.platforms.disabled，重启后生效。
          停用最后一个可查询平台 → exit 1 + 错误码 last-platform。
@@ -155,7 +158,10 @@ async function commandValidate(file, json) {
     e.code = 'validate';
     throw e;
   }
-  // 结构校验与加载器同套 → 复用 loader.validateAdapter（含 id 冲突判定，registry 用真 PLATFORMS）。
+  // 结构校验与加载器同套 → 复用 loader.validateAdapter。catalog 必须传带 origin 的
+  // ALL_PLATFORMS（PLATFORMS 只有 adapter 本体，无法判定「同 id 覆盖包内置」），
+  // 并把 settings.replaced ∪ 同目录 manifest.replaces 作为替代声明传入——与加载器
+  // 的口径一致：已声明替代的同 id 适配器允许通过，「待替换适配器」不再被误拒。
   let adapter;
   try {
     adapter = require(abs);
@@ -164,36 +170,43 @@ async function commandValidate(file, json) {
     e.code = 'validate';
     throw e;
   }
-  const check = validateAdapter(adapter, PLATFORMS);
+  const replaced = new Set(readPlatformStateSync().replaced);
+  for (const id of readProjectManifestReplaces(path.dirname(abs))) replaced.add(id);
+  const check = validateAdapter(adapter, ALL_PLATFORMS, { replaced });
   if (!check.ok) {
     const e = new Error(`适配器校验失败：${check.error}`);
     e.code = 'validate';
     throw e;
   }
 
-  // 通过后调真实 list(defaultDir())（允许相对/读到就行为）。list 可为 null 语义——
-  // loader 不强制 list，但 validate 需枚举会话，缺失即「校验通过但会话不可读」。
-  let dir;
-  try {
-    dir = adapter.defaultDir();
-  } catch (err) {
-    throw sessionUnreadable(`defaultDir() 抛错：${String((err && err.message) || err)}`);
-  }
-  let summaries;
+  // 通过后调真实 list(defaultDir())（允许相对/读到就行为）。loader 允许 list 为 null
+  // （如 openclaw 只提供 getSession/needsAgent），此时跳过会话枚举而不是判失败；
+  // list 存在但 defaultDir 抛错、list 抛错或未返回数组 → 「校验通过但会话不可读」。
+  let sessionCount = null;
+  let firstId = null;
+  let sessionsNote = '';
   if (typeof adapter.list !== 'function') {
-    throw sessionUnreadable('未提供 list 函数（loader 允许 list 为 null），无法枚举会话计数');
-  }
-  try {
-    summaries = await adapter.list(dir);
-  } catch (err) {
-    throw sessionUnreadable(`list(${dir}) 抛错：${String((err && err.message) || err)}`);
-  }
-  if (!Array.isArray(summaries)) {
-    throw sessionUnreadable(`list(${dir}) 未返回数组`);
+    sessionsNote = '适配器未提供 list（loader 允许 list 为 null），已跳过会话枚举。';
+  } else {
+    let dir;
+    try {
+      dir = adapter.defaultDir();
+    } catch (err) {
+      throw sessionUnreadable(`defaultDir() 抛错：${String((err && err.message) || err)}`);
+    }
+    let summaries;
+    try {
+      summaries = await adapter.list(dir);
+    } catch (err) {
+      throw sessionUnreadable(`list(${dir}) 抛错：${String((err && err.message) || err)}`);
+    }
+    if (!Array.isArray(summaries)) {
+      throw sessionUnreadable(`list(${dir}) 未返回数组`);
+    }
+    sessionCount = summaries.length;
+    firstId = sessionCount ? String(summaries[0].id) : null;
   }
 
-  const sessionCount = summaries.length;
-  const firstId = sessionCount ? String(summaries[0].id) : null;
   if (json) {
     process.stdout.write(
       `${JSON.stringify({
@@ -204,12 +217,16 @@ async function commandValidate(file, json) {
         sessionCount,
         firstId,
         note: TRUST_NOTE,
+        ...(sessionsNote ? { sessionsNote } : {}),
       })}\n`
     );
   } else {
     process.stdout.write(
-      `platform validate: ok — id=${adapter.id} label=${adapter.label} sessions=${sessionCount} firstId=${firstId}\n`
+      `platform validate: ok — id=${adapter.id} label=${adapter.label} sessions=${
+        sessionCount === null ? 'n/a' : sessionCount
+      } firstId=${firstId}\n`
     );
+    if (sessionsNote) process.stdout.write(`${sessionsNote}\n`);
     process.stderr.write(`agentlray platform: 注意：${TRUST_NOTE}\n`);
   }
 }

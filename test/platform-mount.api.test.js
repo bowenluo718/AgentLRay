@@ -41,7 +41,16 @@ test('platform 控制端点：GET 列表含 7 内置 + 形状', async () => {
 test('platform 控制端点：PUT mount 停用 → 重启后生效', async () => {
   const srv = await startServer();
   try {
-    const r = await sendJson(srv.base, 'PUT', '/api/platforms/codex/mount', { mounted: false });
+    // 写操作响应 = GET /api/platforms 同形状（数组）；前端据此直接复用平台列表缓存。
+    const list0 = await sendJson(srv.base, 'PUT', '/api/platforms/codex/mount', { mounted: false });
+    assert.ok(Array.isArray(list0));
+    const codex0 = list0.find((p) => p.id === 'codex');
+    assert.equal(codex0.configuredMounted, false);
+    assert.equal(codex0.mounted, true); // 本轮加载仍挂载，重启后生效
+    // CLI 写出口（lib/platform-config）仍返回 { id, mounted, restart }。
+    const { setPlatformMounted } = require('../lib/platform-config');
+    const { ALL_PLATFORMS } = require('../lib/platforms');
+    const r = await setPlatformMounted('codex', false, ALL_PLATFORMS);
     assert.equal(r.id, 'codex');
     assert.equal(r.mounted, false);
     assert.equal(r.restart, true);
@@ -60,9 +69,11 @@ test('platform 控制端点：PUT mount 停用 → 重启后生效', async () =>
 test('platform 控制端点：DELETE mount 再挂载恢复', async () => {
   const srv = await startServer();
   try {
-    await sendJson(srv.base, 'DELETE', '/api/platforms/codex/mount');
-    const r = await sendJson(srv.base, 'PUT', '/api/platforms/codex/mount', { mounted: true });
-    assert.equal(r.mounted, true);
+    const off = await sendJson(srv.base, 'DELETE', '/api/platforms/codex/mount');
+    assert.ok(Array.isArray(off));
+    assert.equal(off.find((p) => p.id === 'codex').configuredMounted, false);
+    const on = await sendJson(srv.base, 'PUT', '/api/platforms/codex/mount', { mounted: true });
+    assert.equal(on.find((p) => p.id === 'codex').configuredMounted, true);
     const list = await getJson(srv.base, '/api/platforms');
     assert.equal(list.find((p) => p.id === 'codex').configuredMounted, true);
   } finally {
@@ -110,15 +121,18 @@ test('platform 控制端点：PUT/DELETE replace 往返写盘', async () => {
         return {};
       }
     };
-    // PUT replace → 写盘 replaced：[codex]
+    // PUT replace → 写盘 replaced：[codex]；响应 = GET 列表同形状，条目带 replaced:true。
+    // （replacementPending 只在「声明替代后仍未挂载」时置位，属下一轮加载行为，见
+    // test/platform-loader.test.js。）
     const r = await sendJson(srv.base, 'PUT', '/api/platforms/codex/replace', { replaced: true });
-    assert.equal(r.id, 'codex');
-    assert.equal(r.replaced, true);
-    assert.equal(r.restart, true);
+    assert.ok(Array.isArray(r));
+    assert.equal(r.find((p) => p.id === 'codex').replaced, true);
+    assert.equal(r.find((p) => p.id === 'gemini').replaced, false);
     assert.deepEqual(readSettings().platforms, { disabled: [], replaced: ['codex'] });
     // 撤销 → 清空 replaced
     const r2 = await sendJson(srv.base, 'DELETE', '/api/platforms/codex/replace');
-    assert.equal(r2.replaced, false);
+    assert.ok(Array.isArray(r2));
+    assert.equal(r2.find((p) => p.id === 'codex').replaced, false);
     assert.deepEqual(readSettings().platforms, { disabled: [], replaced: [] });
   } finally {
     await srv.stop();

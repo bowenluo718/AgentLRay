@@ -36,6 +36,24 @@ async function addOpenClawSession(home, agent, sessionId = 'oc-1111') {
   await fsp.writeFile(path.join(sessionsDir, `${sessionId}.jsonl`), records.map((r) => JSON.stringify(r)).join('\n') + '\n');
 }
 
+// 夹具 HOME 派生的全部数据目录。CLI 子进程若只重定向 HOME，仍可能命中宿主进程
+// 从 ~/.bashrc 导出的 DSH_DIR/OMP_DIR 等变量（如用户本机指向真实数据），导致
+// resume/备份类用例时红时绿。这里与 test/helpers.js::serverEnv 保持同一套隔离。
+function dataDirEnv(home) {
+  return {
+    OPENCLAW_DIR: path.join(home, '.openclaw', 'agents'),
+    CODEX_DIR: path.join(home, '.codex', 'sessions'),
+    CLAUDE_CODE_DIR: path.join(home, '.claude', 'projects'),
+    OMP_DIR: path.join(home, '.omp', 'agent', 'sessions'),
+    HERMES_DIR: path.join(home, '.hermes'),
+    DSH_DIR: path.join(home, '.dsh', 'sessions'),
+    GEMINI_DIR: path.join(home, '.gemini', 'tmp'),
+    AGENTLRAY_LIBRARY_DIR: path.join(home, '.agentlray', 'library'),
+    AGENTLRAY_ARCHIVE_DIR: path.join(home, '.agentlray', 'archive'),
+    AGENTLRAY_NO_PLUGINS: '',
+  };
+}
+
 function runCli(home, args, extraEnv = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
@@ -43,12 +61,22 @@ function runCli(home, args, extraEnv = {}) {
     // 平台目录，使 addCustomPlatform 落盘的自定义适配器在 CLI 子进程里可见。
     env: {
       ...process.env,
+      ...dataDirEnv(home),
       HOME: home,
       AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
       AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      AGENTLRAY_SELF_CMDLINE_MARKERS: selfCmdlineMarkers().join(path.delimiter),
       ...extraEnv,
     },
   });
+}
+
+// 本测试文件内的每个 CLI 子进程都在这份白名单下运行：把 agentlray 自身误判为 omp 持有者的
+// 只可能来自本文件的用例（如并发 tool 进程），这些进程的 cmdline 只含本测试目录路径，
+// 因此把「本测试目录路径」也当成本工具自身进程排除，得到与外部环境无关的稳定判定。
+// 真实持有者用 `-c 'exec -a "omp --resume <fixturePath>" ...'` 启动，cmdline 不含本目录。
+function selfCmdlineMarkers() {
+  return [BIN, __dirname, 'agentlray-sessions-test-'];
 }
 
 // runCli 的异步版本（用 spawn 而非 spawnSync）：omp 持有/终止用例需在 CLI 运行期间
@@ -60,9 +88,11 @@ function runCliAsync(home, args, extraEnv = {}) {
     const child = spawn(process.execPath, [BIN, ...args], {
       env: {
         ...process.env,
+        ...dataDirEnv(home),
         HOME: home,
         AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
         AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+        AGENTLRAY_SELF_CMDLINE_MARKERS: selfCmdlineMarkers().join(path.delimiter),
         ...extraEnv,
       },
     });

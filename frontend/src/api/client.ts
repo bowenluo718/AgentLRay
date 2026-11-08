@@ -78,7 +78,8 @@ export function fetchPlatforms(): Promise<PlatformInfo[]> {
   return fetchJson('/api/platforms');
 }
 
-/** PUT /api/platforms/:id/mount — 启用平台挂载（settings.platforms.disabled 移除该 id）。 */
+/** PUT /api/platforms/:id/mount — 启用平台挂载（settings.platforms.disabled 移除该 id）。
+ *  成功响应为与 GET /api/platforms 同形状的完整列表（可直接复用，无需再查）。 */
 export function setPlatformMounted(id: string, mounted: boolean): Promise<PlatformInfo[]> {
   return requestJson(`/api/platforms/${encodeURIComponent(id)}/mount`, mounted ? 'PUT' : 'DELETE');
 }

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  fetchPlatforms,
   getBackupStatus,
   getSettings,
   runBackup,
@@ -131,15 +132,27 @@ function BackupSection() {
   );
 }
 
-/** 平台管理 tab：遍历 /api/platforms（含未挂载/broken），展示来源、创建来源、挂载态、
- *  启停 toggle（写服务端 platforms 配置并失效 ['platforms']），重启生效标注。不参与统一 draft。 */
+/** 平台管理 tab：遍历 /api/platforms（含未挂载/broken），展示来源、挂载态与启停 toggle。
+ *  启停/撤销替代写服务端 platforms 配置（重启生效），结果写回 store（store.platforms 是
+ *  全局唯一平台列表，App 的 usePlatforms 不再刷新，直接 invalidate 收不到新数据）。
+ *  不参与统一 draft。 */
 function PlatformSection() {
   const platforms = useAppStore((s) => s.platforms);
+  const setPlatforms = useAppStore((s) => s.setPlatforms);
+  // 平台管理必须看到含未挂载条目的完整 catalog（含 broken），否则「启用」按钮无从出现：
+  // 挂载成功时全局查询缓存的 ['platforms'] 即全量列表；挂载/替代之后（本组件的独立 key）
+  // 由写操作响应刷新，不依赖全局 key 的失效。
+  const full = useQuery({ queryKey: ['platforms-catalog'], queryFn: fetchPlatforms });
+  const listed = full.data ?? platforms;
   const queryClient = useQueryClient();
   const applyPlatformMutation = useMutation({
-    mutationFn: async (fn: () => Promise<unknown>) => fn(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['platforms'] });
+    mutationFn: async (fn: () => Promise<PlatformInfo[]>) => fn(),
+    onSuccess: (data) => {
+      if (Array.isArray(data)) {
+        queryClient.setQueryData(['platforms-catalog'], data);
+        setPlatforms(data);
+      }
+      // 配置文件已变（待重启生效）：刷新会话列表，让「停用」立即从查询面消失之外的状态可见。
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
     },
     onError: (e: Error) => toast.error(`平台配置失败: ${e.message}`),
@@ -149,6 +162,10 @@ function PlatformSection() {
     applyPlatformMutation.mutate(() => setPlatformMounted(id, target));
   const toggleReplaced = (id: string, target: boolean) =>
     applyPlatformMutation.mutate(() => setPlatformReplaced(id, target));
+
+  // 替代声明（settings.platforms.replaced）由服务端 PlatformInfo.replaced 下发：
+  // 启用替代 = 先 `platform replace <id>` 声明再放入同 id 薄适配器；本面板只提供撤销。
+  const replacedDeclared = (p: PlatformInfo) => p.replaced === true;
 
   const mountStatus = (p: PlatformInfo) => {
     if (p.replacementPending)
@@ -161,10 +178,10 @@ function PlatformSection() {
   return (
     <div className="space-y-1.5">
       <p className="text-xs text-muted-foreground">
-        平台注册表（服务端 GET /api/platforms 单一真源）。可停用平台以从查询/分析面隐藏；
-        broken 平台需修复适配器或移除声明。包内置换需目标适配器可用。
+        平台注册表（服务端 GET /api/platforms 单一真源）。停用/启用与撤销替代均在重启后生效；
+        broken 平台需修复适配器或移除声明；声明替代（platform replace &lt;id&gt;）并放入同 id 适配器后覆盖内置。
       </p>
-      {platforms.map((p) => {
+      {listed.map((p) => {
         const originLabel = p.origin === 'project' ? '项目' : p.origin === 'user' ? '用户' : '内置';
         const canMount = p.id != null && !p.broken;
         return (
@@ -204,23 +221,26 @@ function PlatformSection() {
             </div>
             {canMount ? (
               <div className="flex shrink-0 items-center gap-2">
-                {p.builtin ? (
+                {replacedDeclared(p) ? (
                   <Button
                     variant="outline"
                     size="sm"
-                    title="包内置与其他来源同 id 适配器间的启用/停用（替代）"
-                    onClick={() => toggleReplaced(p.id as string, true)}
+                    disabled={applyPlatformMutation.isPending}
+                    title="撤销对包内置平台的替代声明（settings.platforms.replaced）"
+                    onClick={() => toggleReplaced(p.id as string, false)}
                   >
-                    置换
+                    撤销替代
                   </Button>
                 ) : null}
+                {/* 切换的是「配置态」（重启后生效）：挂载中的停用 → PUT mounted=false；
+                    已停用的启用 → PUT mounted=true；仅在重启生效窗口内两者一致时按当前配置发。 */}
                 <Button
                   variant="outline"
                   size="sm"
                   disabled={applyPlatformMutation.isPending}
-                  onClick={() => toggleMounted(p.id as string, !p.mounted)}
+                  onClick={() => toggleMounted(p.id as string, !p.configuredMounted)}
                 >
-                  {p.mounted ? '停用' : '启用'}
+                  {p.configuredMounted ? (p.mounted ? '停用' : '重启后停用') : p.mounted ? '重启后启用' : '启用'}
                 </Button>
               </div>
             ) : (
@@ -265,11 +285,13 @@ export function SettingsDialog({
         .map((p) => ({ key: p.dirSettingKey as string, label: p.dirSettingLabel ?? p.label ?? p.id, hint: p.dirSettingHint })),
     [platforms]
   );
-  // resume 续跑配套行：服务端已置位 resume 的平台（含内置与自定义适配器 resume opt-in）。
+  // resume 续跑配套行：已挂载、声明了默认命令名（bin ≠ null）或置位了 resume 的平台。
+  // 不能只按 resume 置位过滤：适配器缺少 resume 契约但仍声明 bin 时（自定义平台常见），
+  // bin 仍在 resolveCliBin 中作为默认命令名生效，设置面板必须能查看/编辑。
   const binsRows = useMemo(
     () =>
       selectablePlatforms(platforms)
-        .filter((p) => p.resume)
+        .filter((p) => p.bin != null || p.resume)
         .map((p) => ({ id: p.id, label: p.label ?? p.id, custom: !p.builtin })),
     [platforms]
   );

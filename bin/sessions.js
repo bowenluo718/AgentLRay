@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { PLATFORMS } = require('../lib/platforms');
+const { PLATFORMS, ALL_PLATFORMS } = require('../lib/platforms');
 const { resolveDir } = require('../lib/config');
 const { hasResumeContract, buildResumeCommand } = require('../lib/resume');
 const { hasCreateContract, buildNewCommand, spawnNewSession } = require('../lib/new');
@@ -128,9 +128,16 @@ function emitError(json, message, help = false) {
   process.exitCode = 1;
 }
 
+// 平台存在于 catalog 但未挂载（停用/替代待生效，重启后生效）的提示与 lib/session-list
+// 保持一致：让 CLI 用户知道是配置问题而非拼写问题。
 function resolvePlatform(id) {
   const platform = id && PLATFORMS[id];
   if (!platform) {
+    if (id && ALL_PLATFORMS.has(id)) {
+      throw new Error(
+        `Platform '${id}' 当前未挂载（已在平台管理中停用或替代待生效）：重启后生效，可用 agentlray platform mount ${id} 恢复。`
+      );
+    }
     throw new Error(
       `Unknown platform '${id}'. Expected one of: ${Object.keys(PLATFORMS).join(', ')}.`
     );

@@ -276,7 +276,7 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 
 `mount` / `unmount` write `~/.agentlray/settings.json` (`platforms.disabled`) and take effect after a restart — the last queryable platform cannot be unmounted (errors `last-platform`). `replace` / `unreplace` write `platforms.replaced`; `unreplace` warns if a same-id project/user file still exists (it would be broken on the next load).
 
-**`platform export`** migrates a package (built-in) or project platform to a **user thin adapter** in the platform directory (default `~/.agentlray/platforms`, override with `--out <dir>` or `AGENTLRAY_PLATFORMS_DIR`): it writes `<id>.js` plus, by default, adds the id to `settings.replaced` (`--no-replace` skips that) and removes it from `settings.disabled` if present. The generated adapter is a thin wrapper that resolves the real implementation via `AGENTLRAY_PKG_ROOT` (set by the loader to the package root), so a package upgrade follows automatically. Options: `--force` overwrites an existing file; `--out <dir>` targets a directory; `--json` prints `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`. A source already `user`-origin is refused (`export-user-origin`); conflicts error `export-exists` (use `--force`). Because the adapter runs with your user permissions, the CLI prints a trust note — only deliver trusted adapter files.
+**`platform export`** migrates a package (built-in) or project platform to a **user thin adapter** in the platform directory (default `~/.agentlray/platforms`, override with `--out <dir>` or `AGENTLRAY_PLATFORMS_DIR`): it writes `<id>.js` plus, by default, adds the id to `settings.replaced` (`--no-replace` skips that) and removes it from `settings.disabled` if present. The generated adapter is a thin wrapper that resolves the real implementation via `AGENTLRAY_PKG_ROOT` (set by the loader to the package root), so a package upgrade follows automatically. Options: `--force` overwrites an existing file; `--out <dir>` targets a directory; `--json` prints `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`. A source already `user`-origin is refused (`export-user-origin`); conflicts error `export-exists` (use `--force`). Because the adapter runs with your user permissions, the CLI prints a trust note — only deliver trusted adapter files. **Requirement:** the generated thin adapter depends on `AGENTLRAY_PKG_ROOT` injected by the loader and can only be loaded through AgentLRay; requiring it directly fails with `AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.`
 
 **Web UI:** built-in and custom platforms appear in the same platform bar (both React and legacy UI). A custom platform whose file fails to load shows a broken badge with its error and takes no part in queries.
 
@@ -291,9 +291,9 @@ A complete runnable, annotated sample adapter (flat JSONL platform, with `find` 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/status-labels` | Unified session-status vocabulary `{ order, labels }` for the four states (single source for both UIs) |
-| `GET /api/agents` | List OpenClaw agents |
-| `GET /api/agents/:name/sessions` | List sessions for an agent |
-| `GET /api/agents/:name/sessions/:id` | Get session messages |
+| `GET /api/agents` | List OpenClaw agents (legacy shim: registered only while openclaw is mounted; 404 once openclaw is disabled/removed — same for the two rows below) |
+| `GET /api/agents/:name/sessions` | List sessions for an agent (legacy shim, same lifecycle) |
+| `GET /api/agents/:name/sessions/:id` | Get session messages (legacy shim, same lifecycle) |
 | `GET /api/codex/sessions` | List Codex sessions |
 | `GET /api/codex/sessions/:id` | Get Codex session messages |
 | `GET /api/claude-code/sessions` | List Claude Code sessions |
@@ -308,7 +308,7 @@ A complete runnable, annotated sample adapter (flat JSONL platform, with `find` 
 | `GET /api/gemini/sessions/:id` | Get Gemini CLI session messages |
 | `GET /api/platforms` | List all platforms (built-in + custom + broken) with capability bits, labels and load errors |
 | `POST /api/:platform/sessions/new` | Spawn the platform CLI to start a new session (`{ "message": "...", "cwd": "..." }`, both optional). Fire-and-forget: answers `{ triggered, platform, bin, args, command }` once the spawn is triggered. 404 unknown platform, 422 platform without a create contract (dsh / openclaw), 400 cwd missing or not a directory |
-| `GET /api/spawn-map` | Build agent spawn relationship map |
+| `GET /api/spawn-map` | Build agent spawn relationship map (legacy shim: registered only while openclaw is mounted; 404 once openclaw is disabled/removed — `/api/spawn-tree` likewise) |
 | `GET /api/insights` | Aggregate analytics (tool stats, error clusters, trends) |
 | `GET /api/prompts` | Real human prompts per session, grouped by directory |
 | `GET /api/prompts/analyze` | Template clustering + attribution + Claude suggestions (`?refresh=1` to recompute, `?skipLlm=1` for clustering only) |

@@ -272,7 +272,7 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 
 `mount` / `unmount` 写 `~/.agentlray/settings.json`（`platforms.disabled`），重启后生效；最后一个可查询平台不可被停用（报 `last-platform`）。`replace` / `unreplace` 写 `platforms.replaced`；`unreplace` 若同 id 的 project/user 文件仍存在会提示（下次加载会 broken）。
 
-**`platform export`** 把包内置（package）或项目（project）平台迁移为**用户薄适配器**，写入平台目录（默认 `~/.agentlray/platforms`，可用 `--out <dir>` 或 `AGENTLRAY_PLATFORMS_DIR` 指定）：生成 `<id>.js`，并默认把 id 加入 `settings.replaced`（`--no-replace` 关闭）、若在 `settings.disabled` 中则移出。薄适配器通过 `AGENTLRAY_PKG_ROOT`（加载器设置的包根）解析真实实现，包升级自动跟随。选项：`--force` 覆盖已存在文件、`--out <dir>` 指定目录、`--json` 输出 `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`。来源已为 user 时拒绝（`export-user-origin`）；文件冲突报 `export-exists`（用 `--force` 覆盖）。因适配器按用户权限执行任意代码，CLI 输出信任提示——只投递可信的适配器文件。
+**`platform export`** 把包内置（package）或项目（project）平台迁移为**用户薄适配器**，写入平台目录（默认 `~/.agentlray/platforms`，可用 `--out <dir>` 或 `AGENTLRAY_PLATFORMS_DIR` 指定）：生成 `<id>.js`，并默认把 id 加入 `settings.replaced`（`--no-replace` 关闭）、若在 `settings.disabled` 中则移出。薄适配器通过 `AGENTLRAY_PKG_ROOT`（加载器设置的包根）解析真实实现，包升级自动跟随。选项：`--force` 覆盖已存在文件、`--out <dir>` 指定目录、`--json` 输出 `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`。来源已为 user 时拒绝（`export-user-origin`）；文件冲突报 `export-exists`（用 `--force` 覆盖）。因适配器按用户权限执行任意代码，CLI 输出信任提示——只投递可信的适配器文件。**前提：** 生成的薄适配器依赖加载器注入的 `AGENTLRAY_PKG_ROOT`，只能经 AgentLRay 加载；脱离 AgentLRay 直接 `require` 会以 `AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.` 失败。
 
 **Web 前端：** React 与 legacy 两套 UI 都经 `GET /api/platforms` 展示内置 + 自定义平台；加载失败的自定义平台显示 broken 徽标（含错误），不参与查询。
 
@@ -287,9 +287,9 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 | 接口 | 说明 |
 |------|------|
 | `GET /api/status-labels` | 会话四态的统一状态词汇 `{ order, labels }`（两套 UI 的状态徽标/组头单一来源） |
-| `GET /api/agents` | 获取 OpenClaw Agent 列表 |
-| `GET /api/agents/:name/sessions` | 获取指定 Agent 的会话列表 |
-| `GET /api/agents/:name/sessions/:id` | 获取会话消息详情 |
+| `GET /api/agents` | 获取 OpenClaw Agent 列表（legacy 兼容端点：仅当 openclaw 已挂载时注册；openclaw 停用/卸载后 404，下同） |
+| `GET /api/agents/:name/sessions` | 获取指定 Agent 的会话列表（legacy 兼容，生命周期同上） |
+| `GET /api/agents/:name/sessions/:id` | 获取会话消息详情（legacy 兼容，生命周期同上） |
 | `GET /api/codex/sessions` | 获取 Codex 会话列表 |
 | `GET /api/codex/sessions/:id` | 获取 Codex 会话消息详情 |
 | `GET /api/claude-code/sessions` | 获取 Claude Code 会话列表 |
@@ -304,7 +304,7 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 | `GET /api/gemini/sessions/:id` | 获取 Gemini CLI 会话消息详情 |
 | `GET /api/platforms` | 列出全部平台（内置 + 自定义 + broken）：含能力位、label 与加载错误 |
 | `POST /api/:platform/sessions/new` | spawn 平台 CLI 开新会话（body `{ "message": "...", "cwd": "..." }`，均可空）。fire-and-forget：触发成功即返回 `{ triggered, platform, bin, args, command }`。404 平台不存在、422 平台无 create 契约（dsh / openclaw）、400 cwd 不存在或不是目录 |
-| `GET /api/spawn-map` | 获取 Agent spawn 关系图 |
+| `GET /api/spawn-map` | 获取 Agent spawn 关系图（legacy 兼容端点：仅当 openclaw 已挂载时注册；openclaw 停用/卸载后 404，`/api/spawn-tree` 同） |
 | `GET /api/insights` | 聚合分析（工具统计、错误聚类、趋势） |
 | `GET /api/prompts` | 按目录分组的各 session 真人 prompt |
 | `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |
