@@ -297,7 +297,7 @@ test('multiple launches in one assistant record retain separate process evidence
 });
 
 test('hosted process sample matches real parser output and preserves overlap boundaries', async () => {
-  const { parseCodexSessionFile } = require('../lib/platforms/codex');
+  const { parseCodexSessionFile } = require('../lib/platforms/builtin/codex/parse');
   const filename = path.join(
     __dirname,
     '../frontend/demo/sample-logs/codex/2026/09/24/rollout-2026-09-24T08-00-00-01990000-0000-7000-8000-000000000199.jsonl'

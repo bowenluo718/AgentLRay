@@ -289,10 +289,10 @@ module.exports = require(path.join(root, ${JSON.stringify(internalRelativePath)}
 `;
 }
 
-// export 的薄适配器内部相对路径：包内置 → lib/platforms/builtin/<id>.js；
+// export 的薄适配器内部相对路径：包内置 → lib/platforms/builtin/<id>/index.js；
 // 项目平台 → 仓库内 platforms/<id>.js（相对包根的源码布局）。
 function internalRelativePathFor(id, origin) {
-  return origin === 'project' ? path.posix.join('platforms', `${id}.js`) : path.posix.join('lib', 'platforms', 'builtin', `${id}.js`);
+  return origin === 'project' ? path.posix.join('platforms', `${id}.js`) : path.posix.join('lib', 'platforms', 'builtin', id, 'index.js');
 }
 
 async function commandExport(id, opts, json) {

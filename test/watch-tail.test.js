@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { watchTail, accumulateWatchTail, latestMessageTimestamp } = require('../lib/watch');
+const { watchTail, accumulateWatchTail, latestMessageTimestamp } = require('../lib/platforms/shared/watch');
 const {
   createTailState,
   noteAssistant,
@@ -13,7 +13,7 @@ const {
   resolvePending,
   resolveAllPending,
   finishTail,
-} = require('../lib/platforms/tail-state');
+} = require('../lib/platforms/shared/tail-state');
 const { deriveStatus } = require('../lib/status');
 
 const NOW = Date.parse('2026-10-23T04:00:00.000Z');

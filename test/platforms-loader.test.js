@@ -24,7 +24,9 @@ process.env.HOME = tmpHome;
 // setup-env.cjs 已全局注入空的 AGENTLRAY_PLATFORMS_DIR；本测试用临时 HOME 下
 // 的目录放置自定义适配器，需在此重置两个来源目录为 HOME 派生路径。
 process.env.AGENTLRAY_PLATFORMS_DIR = path.join(tmpHome, '.agentlray', 'platforms');
-process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = path.join(tmpHome, 'platforms');
+// project 来源指仓库自带 platforms/（随包分发的 dsh/gemini/hermes 项目平台），
+// 保证 4 内置 + 3 项目平台的 7 平台基线；自定义/坏适配器走 user 来源。
+process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = path.join(__dirname, '..', 'platforms');
 
 const { loadPlatformAdapters, PLATFORM_DIR } = require('../lib/platforms/loader');
 const { PLATFORMS, listPlatformInfo } = require('../lib/platforms');

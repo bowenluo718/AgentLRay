@@ -192,3 +192,60 @@ test('ID_RE 契约：小写字母/数字开头，仅小写/数字/连字符', ()
   assert.doesNotMatch('-mind', ID_RE);
   assert.doesNotMatch('co mind', ID_RE);
 });
+
+test('子目录平台 <id>/index.js 由 loader 加载，辅助文件（parse.js 等）不产生独立平台', () => {
+  clearSources();
+  const platDir = path.join(userDir, 'myplat');
+  fs.mkdirSync(platDir, { recursive: true });
+  fs.writeFileSync(path.join(platDir, 'parse.js'), '// 内聚辅助文件，不应被单独加载为平台\n');
+  fs.writeFileSync(
+    path.join(platDir, 'index.js'),
+    `module.exports = { id: 'myplat', defaultDir: () => '/tmp/myplat', getSession: async () => null, label: 'MyPlat' };\n`
+  );
+  const { catalog, broken } = run();
+  const entry = catalog.get('myplat');
+  assert.ok(entry, '子目录平台应加载');
+  assert.equal(entry.origin, 'user');
+  assert.equal(entry.adapter.label, 'MyPlat');
+  assert.equal(broken.length, 0, '辅助文件 parse.js 不应产生 broken');
+  assert.ok(catalog.has('myplat'));
+  // 只产出一个 myplat，parse.js 不作为独立 id
+  assert.equal([...catalog.keys()].filter((k) => k === 'myplat').length, 1);
+});
+
+test('同名冲突：<id>.js 单文件与 <id>/index.js 子目录并存 → 子目录优先，无重复、无虚假 broken', () => {
+  clearSources();
+  // 在同一 user 目录放置 foo.js 与 foo/index.js（目录按字典序先于 foo.js 枚举，
+  // 恰好命中「目录先枚举、单文件后枚举」的路径）。
+  const platDir = userDir; // user 来源目录
+  fs.mkdirSync(platDir, { recursive: true });
+  fs.writeFileSync(path.join(platDir, 'foo.js'), "module.exports = { id: 'foo', defaultDir: () => '/file', getSession: async () => null, label: 'Foo File' };\n");
+  fs.mkdirSync(path.join(platDir, 'foo'), { recursive: true });
+  fs.writeFileSync(path.join(platDir, 'foo', 'index.js'), "module.exports = { id: 'foo', defaultDir: () => '/dir', getSession: async () => null, label: 'Foo Dir' };\n");
+  const { catalog, broken } = run();
+  const foo = catalog.get('foo');
+  assert.ok(foo, 'foo 应加载');
+  assert.equal(foo.adapter.label, 'Foo Dir', '子目录形态应优先');
+  assert.equal([...catalog.keys()].filter((k) => k === 'foo').length, 1, '同 id 只产出一条');
+  assert.equal(broken.length, 0, '不应产生单文件的虚假 broken 条目');
+  // 反序：仅单文件组织形式（无同名目录）仍正常加载。
+  clearSources();
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, 'bar.js'), "module.exports = { id: 'bar', defaultDir: () => '/bar', getSession: async () => null, label: 'Bar' };\n");
+  const { catalog: c2, broken: b2 } = run();
+  assert.ok(c2.get('bar'));
+  assert.equal(b2.length, 0);
+});
+
+test('@agentlray/shared 裸名别名由 shared-alias 解析到外层共享目录', () => {
+  const { installSharedAlias } = require('../lib/platforms/shared-alias');
+  installSharedAlias();
+  // 子模块（helpers）与目录入口（index）都应按别名解析到 lib/platforms/shared。
+  const helpers = require('@agentlray/shared/helpers');
+  const barrel = require('@agentlray/shared');
+  assert.ok(helpers && typeof helpers === 'object');
+  assert.ok(barrel && typeof barrel === 'object');
+  // 与相对路径 require 得到同一模块实例（同引用），证明别名命中共享目录。
+  const relHelpers = require('../lib/platforms/shared/helpers');
+  assert.equal(helpers, relHelpers);
+});

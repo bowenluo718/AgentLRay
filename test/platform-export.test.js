@@ -62,14 +62,14 @@ test('export 生成薄适配器 + 自动 replace + AGENTLRAY_PKG_ROOT 包根解�
   assert.equal(data.replaced, true);
   assert.equal(data.restart, true);
 
-  // 薄适配器内容：use strict + 注释 + path + AGENTLRAY_PKG_ROOT 判空 + require(path.join(root, 'lib/platforms/builtin/codex.js'))
+  // 薄适配器内容：use strict + 注释 + path + AGENTLRAY_PKG_ROOT 判空 + require(path.join(root, 'lib/platforms/builtin/codex/index.js'))
   const file = path.join(outDir, 'codex.js');
   assert.ok(fs.existsSync(file));
   const src = fs.readFileSync(file, 'utf8');
   assert.match(src, /'use strict'/);
   assert.match(src, /process\.env\.AGENTLRAY_PKG_ROOT/);
   assert.match(src, /AGENTLRAY_PKG_ROOT is not set/);
-  assert.match(src, /require\(path\.join\(root, ["']lib\/platforms\/builtin\/codex\.js["']\)\)/);
+  assert.match(src, /require\(path\.join\(root, ["']lib\/platforms\/builtin\/codex\/index\.js["']\)\)/);
 
   // 自动 replace 写入 settings.replaced
   const settings = readSettings(home);
@@ -83,7 +83,7 @@ test('export 的薄适配器在 AgentLRay 加载下解析到包内置实现（or
   // 模拟 export 产物 + replaced 配置
   fs.writeFileSync(
     path.join(outDir, 'codex.js'),
-    `'use strict';\nconst path = require('path');\nconst root = process.env.AGENTLRAY_PKG_ROOT;\nif (!root) throw new Error('AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.');\nmodule.exports = require(path.join(root, "lib/platforms/builtin/codex.js"));\n`
+    `'use strict';\nconst path = require('path');\nconst root = process.env.AGENTLRAY_PKG_ROOT;\nif (!root) throw new Error('AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.');\nmodule.exports = require(path.join(root, "lib/platforms/builtin/codex/index.js"));\n`
   );
   fs.mkdirSync(path.join(home, '.agentlray'), { recursive: true });
   fs.writeFileSync(
@@ -166,7 +166,7 @@ test('export user 来源（本地自定义）拒绝导出 → exit 1 + export-us
   // 写一个有效码 user 适配器（id=codex），使加载后 codex origin=user。
   fs.writeFileSync(
     path.join(outDir, 'codex.js'),
-    `'use strict';\nconst path = require('path');\nconst root = process.env.AGENTLRAY_PKG_ROOT;\nif (!root) throw new Error('no root');\nmodule.exports = require(path.join(root, "lib/platforms/builtin/codex.js"));\n`
+    `'use strict';\nconst path = require('path');\nconst root = process.env.AGENTLRAY_PKG_ROOT;\nif (!root) throw new Error('no root');\nmodule.exports = require(path.join(root, "lib/platforms/builtin/codex/index.js"));\n`
   );
   fs.mkdirSync(path.join(home, '.agentlray'), { recursive: true });
   fs.writeFileSync(

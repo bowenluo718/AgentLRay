@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
-const dsh = require(path.join(__dirname, '..', 'lib', 'platforms', 'dsh'));
+const dsh = require(path.join(__dirname, '..', 'platforms', 'dsh', 'parse'));
 const { startServer, getJson } = require('./helpers.js');
 
 const DSH_PLAIN = 'dsh-fixture-session-0001';

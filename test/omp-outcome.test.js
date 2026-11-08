@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const { stripTypeScriptTypes } = require('node:module');
-const { normalizeOmpRecord } = require('../lib/platforms/omp');
+const { normalizeOmpRecord } = require('../lib/platforms/builtin/omp/parse');
 
 let diagnoseSession;
 before(async () => {

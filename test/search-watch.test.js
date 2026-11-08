@@ -10,7 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { extractSnippet, createSessionMatcher } = require(path.join(__dirname, '..', 'lib', 'search'));
-const { readNewLines, parseWatchLines } = require(path.join(__dirname, '..', 'lib', 'watch'));
+const { readNewLines, parseWatchLines } = require(path.join(__dirname, '..', 'lib', 'platforms', 'shared', 'watch'));
 const { PLATFORMS } = require(path.join(__dirname, '..', 'lib', 'platforms'));
 
 describe('search snippet extraction', () => {

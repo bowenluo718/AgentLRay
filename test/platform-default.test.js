@@ -26,7 +26,7 @@ function runInIsolated(settingsJson) {
   const script = `
     process.env.HOME = ${JSON.stringify(home)};
     process.env.AGENTLRAY_PLATFORMS_DIR = ${JSON.stringify(path.join(home, '.empty-user'))};
-    process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = ${JSON.stringify(path.join(home, '.empty-project'))};
+    process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = ${JSON.stringify(path.join(REPO_ROOT, 'platforms'))};
     const { defaultPlatformId, PLATFORMS, listPlatformInfo } = require(${JSON.stringify(path.join(REPO_ROOT, 'lib', 'platforms'))});
     console.log(JSON.stringify({ default: defaultPlatformId(), platforms: Object.keys(PLATFORMS) }));
   `;
@@ -55,7 +55,7 @@ test('defaultPlatformId：listPlatformInfo 反映挂载/配置/重启差异于�
   const script = `
     process.env.HOME = ${JSON.stringify(home)};
     process.env.AGENTLRAY_PLATFORMS_DIR = ${JSON.stringify(path.join(home, '.empty-user'))};
-    process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = ${JSON.stringify(path.join(home, '.empty-project'))};
+    process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = ${JSON.stringify(path.join(REPO_ROOT, 'platforms'))};
     const { defaultPlatformId, listPlatformInfo } = require(${JSON.stringify(path.join(REPO_ROOT, 'lib', 'platforms'))});
     const info = listPlatformInfo();
     console.log(JSON.stringify({

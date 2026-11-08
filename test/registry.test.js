@@ -2,20 +2,20 @@
 // generic routes (sessions/search/watch/insights/export/otlp) rely on.
 // Guards against a new adapter being registered with a missing capability.
 
-// 本测试只守护内置平台契约。v2（平台来源统一）后 lib/platforms 在 require 期同步
-// 读 settings 的 platforms section（disabled/replaced）并并入 ~/.agentlray/platforms/
-// 自定义适配器，因此须在 require 之前：① 禁用自定义平台；② 把 HOME 指到临时目录，
-// 使 readPlatformStateSync 读到空的 settings（无 disabled/replaced），保证「空配置
-// 基线 → 7 个内置平台」的确定性，不受用户本机配置（如禁用了 gemini）影响。
-process.env.AGENTLRAY_NO_PLUGINS = '1';
+// 本测试守护整个平台注册表契约。v2（平台来源统一）后 dsh/gemini/hermes 已迁移为
+// 随包分发的项目平台（<repo>/platforms/）。为得到「4 个内置 + 3 个项目平台」的
+// 确定性基线，须在 require 之前：① 把 HOME 指到临时目录，使 readPlatformStateSync
+// 读到空的 settings（无 disabled/replaced），不受用户本机配置影响；
+// ② user 来源指到空目录（不并入用户本机自定义适配器），project 来源指到仓库
+// platforms/（承载 dsh/gemini/hermes）。不使用 AGENTLRAY_NO_PLUGINS（会连项目
+// 来源一起屏蔽，丢失迁移后的项目平台）。
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-registry-'));
-// setup-env.cjs 全局注入的空来源目录不基于本测试的临时 HOME，重置为空目录，
-// 确保 lib/platforms 不并入任何自定义适配器。
+// setup-env.cjs 全局注入的空 user 来源目录不基于本测试的临时 HOME，重置为空目录。
 process.env.AGENTLRAY_PLATFORMS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-registry-user-'));
-process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-registry-project-'));
+process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = path.join(__dirname, '..', 'platforms');
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

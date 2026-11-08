@@ -13,9 +13,9 @@ const { hasCreateContract, buildNewCommand } = require('../lib/new');
 const codex = require('../lib/platforms/builtin/codex');
 const claude = require('../lib/platforms/builtin/claude-code');
 const omp = require('../lib/platforms/builtin/omp');
-const gemini = require('../lib/platforms/builtin/gemini');
-const hermes = require('../lib/platforms/builtin/hermes');
-const dsh = require('../lib/platforms/builtin/dsh');
+const gemini = require('../platforms/gemini');
+const hermes = require('../platforms/hermes');
+const dsh = require('../platforms/dsh');
 const openclaw = require('../lib/platforms/builtin/openclaw');
 
 test('hasCreateContract：内置五平台 true，dsh/openclaw false', () => {

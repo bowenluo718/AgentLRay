@@ -226,7 +226,7 @@ test('embedded calls and separate child transcripts preserve event boundaries', 
 });
 
 test('hosted synthetic walkthrough yields two events and preserves seven failure results', async () => {
-  const { parseOmpSessionFile } = require('../lib/platforms/omp');
+  const { parseOmpSessionFile } = require('../lib/platforms/builtin/omp/parse');
   const sample = path.join(
     __dirname,
     '../frontend/demo/sample-logs/omp/-demo-diagnostics/2026-09-23T08-00-00-000Z_0199demo-diagnostics.jsonl'
@@ -251,7 +251,7 @@ test('hosted synthetic walkthrough yields two events and preserves seven failure
 });
 
 test('bundled hosted walkthrough matches its real parser output', async () => {
-  const { parseOmpSessionFile } = require('../lib/platforms/omp');
+  const { parseOmpSessionFile } = require('../lib/platforms/builtin/omp/parse');
   const sample = path.join(
     __dirname,
     '../frontend/demo/sample-logs/omp/-demo-diagnostics/2026-09-23T08-00-00-000Z_0199demo-diagnostics.jsonl'

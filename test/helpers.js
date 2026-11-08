@@ -40,10 +40,12 @@ function serverEnv(home, port) {
     GEMINI_DIR: path.join(home, '.gemini', 'tmp'),
     AGENTLRAY_LIBRARY_DIR: path.join(home, '.agentlray', 'library'),
     AGENTLRAY_ARCHIVE_DIR: path.join(home, '.agentlray', 'archive'),
-    // 平台来源目录（P0）：指向隔离家目录下的（必然为空）子目录，确保 server
-    // 子进程不并入用户本机自定义适配器/禁用配置，保持空配置基线。
+    // 平台来源目录（P0）：user 来源指向隔离家目录下的（必然为空）子目录，确保
+    // server 子进程不并入用户本机自定义适配器/禁用配置；project 来源指向仓库自带
+    // platforms/（dsh/gemini/hermes 随包分发的项目平台，确定性），保证空配置基线
+    // = 4 内置 + 3 项目平台。
     AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
-    AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'platforms'),
+    AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(REPO_ROOT, 'platforms'),
     // 宿主进程若导出 AGENTLRAY_NO_PLUGINS=1（例如排查问题时残留），会跳过 project/user
     // 来源，使自定义平台相关用例静默失效；测试基线显式清空，只由用例自身设置。
     AGENTLRAY_NO_PLUGINS: '',

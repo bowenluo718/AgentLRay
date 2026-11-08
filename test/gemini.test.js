@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const gemini = require(path.join(__dirname, '..', 'lib', 'platforms', 'gemini'));
+const gemini = require(path.join(__dirname, '..', 'platforms', 'gemini', 'parse'));
 const { startServer, getJson } = require('./helpers.js');
 
 const GEM_PLAIN = 'gemini-fixture-session-0001';

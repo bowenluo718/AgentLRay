@@ -64,7 +64,9 @@ function runCli(home, args, extraEnv = {}) {
       ...dataDirEnv(home),
       HOME: home,
       AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
-      AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      // project 来源指向仓库自带 platforms/（含随包分发的 dsh/gemini/hermes 项目
+      // 平台）；自定义加法器写 user 来源可见。与 test/helpers.js::serverEnv 同套隔离。
+      AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(__dirname, '..', 'platforms'),
       AGENTLRAY_SELF_CMDLINE_MARKERS: selfCmdlineMarkers().join(path.delimiter),
       ...extraEnv,
     },

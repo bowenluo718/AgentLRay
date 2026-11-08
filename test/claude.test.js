@@ -12,7 +12,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
-const claude = require(path.join(__dirname, '..', 'lib', 'platforms', 'claude'));
+const claude = require(path.join(__dirname, '..', 'lib', 'platforms', 'builtin', 'claude-code', 'parse'));
 const { extractClaudeCodeUserPromptText } = claude;
 
 // --- extractClaudeCodeUserPromptText ---

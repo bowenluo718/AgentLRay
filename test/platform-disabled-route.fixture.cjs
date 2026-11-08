@@ -9,7 +9,7 @@ const mountPlatformsRoutes = require('../lib/routes/platforms');
 
 // 构造未挂载态：gemini 在 catalog，但不在 PLATFORMS。
 if (process.env.AGENTLRAY_FORCE_DISABLED_GEMINI === '1') {
-  const gemini = lib.ALL_PLATFORMS.get('gemini')?.adapter ?? require('../lib/platforms/builtin/gemini');
+  const gemini = lib.ALL_PLATFORMS.get('gemini')?.adapter ?? require('../platforms/gemini');
   // 条目（含损坏的遗留条目）都在 ALL_PLATFORMS 里；测试不依赖 settings，直接覆盖为有效条目。
   lib.ALL_PLATFORMS.set('gemini', { adapter: gemini, origin: 'package', overrides: null, replacementPending: false });
   delete lib.PLATFORMS.gemini;
@@ -19,7 +19,7 @@ const express = require('express');
 const app = express();
 // 对照组若本机已停用 gemini，则把适配器补回 PLATFORMS（无该 adapter 时无从构造）。
 if (process.env.AGENTLRAY_FORCE_DISABLED_GEMINI !== '1' && !lib.PLATFORMS.gemini) {
-  lib.PLATFORMS.gemini = lib.ALL_PLATFORMS.get('gemini')?.adapter ?? require('../lib/platforms/builtin/gemini');
+  lib.PLATFORMS.gemini = lib.ALL_PLATFORMS.get('gemini')?.adapter ?? require('../platforms/gemini');
 }
 const mountSessionRoutes = require('../lib/routes/sessions');
 mountPlatformsRoutes(app);

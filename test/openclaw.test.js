@@ -15,7 +15,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
-const oc = require(path.join(__dirname, '..', 'lib', 'platforms', 'openclaw'));
+const oc = require(path.join(__dirname, '..', 'lib', 'platforms', 'builtin', 'openclaw', 'parse'));
 const { stripOpenClawNoise } = oc;
 
 function writeSession(recs) {

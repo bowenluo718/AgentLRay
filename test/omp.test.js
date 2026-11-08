@@ -9,7 +9,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const { extractOmpUserPromptText } = require(path.join(__dirname, '..', 'lib', 'platforms', 'omp'));
+const { extractOmpUserPromptText } = require(path.join(__dirname, '..', 'lib', 'platforms', 'builtin', 'omp', 'parse'));
 
 const ATTACHMENT_WORKER = `<attachment>
 You are working inside Orca, a multi-agent IDE. You are a dispatched worker.

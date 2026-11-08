@@ -22,7 +22,7 @@ function tmpHome() {
 
 // 生成一个「继承包内置」的薄适配器（与 export 产物一致），以某个内置 id 作为项目平台。
 function thinAdapterSource(id) {
-  return `'use strict';\nconst path = require('path');\nconst root = process.env.AGENTLRAY_PKG_ROOT;\nif (!root) throw new Error('no root');\nmodule.exports = require(path.join(root, ${JSON.stringify(path.posix.join('lib', 'platforms', 'builtin', `${id}.js`))}));\n`;
+  return `'use strict';\nconst path = require('path');\nconst root = process.env.AGENTLRAY_PKG_ROOT;\nif (!root) throw new Error('no root');\nmodule.exports = require(path.join(root, ${JSON.stringify(path.posix.join('lib', 'platforms', 'builtin', id, 'index.js'))}));\n`;
 }
 
 function makeEnv(home, projectDir) {
