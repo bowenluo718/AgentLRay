@@ -46,9 +46,18 @@ function runCli(home, args, extraEnv = {}) {
       HOME: home,
       AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
       AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      AGENTLRAY_SELF_CMDLINE_MARKERS: selfCmdlineMarkers().join(path.delimiter),
       ...extraEnv,
     },
   });
+}
+
+// 本测试文件内的每个 CLI 子进程都在这份白名单下运行：把 agentlray 自身误判为 omp 持有者的
+// 只可能来自本文件的用例（如并发 tool 进程），这些进程的 cmdline 只含本测试目录路径，
+// 因此把「本测试目录路径」也当成本工具自身进程排除，得到与外部环境无关的稳定判定。
+// 真实持有者用 `-c 'exec -a "omp --resume <fixturePath>" ...'` 启动，cmdline 不含本目录。
+function selfCmdlineMarkers() {
+  return [BIN, __dirname, 'agentlray-sessions-test-'];
 }
 
 // runCli 的异步版本（用 spawn 而非 spawnSync）：omp 持有/终止用例需在 CLI 运行期间
@@ -63,6 +72,7 @@ function runCliAsync(home, args, extraEnv = {}) {
         HOME: home,
         AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
         AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+        AGENTLRAY_SELF_CMDLINE_MARKERS: selfCmdlineMarkers().join(path.delimiter),
         ...extraEnv,
       },
     });

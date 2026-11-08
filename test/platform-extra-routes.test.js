@@ -3,7 +3,7 @@
 //   - 通用 agents / children / spawn 路由按 capability 挂载
 //     （/api/:platform/agents*、…/children*、…/spawn-map|spawn-tree）
 //   - openclaw 通用 needsAgent 清单/详情 → 平台默认目录（不复用 top-level DATA_DIR）
-//   - 平台 disabled（重启生效）后对应通用路由 404
+//   - 平台 disabled（重启生效）后对应通用路由返回结构化 404（platformIssue.code=disabled）
 //   - top-level legacy 别名（/api/agents*、/api/spawn-*）仅 openclaw 挂载时可用，
 //     openclaw 卸载后消失（404）
 // 所有用例都跑在临时 AGENTLRAY_HOME / 隔离 platform 目录下，绝不碰真实 ~/.agentlray。
@@ -45,12 +45,12 @@ describe('平台等价 P2：通用能力路由', () => {
     await srv.stop();
   });
 
-  it('claude-code agents 端点不挂（无 listAgents）→ 回落 SPA 而非 JSON', async () => {
-    // 非 needsAgent 平台不提供 listAgents hook，/api/claude-code/agents 无匹配路由
-    // → next() 落到 SPA 兜底（200 HTML），而非返回 JSON。
-    const res = await fetch(`${srv.base}/api/claude-code/agents`);
-    const ct = res.headers.get('content-type') || '';
-    assert.ok(ct.includes('text/html'), `expected SPA HTML fallback, got ${ct}`);
+  it('claude-code agents 端点（无 listAgents）→ 结构化 404 JSON（capability-missing）', async () => {
+    // 非 needsAgent 平台不提供 listAgents hook：统一 404 JSON（而不是 next() 落到 SPA 的
+    // 200 HTML，前端拿不到 JSON 时只会显示空数据/无响应）。
+    const body = await getJson(srv.base, '/api/claude-code/agents', 404);
+    assert.equal(body.platformIssue?.platform, 'claude-code');
+    assert.equal(body.platformIssue.code, 'capability-missing');
   });
 
   it('openclaw 通用 agents 端点列出 agents + 单 agent 会话', async () => {
@@ -194,12 +194,18 @@ describe('平台等价 P2：legacy 别名与卸载 404', () => {
     await getJson(mountedSrv.base, '/api/spawn-map'); // openclaw 挂载 → hook 存在 → 200
   });
 
-  it('openclaw 卸载后 top-level legacy 别名与通用 openclaw 路由消失（回落 SPA 而非 JSON）', async () => {
+  it('openclaw 卸载后 top-level legacy 别名消失、通用 openclaw 路由结构化 404', async () => {
     const srvOff = await spawnDisabledServer(['openclaw']);
     try {
-      // SPA fallback 对未匹配路由返回 200 HTML；已挂载的业务路由返回 JSON。
-      // 「路由消失」的可靠判据 = 响应不是 JSON（而是 SPA index.html 兜底）。
-      for (const p of ['/api/agents', '/api/spawn-map', '/api/spawn-tree', '/api/openclaw/sessions']) {
+      // 已挂载平台：通用路由返回 JSON；平台未挂载：结构化 404（platformIssue.code=disabled，
+      // 而不是 SPA HTML —— 前端据 code 提示「已停用，重启后生效」）。
+      for (const p of ['/api/openclaw/sessions']) {
+        const body = await getJson(srvOff.base, p, 404);
+        assert.equal(body.platformIssue?.platform, 'openclaw', p);
+        assert.equal(body.platformIssue.code, 'disabled', p);
+      }
+      // top-level legacy 别名随 openclaw 卸载一并消失（不再是业务路由）→ SPA 回落。
+      for (const p of ['/api/agents', '/api/spawn-map', '/api/spawn-tree']) {
         const res = await fetch(srvOff.base + p);
         const ct = res.headers.get('content-type') || '';
         assert.ok(
@@ -216,12 +222,12 @@ describe('平台等价 P2：legacy 别名与卸载 404', () => {
     }
   });
 
-  it('omp 卸载后其通用 children 路由消失（回落 SPA；codex 仍挂载）', async () => {
+  it('omp 卸载后其通用 children 路由结构化 404（codex 仍挂载）', async () => {
     const srvOff = await spawnDisabledServer(['omp']);
     try {
-      const res = await fetch(`${srvOff.base}/api/omp/sessions/x/children`);
-      const ct = res.headers.get('content-type') || '';
-      assert.ok(ct.includes('text/html'), `omp children should fall back to SPA when omp unmounted (got ${ct})`);
+      const body = await getJson(srvOff.base, '/api/omp/sessions/x/children', 404);
+      assert.equal(body.platformIssue?.platform, 'omp');
+      assert.equal(body.platformIssue.code, 'disabled');
       // codex 仍挂载 → 通用列表正常 JSON
       const codex = await getJson(srvOff.base, '/api/codex/sessions');
       assert.ok(Array.isArray(codex));

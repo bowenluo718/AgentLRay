@@ -83,6 +83,8 @@ async function spawnOnce(home, port, extraEnv) {
 }
 
 // Starts a hermetic server instance. Returns { base, home, stop }.
+// 每个 server 实例一个全新隔离 HOME（夹具副本 + 随机派生目录），因此「重启后生效」
+// 类用例应各自 startServer() 后重放配置，不要跨实例复用 HOME。
 async function startServer(extraEnv) {
   const home = await makeTmpHome();
   let child = null;

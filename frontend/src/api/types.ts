@@ -55,6 +55,8 @@ export interface PlatformInfo {
   overrides: Record<string, unknown> | null;
   /** 声明了替代但同 id 适配器缺失/损坏 → 回退包内置。 */
   replacementPending: boolean;
+  /** 替代声明（settings.platforms.replaced ∪ manifest.replaces）是否覆盖本 id。 */
+  replaced?: boolean;
   /** 当前生效挂载态（包含 disabled 黑名单与替代回退之后的最终状态）。 */
   mounted: boolean;
   /** 用户配置的挂载态（settings.platforms.disabled 之外的原生意图）。 */
