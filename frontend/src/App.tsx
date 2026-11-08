@@ -12,7 +12,6 @@ import { useAppStore } from '@/store';
 import type { MainView } from '@/store';
 import { usePlatforms } from '@/views/sessions/queries';
 import { InsightsView } from '@/views/insights/InsightsView';
-import { LibraryView } from '@/views/library/LibraryView';
 import { PromptsView } from '@/views/prompts/PromptsView';
 import { SessionsView } from '@/views/sessions/SessionsView';
 import { KanbanView } from '@/views/kanban/KanbanView';
@@ -22,7 +21,6 @@ const TABS: { view: MainView; label: string; title: string }[] = [
   { view: 'sessions', label: '会话', title: '浏览与回放会话：消息、工具调用、耗时与 token' },
   { view: 'insights', label: '分析', title: '聚合统计：工具调用、错误聚类、token 消耗、按日趋势' },
   { view: 'prompts', label: 'Prompts', title: '自动提取历史里所有真人 prompt：搜索、收藏、聚类分析与改写' },
-  { view: 'library', label: '资产库', title: 'Prompt 资产库：标签管理，一键安装为各工具的 slash command' },
   { view: 'kanban', label: '任务看板', title: '会话状态看板：按待用户输入/工作中/等待中/已停止 四列查看' },
 ];
 
@@ -198,9 +196,6 @@ export default function App() {
               </TabsContent>
               <TabsContent value="prompts" className="mt-0 min-h-0 flex-1 overflow-auto p-2 md:p-4">
                 <PromptsView />
-              </TabsContent>
-              <TabsContent value="library" className="mt-0 min-h-0 flex-1 overflow-auto p-2 md:p-4">
-                <LibraryView />
               </TabsContent>
               <TabsContent value="kanban" className="mt-0 min-h-0 flex-1 overflow-auto p-2 md:p-4">
                 <KanbanView />

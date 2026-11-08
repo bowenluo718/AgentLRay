@@ -1,7 +1,7 @@
 // Integration tests: each describe block gets a hermetic server whose HOME is
 // a temp copy of test/fixtures/home. The read-only groups share one server;
-// groups that mutate global stores (library installs, backup archive) start
-// their own so runs stay order-independent and repeatable.
+// groups that mutate global stores start their own so runs stay
+// order-independent and repeatable.
 
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -603,124 +603,6 @@ describe('AgentLRay API', () => {
       assert.deepEqual(tools[0].status, { code: 2 }); // the fixture tool pair errored
       assert.ok(BigInt(tools[0].endTimeUnixNano) > BigInt(tools[0].startTimeUnixNano));
     });
-  });
-});
-
-describe('library', () => {
-  let srv;
-  before(async () => {
-    srv = await startServer();
-  });
-  after(async () => {
-    await srv.stop();
-  });
-
-  it('supports CRUD, install into platform command dirs, and usage stats', async () => {
-    const empty = await getJson(srv.base, '/api/library');
-    assert.deepEqual(empty.prompts, []);
-
-    const created = await sendJson(
-      srv.base,
-      'POST',
-      '/api/library',
-      {
-        name: 'fixture-prompt',
-        description: 'Fixture prompt for tests',
-        tags: ['fixture', 'test'],
-        content: 'Run the fixture checks and report.',
-      },
-      201
-    );
-    assert.equal(created.prompt.name, 'fixture-prompt');
-    assert.deepEqual(created.prompt.tags, ['fixture', 'test']);
-    assert.deepEqual(created.prompt.installed, { claude: false, codex: false, omp: false });
-
-    // Duplicate create is rejected
-    await sendJson(
-      srv.base,
-      'POST',
-      '/api/library',
-      {
-        name: 'fixture-prompt',
-        content: 'x',
-      },
-      409
-    );
-
-    const listed = await getJson(srv.base, '/api/library');
-    assert.equal(listed.prompts.length, 1);
-
-    const updated = await sendJson(srv.base, 'PUT', '/api/library/fixture-prompt', {
-      description: 'Updated fixture description',
-    });
-    assert.equal(updated.prompt.description, 'Updated fixture description');
-    assert.equal(updated.prompt.content.trim(), 'Run the fixture checks and report.');
-
-    // Install lands real files inside the temp HOME copy — never the real ~
-    const installed = await sendJson(srv.base, 'POST', '/api/library/fixture-prompt/install', {
-      targets: ['claude', 'codex'],
-    });
-    assert.deepEqual(installed.installed, { claude: true, codex: true, omp: false });
-    const claudeCmd = path.join(srv.home, '.claude', 'commands', 'fixture-prompt.md');
-    const codexCmd = path.join(srv.home, '.codex', 'prompts', 'fixture-prompt.md');
-    assert.ok(await exists(claudeCmd));
-    assert.ok(await exists(codexCmd));
-    const installedBody = await fsp.readFile(claudeCmd, 'utf8');
-    assert.ok(installedBody.includes('Run the fixture checks and report.'));
-
-    // Usage: one slash invocation in the omp fixture session + one in claude history
-    const usage = await getJson(srv.base, '/api/library/usage');
-    const u = usage.usage['fixture-prompt'];
-    assert.equal(u.uses, 2);
-    assert.equal(u.avgMessages, 1);
-    assert.equal(u.errorRate, 0);
-    assert.equal(u.lastUsed, '2026-01-21T09:00:02.000Z');
-
-    // Delete removes the entry and its installed copies
-    const deleted = await sendJson(srv.base, 'DELETE', '/api/library/fixture-prompt', undefined);
-    assert.equal(deleted.ok, true);
-    assert.equal(await exists(claudeCmd), false);
-    assert.equal(await exists(codexCmd), false);
-    const finalList = await getJson(srv.base, '/api/library');
-    assert.deepEqual(finalList.prompts, []);
-  });
-});
-
-describe('backup', () => {
-  let srv;
-  before(async () => {
-    srv = await startServer();
-  });
-  after(async () => {
-    await srv.stop();
-  });
-
-  it('copies every session log once, then skips everything on the second run', async () => {
-    const first = await sendJson(srv.base, 'POST', '/api/backup', undefined);
-    // codex 2 + claude 2 + history.jsonl + omp 2 + dsh 5 + gemini 3 (incl. nested subagent transcript)
-    // dsh = 0001 plain + 0002 zstd + 0003 legacy-v0 + 0003 v3 + 0004 v4 (versioned durable logs archived too)
-    assert.equal(first.copied, 15);
-    assert.equal(first.skipped, 0);
-    assert.equal(first.total, 15);
-    assert.deepEqual(first.byPlatform.codex, { copied: 2, skipped: 0 });
-    assert.deepEqual(first.byPlatform['claude-code'], { copied: 3, skipped: 0 });
-    assert.deepEqual(first.byPlatform.omp, { copied: 2, skipped: 0 });
-    assert.deepEqual(first.byPlatform.dsh, { copied: 5, skipped: 0 });
-    assert.deepEqual(first.byPlatform.gemini, { copied: 3, skipped: 0 });
-    // Archive stays inside the temp HOME
-    assert.equal(first.archiveDir, path.join(srv.home, '.agentlray', 'archive'));
-    assert.ok(await exists(path.join(first.archiveDir, 'claude-code', 'history.jsonl')));
-
-    const second = await sendJson(srv.base, 'POST', '/api/backup', undefined);
-    assert.equal(second.copied, 0);
-    assert.equal(second.skipped, 15);
-    assert.equal(second.total, 15);
-
-    const status = await getJson(srv.base, '/api/backup/status');
-    assert.equal(status.archiveDir, first.archiveDir);
-    assert.equal(status.files, 15);
-    assert.ok(status.bytes > 0);
-    assert.ok(typeof status.lastBackup === 'string');
   });
 });
 

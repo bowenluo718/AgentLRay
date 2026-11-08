@@ -29,7 +29,6 @@ interface PromptGroupSectionProps {
   onHideSession: (session: PromptSession) => void;
   onHidePrompt: (prompt: PromptEntry) => void;
   hidePending: boolean;
-  onStarPrompt: (prompt: PromptEntry) => void;
   onOpenSession: (sessionId: string) => void;
 }
 
@@ -43,7 +42,6 @@ export function PromptGroupSection({
   onHideSession,
   onHidePrompt,
   hidePending,
-  onStarPrompt,
   onOpenSession,
 }: PromptGroupSectionProps) {
   // Expansion: per-session override on top of the search-driven default.
@@ -144,7 +142,6 @@ export function PromptGroupSection({
                         onToggleSelected={(on) => onToggleKeys([key], on)}
                         onHide={() => onHidePrompt(p)}
                         hidePending={hidePending}
-                        onStar={() => onStarPrompt(p)}
                       />
                     );
                   })}

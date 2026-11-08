@@ -14,7 +14,7 @@ const BASE_CAPS: PlatformCapabilities = {
   list: false, find: false, parse: false, getSession: false, collectFiles: false, watchParse: false,
   needsAgent: false, listForAgent: false, listAllAgents: false, listAgents: false, children: false,
   spawn: false, watch: false, search: false, insights: false, prompts: false, toolAudit: false,
-  backup: false, inspect: false, otlp: false,
+  inspect: false, otlp: false,
 };
 
 // 内置平台降级表（除 openclaw）的「常规可查询」能力位。
@@ -298,10 +298,10 @@ function loadPersisted(): {
 
 /** 界面主题：亮色 / 暗色（两态手动切换，首启跟随系统一次后固定）。 */
 export type Theme = 'light' | 'dark';
-export type MainView = 'sessions' | 'insights' | 'prompts' | 'library' | 'kanban';
+export type MainView = 'sessions' | 'insights' | 'prompts' | 'kanban';
 /** 右侧视图页签值校验（URL 参数 / localStorage 解析共用；非法值一律回退默认）。 */
 export function isMainView(v: unknown): v is MainView {
-  return v === 'sessions' || v === 'insights' || v === 'prompts' || v === 'library' || v === 'kanban';
+  return v === 'sessions' || v === 'insights' || v === 'prompts' || v === 'kanban';
 }
 export type InsightsScope = 'global' | 'session';
 export type SessionView = 'messages' | 'trace';
@@ -316,7 +316,7 @@ export type GroupBy = 'platform' | 'project' | 'none';
 const URL_PARAM_SESSION = 'session'; // 平台
 const URL_PARAM_SID = 'sid'; // 会话 id（URLSearchParams 自动编解码）
 const URL_PARAM_AGENT = 'agent'; // openclaw 归属 agent（可选）
-const URL_PARAM_VIEW = 'view'; // 右侧视图页签（sessions/insights/prompts/library/kanban）
+const URL_PARAM_VIEW = 'view'; // 右侧视图页签（sessions/insights/prompts/kanban）
 
 /** 从当前 URL 解析详情上下文（无参数/平台非法 → 空）。 */
 function parseDetailFromUrl(): { detailPlatform?: Platform; detailAgent?: string; selectedSessionId?: string } {
@@ -410,26 +410,6 @@ function persistState(): void {
   }
 }
 
-/** Prefill payload for the library create/edit form (LibraryFormDialog, views/library/). */
-export interface LibraryFormPrefill {
-  name?: string;
-  description?: string;
-  tags?: string[];
-  content?: string;
-  source?: string;
-  /** Fired once after a successful non-edit save (legacy libraryFormOnSaved). */
-  onSaved?: () => void;
-}
-
-export interface LibraryFormState {
-  open: boolean;
-  /** Original name when editing an existing prompt; null = create. */
-  editingName: string | null;
-  prefill: LibraryFormPrefill | null;
-  /** Bumped on every open — invalidates in-flight suggest-name responses (legacy seq). */
-  openSeq: number;
-}
-
 interface AppState {
   platform: Platform;
   /** 多平台选中集合（PlatformBar 可勾选多个）：非空 = 聚合视图
@@ -463,8 +443,6 @@ interface AppState {
   sessionView: SessionView;
   /** Child-agent transcript being viewed (omp/claude-code spawned subagent name), null = parent session. */
   viewingChildAgent: string | null;
-  /** Library create/edit form dialog — opened cross-view via openLibraryForm (⭐收藏 / 入库). */
-  libraryForm: LibraryFormState;
   /** One-shot cross-view jump target: SessionsView consumes it (expand pagination, clear filter, flash). */
   pendingScrollMsgId: string | null;
   /** Sidebar toggles (sessions view): 5s list polling + SSE tail / scroll-to-top on new messages. */
@@ -506,8 +484,6 @@ interface AppState {
   setInsightsScope: (scope: InsightsScope) => void;
   setSessionView: (view: SessionView) => void;
   setViewingChildAgent: (name: string | null) => void;
-  openLibraryForm: (prefill?: LibraryFormPrefill | null, isEdit?: boolean) => void;
-  closeLibraryForm: () => void;
   /** Cross-view jump-to-message: lands on 会话 view, messages sub-view; SessionsView scrolls + clears. */
   requestScrollToMessage: (id: string) => void;
   clearPendingScrollMsgId: () => void;
@@ -540,7 +516,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   insightsScope: null,
   sessionView: 'messages',
   viewingChildAgent: null,
-  libraryForm: { open: false, editingName: null, prefill: null, openSeq: 0 },
   pendingScrollMsgId: null,
   autoRefresh: true,
   autoScroll: false,
@@ -714,16 +689,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Opening a child transcript lands on messages (legacy viewChildAgent forces sessionView='messages')
   setViewingChildAgent: (name) =>
     set(name ? { viewingChildAgent: name, sessionView: 'messages' } : { viewingChildAgent: null }),
-  openLibraryForm: (prefill = null, isEdit = false) =>
-    set((s) => ({
-      libraryForm: {
-        open: true,
-        editingName: isEdit && prefill?.name ? prefill.name : null,
-        prefill,
-        openSeq: s.libraryForm.openSeq + 1,
-      },
-    })),
-  closeLibraryForm: () => set((s) => ({ libraryForm: { ...s.libraryForm, open: false } })),
   requestScrollToMessage: (id) =>
     set({ view: 'sessions', sessionView: 'messages', pendingScrollMsgId: id }),
   clearPendingScrollMsgId: () => set({ pendingScrollMsgId: null }),

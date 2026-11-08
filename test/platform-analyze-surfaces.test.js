@@ -1,7 +1,7 @@
 'use strict';
-// P1-5 全表面等价：自定义平台只要声明对应 hook，即可进入六个分析面
-// （search / insights / prompts / tool-audit / backup / inspect），编排层不再
-// 硬编码内置平台 id。用独立 HOME 落盘一个探针适配器，子进程内调用六面并断言。
+// P1-5 全表面等价：自定义平台只要声明对应 hook，即可进入五个分析面
+// （search / insights / prompts / tool-audit / inspect），编排层不再
+// 硬编码内置平台 id。用独立 HOME 落盘一个探针适配器，子进程内调用五面并断言。
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -73,11 +73,6 @@ module.exports = {
     entry.msCount++;
     entry.sessions.add(path.basename(file));
   },
-  backupFiles: async (dir) =>
-    fs
-      .readdirSync(dir)
-      .filter((name) => name.endsWith('.jsonl'))
-      .map((name) => ({ path: path.join(dir, name), rel: name })),
   inspect: {
     normalize: (record) => ({
       id: null,
@@ -109,7 +104,7 @@ function setupProbeHome() {
   return { home, platDir, dataDir };
 }
 
-// 六面在子进程内执行：HOME / 平台目录 / 归档目录都在 require 前隔离。
+// 五面在子进程内执行：HOME / 平台目录都在 require 前隔离。
 function runSurfaces(home, platDir, dataDir) {
   const script = `
 (async () => {
@@ -117,7 +112,6 @@ function runSurfaces(home, platDir, dataDir) {
   const insights = require('./lib/insights');
   const prompts = require('./lib/prompts');
   const toolAudit = require('./lib/tool-audit');
-  const backup = require('./lib/backup');
   const inspect = require('./lib/inspect');
   const dir = process.env.PROBE_DIR;
   const out = {};
@@ -125,7 +119,6 @@ function runSurfaces(home, platDir, dataDir) {
   out.insights = await insights.computeInsights('probe', '', dir);
   out.prompts = await prompts.computePrompts('probe', '', dir);
   out.toolAudit = await toolAudit.computeToolAudit('probe', { probe: dir });
-  out.backup = await backup.runFullBackup();
   out.inspect = await inspect.inspectFile(require('path').join(dir, 's1.jsonl'), 'probe');
   process.stdout.write(JSON.stringify(out));
 })().catch((error) => {
@@ -141,7 +134,6 @@ function runSurfaces(home, platDir, dataDir) {
       HOME: home,
       AGENTLRAY_PLATFORMS_DIR: platDir,
       AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
-      AGENTLRAY_ARCHIVE_DIR: path.join(home, 'archive'),
       AGENTLRAY_NO_PLUGINS: '',
       PROBE_DIR: dataDir,
     },
@@ -150,7 +142,7 @@ function runSurfaces(home, platDir, dataDir) {
   return JSON.parse(result.stdout);
 }
 
-test('自定义平台声明 hook 后进入 search/insights/prompts/tool-audit/backup/inspect 六面', () => {
+test('自定义平台声明 hook 后进入 search/insights/prompts/tool-audit/inspect 五面', () => {
   const { home, platDir, dataDir } = setupProbeHome();
   try {
     const out = runSurfaces(home, platDir, dataDir);
@@ -172,10 +164,6 @@ test('自定义平台声明 hook 后进入 search/insights/prompts/tool-audit/ba
     // tool-audit：探针扫描器写入的工具体被汇总，platforms 标明来源平台。
     assert.equal(out.toolAudit.tools[0].name, 'probeTool');
     assert.deepEqual(out.toolAudit.tools[0].platforms, ['probe']);
-
-    // backup：探针 backupFiles 枚举的文件被归档。
-    assert.equal(out.backup.byPlatform.probe.copied, 1);
-    assert.ok(fs.existsSync(path.join(home, 'archive', 'probe', 's1.jsonl')));
 
     // inspect：平台集来自声明了 inspect hook 的适配器，报告走通。
     assert.equal(out.inspect.source.platform, 'probe');

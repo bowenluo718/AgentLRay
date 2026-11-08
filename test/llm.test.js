@@ -139,22 +139,7 @@ test('rewrite goes through a configured OpenAI-compatible endpoint', async () =>
   }
 });
 
-test('suggest-name uses the endpoint and shapes the reply into a library name', async () => {
-  const mock = await startMockOpenAi('Fix Login Bug\n');
-  const { base, stop } = await startServer(NO_CLI);
-  try {
-    await sendJson(base, 'PUT', '/api/settings', { llm: { baseUrl: mock.base, model: 'mock-model' } });
-    const result = await sendJson(base, 'POST', '/api/library/suggest-name', { text: 'please fix login' });
-    assert.equal(result.name, 'fix-login-bug');
-    // No apiKey configured → no Authorization header sent
-    assert.equal(mock.requests[0].auth, null);
-  } finally {
-    await stop();
-    await mock.close();
-  }
-});
-
-test('no backend configured: rewrite explains itself, suggest-name degrades to null', async () => {
+test('no backend configured: rewrite explains itself', async () => {
   const { base, stop } = await startServer(NO_CLI);
   try {
     const res = await fetch(`${base}/api/prompts/rewrite`, {
@@ -167,10 +152,6 @@ test('no backend configured: rewrite explains itself, suggest-name degrades to n
     assert.equal(body.code, 'NO_LLM_BACKEND');
     assert.ok(body.error.includes('设置'), 'error carries setup guidance');
     assert.ok(body.error.includes('claude'), 'error mentions the CLI fallback');
-
-    // suggest-name keeps its { name: null } contract
-    const suggest = await sendJson(base, 'POST', '/api/library/suggest-name', { text: 'anything' });
-    assert.equal(suggest.name, null);
   } finally {
     await stop();
   }

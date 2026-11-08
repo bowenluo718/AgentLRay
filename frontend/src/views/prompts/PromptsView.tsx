@@ -8,11 +8,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { getHiddenPrompts, getPromptAnalysis, getPrompts } from '@/api/client';
-import type { PromptAnalysis, PromptCluster } from '@/api/types';
+import type { PromptAnalysis } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { clusterPrefillContent } from '@/lib/pure';
 import {
   HIDE_TRIVIAL_KEY,
   dirBySettingKey,
@@ -23,7 +22,6 @@ import {
   useActivePlatform,
   useAppStore,
 } from '@/store';
-import { LibraryFormDialog, heuristicLibraryName } from '@/views/library/LibraryFormDialog';
 
 import { PromptGroupSection } from './PromptGroupSection';
 import { PromptsAnalysis } from './PromptsAnalysis';
@@ -44,7 +42,6 @@ export function PromptsView() {
   const platforms = useAppStore((s) => s.platforms);
   const setView = useAppStore((s) => s.setView);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
-  const openLibraryForm = useAppStore((s) => s.openLibraryForm);
   const queryClient = useQueryClient();
 
   const info = platformInfoById(platforms, platform);
@@ -63,8 +60,6 @@ export function PromptsView() {
   const [selectMode, setSelectMode] = useState(false);
   const [selection, setSelection] = useState<Set<string>>(new Set());
   const [manageOpen, setManageOpen] = useState(false);
-  // 「入库」-saved cluster patterns (session-local, legacy clusterSavedPatterns).
-  const [savedPatterns, setSavedPatterns] = useState<Set<string>>(new Set());
 
   const promptsQuery = useQuery({
     queryKey: ['prompts', platform, agent ?? '', dir ?? ''],
@@ -199,8 +194,8 @@ export function PromptsView() {
         <span className="mr-1 rounded-full border border-border bg-secondary px-2 py-0.5">
           📍 当前平台：{platformLabel(platforms, platform)}
         </span>
-        从会话历史自动提取的真人 prompt（已过滤工具输出与系统注入），按目录分组 — 每条可 ⭐
-        收藏入库、「优化」用 Claude 改写 · {data.totalPrompts} prompts / {data.totalSessions} sessions /{' '}
+        从会话历史自动提取的真人 prompt（已过滤工具输出与系统注入），按目录分组 — 每条可「优化」
+        用 Claude 改写 · {data.totalPrompts} prompts / {data.totalSessions} sessions /{' '}
         {data.groups.length} directories
         {q && filtered ? ` — showing ${filtered.shownPrompts} prompts / ${filtered.shownSessions} sessions` : ''}
         {filtered && filtered.trivialActive && filtered.trivialHidden > 0 && (
@@ -220,16 +215,6 @@ export function PromptsView() {
         loading={analyzeMutation.isPending}
         startedAt={analysisStartedAt}
         platform={platform}
-        savedPatterns={savedPatterns}
-        onSaveCluster={(c: PromptCluster) => {
-          const content = clusterPrefillContent(c);
-          if (!content) return;
-          openLibraryForm({
-            content,
-            source: 'history',
-            onSaved: () => setSavedPatterns((prev) => new Set(prev).add(c.pattern)),
-          });
-        }}
       />
 
       {filtered && filtered.groups.length > 0 ? (
@@ -256,9 +241,6 @@ export function PromptsView() {
             }
             onHidePrompt={(p) => hideMutation.mutate({ texts: [p.text], message: '已隐藏' })}
             hidePending={hideMutation.isPending}
-            onStarPrompt={(p) =>
-              openLibraryForm({ name: heuristicLibraryName(p.text), content: p.text, source: platform })
-            }
             onOpenSession={(id) => {
               setSelectedSessionId(id);
               setView('sessions');
@@ -298,7 +280,6 @@ export function PromptsView() {
       )}
 
       <PromptsHiddenDialog open={manageOpen} onOpenChange={setManageOpen} hidden={hidden} />
-      <LibraryFormDialog />
     </div>
   );
 }

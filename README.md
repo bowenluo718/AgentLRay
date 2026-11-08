@@ -124,7 +124,7 @@ There are **8 historical failures**; **7 remain pending in 2 events**, and **1 h
 
 ### Local by default, explicit about egress
 
-Core log browsing and `inspect` do not send logs to a model. The UI is self-contained. Optional prompt rewriting/suggestions use your configured endpoint or the `claude` CLI fallback, which may contact a remote provider; Fabric import downloads patterns from GitHub. Installation can contact package registries. Do not use model-powered prompt features when you require no model egress.
+Core log browsing and `inspect` do not send logs to a model. The UI is self-contained. Optional prompt rewriting/suggestions use your configured endpoint or the `claude` CLI fallback, which may contact a remote provider; installation can contact package registries. Do not use model-powered prompt features when you require no model egress.
 
 Separately invoked research runners can make remote calls with gated sanitized copies; they are not launched by normal browsing or `inspect`. Minimized reports and automated sanitization are **not anonymity guarantees**. [Privacy and usage details →](docs/usage.md#faq)
 

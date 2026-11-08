@@ -1,5 +1,4 @@
-// Pure (no-DOM) markdown pipeline shared by the React UI (<Markdown/>) and,
-// via the generated public/js/pure.js bundle, the frozen legacy UI.
+// Pure (no-DOM) markdown pipeline shared by the React UI (<Markdown/>).
 // Escape-then-transform semantics: the whole input is HTML-escaped first, so
 // the generated markup only ever contains tags we emit ourselves.
 

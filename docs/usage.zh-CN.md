@@ -25,7 +25,6 @@
 - **Trace 视图** — 每轮对话的耗时瀑布图：模型推理（蓝）与工具执行（绿，出错为红）一目了然，点击色条在侧栏查看该 span 详情（紫色条则加载派生出的子 Agent 对话）
 - **Prompt 提取** — 按 session 提取全部真人 prompt（自动过滤工具结果、斜杠命令、系统注入等噪音），按工作目录分组，支持搜索 / JSON 导出 / 复制
 - **Prompt 优化** — 相似 prompt 自动聚类成模板，结合 session 效果归因（轮次、工具调用、错误率），通过配置的 LLM 后端（设置 → LLM 接口）或本机 `claude` CLI 生成改写建议
-- **Prompt 资产库** — 把值得复用的 prompt 收进 `~/.agentlray/library`，支持标签 / 编辑 / 搜索，一键安装为 Claude Code、Codex、OMP 的原生 slash command（`$ARGUMENTS` 原样保留，在目标 CLI 里 `/名字 参数` 直接可用）
 - **全局搜索** — 一个搜索框同时搜七个平台，多关键词 AND 匹配，每条结果带平台色标 —— 包含从被 Claude Code 清理掉的会话里恢复出来的 prompt
 - **会话洞察** — 聚合分析面板：工具统计、错误聚类、每日趋势
 - **Spawn 追踪** — 检测并导航父子 Agent 之间的调用关系
@@ -37,7 +36,6 @@
 - **任务看板视图** — 按会话四态（待用户输入 / 工作中 / 等待中 / 已停止）分桶的任务看板，与侧栏共用同一份列表缓存与实时状态；每列按 `maxPerStatus`（默认 20，可在 设置 → 任务看板 调整）截断，窄屏纵向堆叠。点击卡片即可在 Sessions 视图打开该会话
 - **白天 / 黑夜主题** — 顶栏一键切换亮/暗主题（首启跟随系统一次，之后由手动选择固定，持久化在 `agent-xray-settings`）
 - **设置面板** — 在页面上直接配置各平台目录，保存到 localStorage，无需重启
-- **会话备份** — 增量归档 Codex、Claude Code、OMP、DeepSeek Harness、Gemini CLI 的会话日志到 `~/.agentlray/archive`（Hermes 与 OpenClaw 不归档），在设置面板一键触发（也会每天自动执行），未变化的文件自动跳过
 - **键盘导航** — 使用方向键在会话之间切换
 
 ## 截图预览
@@ -310,19 +308,10 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 | `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |
 | `POST /api/prompts/rewrite` | 通过配置的 LLM 后端改写单条 prompt（`{ "text": "..." }`；无可用后端时返回 503 及配置指引） |
 | `GET/PUT /api/settings` | 统一设置端点：所有服务端设置聚合在 `~/.agentlray/settings.json`（旧 `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` 首启幂等迁移）。PUT 只保存请求体提供的 section（`ui`/`cliBins`/`status`/`kanban`/`llm`），未提供者保持原值。`cliBins` 返回 `bin`/`configured`/`default`，空串 = 清除回退默认；`status`/`kanban` 返回 `value`/`configured`/`default`，保存即生效；`llm` 返回 `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey`（key 不回显） |
-| `GET /api/settings/cli-bins` | 只读兼容端点（legacy 冻结快照 `/legacy` 的「复制恢复命令」按钮用）；与 `/api/settings` 的 `cliBins` 同构 |
+| `GET /api/settings/cli-bins` | 只读兼容端点；与 `/api/settings` 的 `cliBins` 同构 |
 | `GET /api/search` | 会话全文搜索（`?platform=all` 一次搜索全部平台，多关键词 AND） |
 | `GET /api/omp/sessions/:id/children` | 获取该 OMP 会话派生的子 Agent 列表 |
 | `GET /api/omp/sessions/:id/children/:name` | 获取指定子 Agent 的消息详情 |
-| `GET /api/library` | 获取资产库 prompt 列表（含各目标的安装状态） |
-| `POST /api/library` | 新建 prompt（`{ "name": "...", "content": "...", "description": "...", "tags": [...] }`） |
-| `PUT /api/library/:name` | 更新 / 重命名 prompt（`newName`、`content`、`description`、`tags`），已安装的副本同步刷新 |
-| `DELETE /api/library/:name` | 删除 prompt 及其已安装的 slash command |
-| `POST /api/library/:name/install` | 安装为 slash command（`{ "targets": ["claude", "codex", "omp"] }`） |
-| `POST /api/library/:name/uninstall` | 卸载已安装的 slash command（请求体同上） |
-| `POST /api/library/suggest-name` | 通过配置的 LLM 后端为 prompt 生成库内命名（`{ "text": "..." }`，无可用后端时返回 `null`） |
-| `POST /api/backup` | 执行一次增量备份到 `~/.agentlray/archive` |
-| `GET /api/backup/status` | 归档统计：文件数、总字节数、最近备份时间 |
 
 所有列表和详情接口均支持 `?dir=` 参数来覆盖默认目录。
 
@@ -330,7 +319,6 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 
 - **后端：** Node.js + Express
 - **前端：** `frontend/` 下的 React + Vite + TypeScript（默认 UI，服务自 `frontend/dist`）
-- **Legacy UI：** `public/` 下的原版 vanilla HTML/CSS/JS 应用，服务于 `/legacy` —— **已冻结，仅接受安全修复**。新功能只进 React 应用；改动 React 渲染器无需触碰 `public/js/`。共享逻辑（格式化、trace 构建、markdown/转义管线）单一源在 `frontend/src/lib/pure.ts` 与 `frontend/src/lib/markdown.ts`,`public/js/pure.js` 由其生成（`npm run build:legacy-pure`,也包含在 `build:ui` 中）。
 - **数据：** 直接从磁盘读取 JSONL 会话文件 / SQLite 数据库
 - **零外部 CDN** — 完全自包含，离线可用
 
@@ -352,7 +340,7 @@ OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳�
 
 ## 开发
 
-测试代码位于 `test/`，使用 Node 内置的测试运行器，无需额外依赖。先执行一次 `npm ci`，然后运行 `npm test`（即 `node --test test/*.test.js`）。测试会在随机端口上启动自己的服务实例，并把 `HOME` 及各平台目录都指向 `test/fixtures/home` 的临时副本，因此不会读取或修改你的真实会话日志。CI（`.github/workflows/test.yml`）在每次向 `master` 的 push 和 pull request 上以 Node 22 执行四个步骤：`npm ci`（其 `prepare` 脚本会构建 Web UI 并重新生成 `public/js/pure.js`）、漂移检查（`git diff --exit-code public/js/pure.js lib/generated/diagnostics.cjs`）、`npx biome check .` 和 `npm test`。
+测试代码位于 `test/`，使用 Node 内置的测试运行器，无需额外依赖。先执行一次 `npm ci`，然后运行 `npm test`（即 `node --test test/*.test.js`）。测试会在随机端口上启动自己的服务实例，并把 `HOME` 及各平台目录都指向 `test/fixtures/home` 的临时副本，因此不会读取或修改你的真实会话日志。CI（`.github/workflows/test.yml`）在每次向 `master` 的 push 和 pull request 上以 Node 22 执行四个步骤：`npm ci`（其 `prepare` 脚本会构建 Web UI）、漂移检查（`git diff --exit-code lib/generated/diagnostics.cjs`）、`npx biome check .` 和 `npm test`。
 
 **新增平台只需两个文件**：在 `lib/platforms/<name>.js` 写一个适配器（针对该日志格式的 list / find / parse / normalize，`lib/platforms/shared.js` 提供元数据缓存、归一化消息工厂和会话排序），再到 `lib/platforms/index.js` 的 `PLATFORMS` 注册表登记一条。通用会话路由、搜索、watch（SSE 实时跟踪）、洞察、Prompt 提取、工具体检、OTLP 与 Markdown/HTML 导出全部通过该注册表解析平台，无需改动其他文件。**自定义平台**则完全不用改源码：把适配器放进 `~/.agentlray/platforms/` 即可（见 [自定义平台（Custom platforms）](#自定义平台custom-platforms)）。
 
@@ -362,7 +350,7 @@ OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳�
 七个平台：OpenClaw、Codex、Claude Code、Hermes、OMP（oh-my-pi）、DeepSeek Harness 和 Gemini CLI。其中六个是 JSONL，Hermes 是位于 `~/.hermes/state.db` 的 SQLite。DeepSeek Harness 的日志可能是多帧 zstd 压缩的 `.jsonl.zstd`，AgentLRay 会逐帧解压，并容忍崩溃残留的尾部不完整帧。权威清单是 `lib/platforms/index.js` 里的 `PLATFORMS` 注册表，可用 `node -e 'console.log(Object.keys(require("./lib/platforms/index.js").PLATFORMS))'` 打印。
 
 **AgentLRay 会把我的会话数据传到别处吗？**
-核心日志查看和离线 `inspect` 不调用模型、不上传日志。可选的 prompt 改写与建议会使用配置的端点，或回退到可能访问远程服务的 `claude` CLI；Fabric 导入会从 GitHub 下载内容，安装依赖可能访问包仓库。开发实验中的远程对照须单独运行且只接收通过门禁的脱敏载荷，不随正常看板启动。要求零模型外发时，请勿使用改写与建议功能。
+核心日志查看和离线 `inspect` 不调用模型、不上传日志。可选的 prompt 改写与建议会使用配置的端点，或回退到可能访问远程服务的 `claude` CLI；安装依赖可能访问包仓库。开发实验中的远程对照须单独运行且只接收通过门禁的脱敏载荷，不随正常看板启动。要求零模型外发时，请勿使用改写与建议功能。
 
 **需要改动我的 agent 或加埋点吗？**
 不需要。CLI coding agent 本来就把完整会话日志写在磁盘上，AgentLRay 只是读它们。你不需要在代码里接 SDK，也不需要用什么包装命令来启动 agent。默认安装同样无需配置，[配置](#配置) 一节列出的默认目录会直接生效，除非你在设置面板里改，或用 `CLAUDE_CODE_DIR` 之类的环境变量覆盖。

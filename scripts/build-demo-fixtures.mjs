@@ -8,7 +8,7 @@
 // Run after editing sample logs:  node scripts/build-demo-fixtures.mjs
 
 import { spawn } from 'node:child_process';
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,32 +25,6 @@ const PLATFORM_DIRS = {
   codex: ['codex', '.codex/sessions'],
   omp: ['omp', '.omp/agent/sessions'],
 };
-
-// Demo prompt library: written into the temp home and captured via /api/library,
-// so entries go through the real frontmatter serializer/parser round-trip.
-const LIBRARY_ENTRIES = [
-  {
-    name: 'review-pr',
-    description: '代码评审:按风险分级列出问题并给出修复建议',
-    tags: 'review,quality',
-    content:
-      'Review the following change set. For each issue found, classify it as blocker / major / minor, explain the risk in one sentence, and propose a concrete fix. End with a merge verdict.\n\n$ARGUMENTS',
-  },
-  {
-    name: 'bugfix-tdd',
-    description: '缺陷修复:先写失败测试再修,红绿验证',
-    tags: 'debugging,tests',
-    content:
-      'Fix this bug using test-first flow: 1) write a failing test that reproduces it, 2) make the minimal fix, 3) show the test passing, 4) list any related code paths that share the same defect.\n\nBug report:\n$ARGUMENTS',
-  },
-  {
-    name: 'explain-arch',
-    description: '架构讲解:模块职责、数据流和权衡,配 mermaid 图',
-    tags: 'docs,onboarding',
-    content:
-      'Explain the architecture of $ARGUMENTS for a new team member: main modules and their responsibilities, how data flows between them, key design trade-offs, and a mermaid diagram of the component graph.',
-  },
-];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,17 +50,6 @@ async function main() {
   env.OMP_DIR = path.join(home, '.omp', 'agent', 'sessions');
   env.DSH_DIR = path.join(home, '.dsh', 'sessions');
   env.GEMINI_DIR = path.join(home, '.gemini', 'tmp');
-  env.AGENTLRAY_LIBRARY_DIR = path.join(home, '.agentlray', 'library');
-  env.AGENTLRAY_ARCHIVE_DIR = path.join(home, '.agentlray', 'archive');
-
-  // Seed the demo prompt library (real file format: frontmatter + body)
-  mkdirSync(env.AGENTLRAY_LIBRARY_DIR, { recursive: true });
-  for (const e of LIBRARY_ENTRIES) {
-    writeFileSync(
-      path.join(env.AGENTLRAY_LIBRARY_DIR, `${e.name}.md`),
-      `---\ndescription: ${e.description}\ntags: ${e.tags}\nsource: demo\ncreatedAt: 2026-08-15T00:00:00.000Z\n---\n\n${e.content}\n`
-    );
-  }
 
   const child = spawn(process.execPath, [path.join(ROOT, 'server.js')], {
     env,
@@ -111,7 +74,6 @@ async function main() {
       childDetails: {},
       insights: {},
       prompts: {},
-      library: { prompts: [] },
       spawnMap: [],
     };
 
@@ -138,16 +100,11 @@ async function main() {
       fixtures.prompts[platform] = await getJson(`/api/prompts?platform=${platform}`);
     }
 
-    // Library entries pass through the real parser; installed flags are all
-    // false in the temp home, which is what the read-only demo should show.
-    fixtures.library = await getJson('/api/library');
-
     writeFileSync(OUT_FILE, `${JSON.stringify(fixtures, null, 1)}\n`);
     console.log(
       `wrote ${path.relative(ROOT, OUT_FILE)}: ` +
         `${Object.values(fixtures.sessions).flat().length} sessions, ` +
-        `${Object.keys(fixtures.childDetails).length} child transcripts, ` +
-        `${fixtures.library.prompts.length} library prompts`
+        `${Object.keys(fixtures.childDetails).length} child transcripts`
     );
   } finally {
     child.kill('SIGKILL');

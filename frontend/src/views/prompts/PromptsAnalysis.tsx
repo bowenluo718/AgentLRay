@@ -1,12 +1,11 @@
 // 📊 Prompt 画像 — legacy renderAnalysisHtml: loading block with elapsed ticker,
 // header, overall/llmError/rawText, portrait sub-sections (PromptsPortrait.tsx),
-// and template cluster rows (expand → suggestion/rewrite, 📥 入库 prefill).
+// and template cluster rows (expand → suggestion/rewrite).
 
 import { useEffect, useState } from 'react';
 
-import type { Platform, PromptAnalysis, PromptCluster } from '@/api/types';
+import type { Platform, PromptAnalysis } from '@/api/types';
 import { Markdown } from '@/components/Markdown';
-import { Button } from '@/components/ui/button';
 
 import { CopyButton } from './PromptItemRow';
 import { Metric, PromptsPortrait, buildTopicColor } from './PromptsPortrait';
@@ -16,8 +15,6 @@ interface PromptsAnalysisProps {
   loading: boolean;
   startedAt: number | null;
   platform: Platform;
-  savedPatterns: Set<string>;
-  onSaveCluster: (cluster: PromptCluster) => void;
 }
 
 export function PromptsAnalysis({
@@ -25,8 +22,6 @@ export function PromptsAnalysis({
   loading,
   startedAt,
   platform,
-  savedPatterns,
-  onSaveCluster,
 }: PromptsAnalysisProps) {
   const [elapsed, setElapsed] = useState(0);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
@@ -95,7 +90,6 @@ export function PromptsAnalysis({
         <div className="space-y-1">
           {displayClusters.map((c, ci) => {
             const attr = c.attribution;
-            const saved = savedPatterns.has(c.pattern);
             const open = expanded[ci] ?? false;
             const s = c.suggestion;
             return (
@@ -120,19 +114,6 @@ export function PromptsAnalysis({
                   {attr && <Metric>avg {attr.avgMessages} msgs</Metric>}
                   {attr && <Metric>avg {attr.avgToolCalls} tools</Metric>}
                   {attr && <Metric warn={(attr.errorRate ?? 0) > 10}>err {attr.errorRate}%</Metric>}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-6 px-2 text-xs"
-                    disabled={saved}
-                    title="以本簇为模板存入 Prompt Library（自动取公共前缀 + $ARGUMENTS）"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (!saved) onSaveCluster(c);
-                    }}
-                  >
-                    {saved ? '✓ 已入库' : '📥 入库'}
-                  </Button>
                 </div>
                 {open && (
                   <div className="border-t border-border/70 p-2 text-sm">

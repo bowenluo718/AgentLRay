@@ -10,7 +10,6 @@
   "files": [
     "server.js",
     "lib",
-    "public",
     "bin",
     "platforms",
     "README.md",
@@ -18,7 +17,7 @@
   ],
   "scripts": {
     "start": "node server.js",
-    "build:ui": "node scripts/build-diagnostics.mjs && node scripts/build-legacy-pure.mjs && cd frontend && npm run build",
+    "build:ui": "node scripts/build-diagnostics.mjs && cd frontend && npm run build",
     "build:diagnostics": "node scripts/build-diagnostics.mjs",
     "build:ui:full": "cd frontend && npm ci && cd .. && npm run build:ui",
     "pack:build": "npm run build:ui:full && npm pack",
@@ -27,8 +26,7 @@
     "test": "node --require ./test/setup-env.cjs --test test/*.test.js",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "prepublishOnly": "node -e \"if (!require('fs').existsSync('frontend/dist/index.html')) { console.error('frontend/dist missing — run npm run build:ui:full'); process.exit(1); }\"",
-    "build:legacy-pure": "node scripts/build-legacy-pure.mjs"
+    "prepublishOnly": "node -e \"if (!require('fs').existsSync('frontend/dist/index.html')) { console.error('frontend/dist missing — run npm run build:ui:full'); process.exit(1); }\""
   },
   "keywords": [
     "agent",

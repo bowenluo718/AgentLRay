@@ -48,8 +48,6 @@ function dataDirEnv(home) {
     HERMES_DIR: path.join(home, '.hermes'),
     DSH_DIR: path.join(home, '.dsh', 'sessions'),
     GEMINI_DIR: path.join(home, '.gemini', 'tmp'),
-    AGENTLRAY_LIBRARY_DIR: path.join(home, '.agentlray', 'library'),
-    AGENTLRAY_ARCHIVE_DIR: path.join(home, '.agentlray', 'archive'),
     AGENTLRAY_NO_PLUGINS: '',
   };
 }

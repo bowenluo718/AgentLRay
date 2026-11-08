@@ -9,8 +9,6 @@ const mountPromptRoutes = require('./lib/routes/prompts');
 const mountSearchRoutes = require('./lib/routes/search');
 const mountSessionRoutes = require('./lib/routes/sessions');
 const mountExportRoutes = require('./lib/routes/export');
-const mountLibraryRoutes = require('./lib/routes/library');
-const mountBackupRoutes = require('./lib/routes/backup');
 const mountWatchRoutes = require('./lib/routes/watch');
 const mountCliBinsRoutes = require('./lib/routes/cli-bins');
 const mountSettingsRoutes = require('./lib/routes/settings');
@@ -25,9 +23,8 @@ const PORT = process.env.PORT || 3800;
 // Bind to localhost by default: the dashboard exposes full AI session
 // history (and ?dir= reads) with zero auth — opt into LAN via HOST=0.0.0.0
 const HOST = process.env.HOST || '127.0.0.1';
-const PUBLIC_DIR = path.join(__dirname, 'public');
 const DIST_DIR = path.join(__dirname, 'frontend', 'dist');
-// Serve the built React UI when present; the legacy vanilla UI stays at /legacy.
+// 只服务构建后的 React UI；未构建时 SPA fallback 返回提示（legacy vanilla UI 已移除）。
 const HAS_DIST = fs.existsSync(path.join(DIST_DIR, 'index.html'));
 
 // Frontend staleness detection: the SPA polls this and prompts a reload
@@ -39,9 +36,6 @@ app.get('/api/version', (req, res) => {
 
 if (HAS_DIST) {
   app.use(express.static(DIST_DIR, { maxAge: 0, etag: false, lastModified: false }));
-  app.use('/legacy', express.static(PUBLIC_DIR, { maxAge: 0, etag: false, lastModified: false }));
-} else {
-  app.use(express.static(PUBLIC_DIR, { maxAge: 0, etag: false, lastModified: false }));
 }
 // Reject cross-site POST/PUT/DELETE before the body is parsed (lib/csrf.js).
 app.use('/api', csrfGuard);
@@ -65,19 +59,17 @@ mountPromptRoutes(app);
 mountSearchRoutes(app);
 mountExportRoutes(app);
 mountSessionRoutes(app);
-mountLibraryRoutes(app);
-mountBackupRoutes(app);
 mountWatchRoutes(app);
 mountCliBinsRoutes(app);
 mountSettingsRoutes(app, { status: { setStatusConfig } });
 mountPlatformsRoutes(app);
 
-// SPA fallback: unknown paths render the appropriate UI shell
+// SPA fallback: unknown paths render the React UI shell
 app.get('*', (req, res) => {
-  if (HAS_DIST && req.path.startsWith('/legacy')) {
-    return res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+  if (!HAS_DIST) {
+    return res.status(503).send('AgentLRay UI 未构建：请先运行 `npm run build:ui`（frontend/dist 缺失）');
   }
-  res.sendFile(path.join(HAS_DIST ? DIST_DIR : PUBLIC_DIR, 'index.html'));
+  res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 
 // 启动：先做旧独立设置文件的一次性迁移（幂等），再加载状态时间配置注入

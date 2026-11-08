@@ -38,8 +38,6 @@ function serverEnv(home, port) {
     HERMES_DIR: path.join(home, '.hermes'),
     DSH_DIR: path.join(home, '.dsh', 'sessions'),
     GEMINI_DIR: path.join(home, '.gemini', 'tmp'),
-    AGENTLRAY_LIBRARY_DIR: path.join(home, '.agentlray', 'library'),
-    AGENTLRAY_ARCHIVE_DIR: path.join(home, '.agentlray', 'archive'),
     // 平台来源目录（P0）：user 来源指向隔离家目录下的（必然为空）子目录，确保
     // server 子进程不并入用户本机自定义适配器/禁用配置；project 来源指向仓库自带
     // platforms/（dsh/gemini/hermes 随包分发的项目平台，确定性），保证空配置基线
@@ -117,7 +115,7 @@ async function startServer(extraEnv) {
       child.kill('SIGTERM');
       await Promise.race([exited, sleep(3000).then(() => child.kill('SIGKILL'))]);
     }
-    // Give any fire-and-forget git commit in the library repo a beat to settle
+    // Give any fire-and-forget writes a beat to settle
     await sleep(100);
     await fsp.rm(home, { recursive: true, force: true, maxRetries: 5 }).catch(() => {});
   }

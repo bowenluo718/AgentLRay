@@ -263,7 +263,6 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
           insights: false,
           prompts: false,
           toolAudit: false,
-          backup: false,
           inspect: false,
           otlp: false,
         },

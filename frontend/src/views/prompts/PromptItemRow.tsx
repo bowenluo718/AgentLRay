@@ -1,5 +1,5 @@
 // One extracted prompt row: timestamp, markdown body (>500 chars clamped with
-// Show more), and the ⭐收藏 / 优化 / Copy / 🗑隐藏 actions — legacy prompt-item.
+// Show more), and the 优化 / Copy / 🗑隐藏 actions — legacy prompt-item.
 
 import { useMutation } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
@@ -43,7 +43,6 @@ interface PromptItemRowProps {
   onToggleSelected: (on: boolean) => void;
   onHide: () => void;
   hidePending: boolean;
-  onStar: () => void;
 }
 
 export function PromptItemRow({
@@ -53,7 +52,6 @@ export function PromptItemRow({
   onToggleSelected,
   onHide,
   hidePending,
-  onStar,
 }: PromptItemRowProps) {
   const long = prompt.text.length > 500;
   const [clamped, setClamped] = useState(true);
@@ -119,15 +117,6 @@ export function PromptItemRow({
 
       {!selectMode && (
         <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            title="收藏到资产库"
-            onClick={onStar}
-          >
-            ⭐ 收藏
-          </Button>
           <Button
             variant="outline"
             size="sm"

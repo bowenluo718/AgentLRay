@@ -2,9 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   fetchPlatforms,
-  getBackupStatus,
   getSettings,
-  runBackup,
   saveSettings as apiSaveSettings,
   setPlatformMounted,
   setPlatformReplaced,
@@ -21,7 +19,6 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { formatBytes } from '@/lib/pure';
 import { EMPTY_SETTINGS, selectablePlatforms, useAppStore } from '@/store';
 
 // 统一字段范式：每个配置项一行 label（htmlFor 关联）+ 输入框 + 小字 hint。
@@ -87,50 +84,6 @@ function emptyDraft(): Draft {
   };
 }
 
-function BackupSection() {
-  const queryClient = useQueryClient();
-  const status = useQuery({ queryKey: ['backup-status'], queryFn: getBackupStatus });
-  const backup = useMutation({
-    mutationFn: runBackup,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['backup-status'] }),
-  });
-
-  const statusLine = status.data
-    ? `归档目录 ${status.data.archiveDir} · 文件数 ${status.data.files} · 占用 ${formatBytes(status.data.bytes)} · 上次备份 ${
-        status.data.lastBackup ? new Date(status.data.lastBackup).toLocaleString() : '从未'
-      }`
-    : '';
-  const error = backup.error
-    ? `备份失败: ${(backup.error as Error).message}`
-    : status.error
-      ? `备份状态获取失败: ${(status.error as Error).message}`
-      : null;
-
-  return (
-    <div className="space-y-1.5">
-      <label className="text-xs text-muted-foreground">
-        会话备份（codex / claude-code / omp / dsh / gemini 增量归档）
-      </label>
-      <div className="flex items-center gap-2.5">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={backup.isPending}
-          onClick={() => backup.mutate()}
-        >
-          {backup.isPending ? '备份中…' : '立即备份'}
-        </Button>
-        {backup.data && (
-          <span className="text-xs text-muted-foreground">
-            完成：新增 {backup.data.copied}，跳过 {backup.data.skipped}
-          </span>
-        )}
-      </div>
-      {statusLine && <div className="text-xs text-muted-foreground">{statusLine}</div>}
-      {error && <div className="text-xs text-danger">{error}</div>}
-    </div>
-  );
-}
 
 /** 平台管理 tab：遍历 /api/platforms（含未挂载/broken），展示来源、挂载态与启停 toggle。
  *  启停/撤销替代写服务端 platforms 配置（重启生效），结果写回 store（store.platforms 是
@@ -456,7 +409,6 @@ export function SettingsDialog({
             <TabsTrigger className="shrink-0" value="clibins">平台 CLI 命令</TabsTrigger>
             <TabsTrigger className="shrink-0" value="status">状态时间配置</TabsTrigger>
             <TabsTrigger className="shrink-0" value="kanban">任务看板</TabsTrigger>
-            <TabsTrigger className="shrink-0" value="backup">会话备份</TabsTrigger>
           </TabsList>
 
           <TabsContent value="platforms" className="space-y-3">
@@ -655,13 +607,6 @@ export function SettingsDialog({
               />
               <p className="text-[11px] text-muted-foreground">每列最多显示的会话条数，默认 20；正整数</p>
             </div>
-          </TabsContent>
-
-          <TabsContent value="backup" className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              把 codex / claude-code / omp / dsh / gemini 会话日志增量归档到 ~/.agentlray/archive。
-            </p>
-            <BackupSection />
           </TabsContent>
         </Tabs>
         <div className="flex justify-end gap-2 pt-2">

@@ -14,7 +14,6 @@ const {
 const { fileBasedGetSession } = require('@agentlray/shared/helpers');
 const { searchGeminiFile } = require('./search');
 const { extractGeminiPrompts } = require('./prompts');
-const { enumerateGeminiFiles } = require('./backup');
 
 module.exports = {
   id: 'gemini',
@@ -74,6 +73,4 @@ module.exports = {
   searchFile: (sf, keywords) => searchGeminiFile(sf, keywords),
   // Prompts 面：gemini fold 后提取。
   extractPromptsFromFile: (filePath) => extractGeminiPrompts(filePath),
-  // 备份面：归档到 <ARCHIVE_DIR>/gemini/<rel>。
-  backupFiles: (dir) => enumerateGeminiFiles(dir),
 };

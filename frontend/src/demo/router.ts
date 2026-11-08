@@ -5,13 +5,12 @@
 //
 // Served for claude-code / codex / omp: session list + detail, spawned
 // sub-agent children (omp), insights, prompts, global search (multi-keyword
-// AND over fixture transcripts) and the preloaded prompt library. All
+// AND over fixture transcripts). All
 // mutating requests are rejected — the demo is read-only.
 
 import type {
   ChildAgentSummary,
   Insights,
-  LibraryData,
   PlatformCapabilities,
   PlatformInfo,
   PromptsData,
@@ -30,7 +29,7 @@ const BASE_DEMO_CAPS: PlatformCapabilities = {
   collectFiles: false, watchParse: false, needsAgent: false, listForAgent: false,
   listAllAgents: false, listAgents: false, children: false, spawn: false,
   watch: true, search: true, insights: true, prompts: true, toolAudit: false,
-  backup: false, inspect: false, otlp: false,
+  inspect: false, otlp: false,
 };
 
 function demoPlatform(
@@ -81,7 +80,6 @@ interface DemoFixtures {
   childDetails: Record<string, SessionDetail>;
   insights: Record<string, Insights>;
   prompts: Record<string, PromptsData>;
-  library: LibraryData;
   spawnMap: SpawnLink[];
 }
 
@@ -228,12 +226,6 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (parsed.pathname === '/api/search') return ok(searchFixtures(parsed.searchParams.get('q') || ''));
   if (parsed.pathname === '/api/spawn-map') return ok(data.spawnMap ?? []);
   if (seg(1) === 'spawn-tree') return ok({ node: null, parent: null });
-  if (parsed.pathname === '/api/library') return ok(data.library ?? { prompts: [] });
-  if (parsed.pathname === '/api/library/usage') return ok({ usage: {} });
-  if (parsed.pathname === '/api/library/fabric-patterns') return ok({ patterns: [] });
-  if (parsed.pathname === '/api/backup/status') {
-    return ok({ archiveDir: '(demo)', files: 0, bytes: 0, lastBackup: null });
-  }
   if (parsed.pathname === '/api/settings') {
     return ok({
       ui: { platform: null, selectedPlatforms: [] },

@@ -2,19 +2,10 @@
 // Mirrors public/js/app.js fetch behavior: non-2xx → throw Error(body.error || statusText).
 
 import type {
-  BackupResult,
-  BackupStatus,
   ChildAgentSummary,
-  FabricPatternsData,
   HiddenPromptsData,
   HidePromptsResult,
-  ImportFabricResult,
   Insights,
-  InstallTarget,
-  LibraryData,
-  LibraryHistoryData,
-  LibraryHistoryEntry,
-  LibraryUsageData,
   OtlpExport,
   Platform,
   PlatformInfo,
@@ -27,7 +18,6 @@ import type {
   SessionsListResponse,
   SpawnLink,
   SpawnTreeResult,
-  SuggestNameResult,
   ToolsAudit,
   VersionInfo,
 } from './types';
@@ -342,83 +332,6 @@ export function searchSessions(q: string, dirs?: Record<string, string>): Promis
   );
 }
 
-// ---------- Library ----------
-
-export function getLibrary(): Promise<LibraryData> {
-  return fetchJson('/api/library');
-}
-
-export function getLibraryUsage(): Promise<LibraryUsageData> {
-  return fetchJson('/api/library/usage');
-}
-
-export function createLibraryPrompt(body: {
-  name: string;
-  content: string;
-  description?: string;
-  tags?: string[];
-  source?: string;
-}): Promise<Record<string, unknown>> {
-  return requestJson('/api/library', 'POST', body);
-}
-
-export function updateLibraryPrompt(
-  name: string,
-  body: { newName?: string; content?: string; description?: string; tags?: string[] }
-): Promise<Record<string, unknown>> {
-  return requestJson(`/api/library/${encodeURIComponent(name)}`, 'PUT', body);
-}
-
-export function deleteLibraryPrompt(name: string): Promise<Record<string, unknown>> {
-  return requestJson(`/api/library/${encodeURIComponent(name)}`, 'DELETE');
-}
-
-export function installLibraryPrompt(
-  name: string,
-  targets: InstallTarget[]
-): Promise<Record<string, unknown>> {
-  return requestJson(`/api/library/${encodeURIComponent(name)}/install`, 'POST', { targets });
-}
-
-export function uninstallLibraryPrompt(
-  name: string,
-  targets: InstallTarget[]
-): Promise<Record<string, unknown>> {
-  return requestJson(`/api/library/${encodeURIComponent(name)}/uninstall`, 'POST', { targets });
-}
-
-/** Claude-CLI name suggestion; `{ name: null }` when the CLI is unavailable. */
-export function suggestLibraryName(text: string): Promise<SuggestNameResult> {
-  return requestJson('/api/library/suggest-name', 'POST', { text });
-}
-
-export function getFabricPatterns(): Promise<FabricPatternsData> {
-  return fetchJson('/api/library/fabric-patterns');
-}
-
-export function importFabricPatterns(names: string[]): Promise<ImportFabricResult> {
-  return requestJson('/api/library/import-fabric', 'POST', { names });
-}
-
-export function getLibraryHistory(name: string): Promise<LibraryHistoryData> {
-  return fetchJson(`/api/library/${encodeURIComponent(name)}/history`);
-}
-
-export function getLibraryHistoryEntry(name: string, hash: string): Promise<LibraryHistoryEntry> {
-  return fetchJson(
-    `/api/library/${encodeURIComponent(name)}/history/${encodeURIComponent(hash)}`
-  );
-}
-
-// ---------- Backup / misc ----------
-
-export function runBackup(): Promise<BackupResult> {
-  return requestJson('/api/backup', 'POST');
-}
-
-export function getBackupStatus(): Promise<BackupStatus> {
-  return fetchJson('/api/backup/status');
-}
 
 export function getOtlp(platform: Platform, sessionId: string, dir?: string): Promise<OtlpExport> {
   return fetchJson(

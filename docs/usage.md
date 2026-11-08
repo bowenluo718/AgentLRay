@@ -19,7 +19,6 @@ Detailed feature catalog, screenshots, installation alternatives, configuration 
 - **Trace view** — Per-turn waterfall of where the time went: model inference (blue) vs tool execution (green, red on error); click any bar for its span detail in the sidebar, and a purple bar to load the spawned sub-agent's transcript
 - **Prompt extraction** — See every real human prompt per session (tool results, slash commands and injected noise filtered out), grouped by working directory, with search / JSON export / copy
 - **Prompt optimization** — Cluster prompts into templates, attribute session outcomes (turns, tool calls, error rate) per template, and get LLM-powered rewrite suggestions — through any OpenAI-compatible endpoint (Settings → LLM 接口) or, if none is configured, the local `claude` CLI
-- **Prompt library** — Curate the prompts worth keeping into `~/.agentlray/library`, tag / edit / search them, then install any of them as a native slash command for Claude Code, Codex or OMP with one click — `$ARGUMENTS` is passed through, so `/name some args` works in the target CLI
 - **Global search** — One search box across all seven platforms at once, multi-keyword AND matching, colored platform badges per hit — including prompts recovered from sessions that Claude Code's cleanup already deleted
 - **Session insights** — Aggregate analytics dashboard with tool stats, error clustering and daily trends
 - **Evidence-backed failure events (React UI)** — Groups unresolved failures by the same tool, complete arguments and call's user turn, with repeated operations first, first/last evidence jumps and every original result retained. Successful results split groups; missing arguments stay separate. Execution success requires an explicit zero exit code or OMP-native completion evidence. These are review groups, not root-cause diagnoses or proof of task failure. Local rules, no LLM. [Try the synthetic walkthrough and read the boundaries](diagnostics.md).
@@ -36,7 +35,6 @@ Detailed feature catalog, screenshots, installation alternatives, configuration 
 - **Kanban board** — A four-state task board view (`awaiting-input` / `working` / `waiting` / `stopped`) built from the same list cache and live status as the sidebar; columns truncate at `maxPerStatus` (default 20, configurable under Settings → 任务看板), stack vertically on narrow screens. Click a card to open that session in the Sessions view.
 - **Light / dark theme** — Toggle between light and dark in the top bar (follows the system once on first launch, then fixed by your manual choice, persisted in `agent-xray-settings`).
 - **Settings panel** — Configure platform directories from the UI, persisted in localStorage
-- **Session backup** — Incremental archive of your Codex, Claude Code, OMP, DeepSeek Harness and Gemini CLI session logs into `~/.agentlray/archive` (Hermes and OpenClaw are not archived), one click in settings (also runs automatically, daily); unchanged files are skipped
 - **Keyboard navigation** — Arrow keys to move between sessions
 
 ---
@@ -314,19 +312,10 @@ A complete runnable, annotated sample adapter (flat JSONL platform, with `find` 
 | `GET /api/prompts/analyze` | Template clustering + attribution + Claude suggestions (`?refresh=1` to recompute, `?skipLlm=1` for clustering only) |
 | `POST /api/prompts/rewrite` | Rewrite a single prompt via the configured LLM backend (`{ "text": "..." }`; 503 with guidance when no backend is available) |
 | `GET/PUT /api/settings` | Unified settings endpoint: all server-side settings aggregated in `~/.agentlray/settings.json` (legacy `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` migrate in on first start). PUT saves only the sections supplied (`ui`/`cliBins`/`status`/`kanban`/`llm`), others untouched. `cliBins` returns `bin`/`configured`/`default`, empty string clears (fall back to default); `status`/`kanban` return `value`/`configured`/`default`, saving takes effect immediately; `llm` `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey` (key never echoed back) |
-| `GET /api/settings/cli-bins` | Read-only compat endpoint for the legacy frozen UI (`/legacy` resume-copy button); same `bin`/`configured`/`default` shape as `/api/settings`'s `cliBins` |
+| `GET /api/settings/cli-bins` | Read-only compat endpoint; same `bin`/`configured`/`default` shape as `/api/settings`'s `cliBins` |
 | `GET /api/search` | Full-text search across sessions (`?platform=all` searches every platform at once, multi-keyword AND) |
 | `GET /api/omp/sessions/:id/children` | List sub-agents spawned by an OMP session |
 | `GET /api/omp/sessions/:id/children/:name` | Get a spawned sub-agent's messages |
-| `GET /api/library` | List library prompts with their per-target install state |
-| `POST /api/library` | Create a prompt (`{ "name": "...", "content": "...", "description": "...", "tags": [...] }`) |
-| `PUT /api/library/:name` | Update / rename a prompt (`newName`, `content`, `description`, `tags`); installed copies are refreshed |
-| `DELETE /api/library/:name` | Delete a prompt and any installed slash commands |
-| `POST /api/library/:name/install` | Install as a slash command (`{ "targets": ["claude", "codex", "omp"] }`) |
-| `POST /api/library/:name/uninstall` | Remove the installed slash commands (same body) |
-| `POST /api/library/suggest-name` | Suggest a library name for a prompt via the configured LLM backend (`{ "text": "..." }`; `null` when no backend is available) |
-| `POST /api/backup` | Run an incremental backup into `~/.agentlray/archive` |
-| `GET /api/backup/status` | Archive stats: file count, total bytes, last backup time |
 
 All list/detail endpoints accept an optional `?dir=` parameter to override the default directory.
 
@@ -336,7 +325,6 @@ All list/detail endpoints accept an optional `?dir=` parameter to override the d
 
 - **Backend:** Node.js + Express
 - **Frontend:** React + Vite + TypeScript under `frontend/` (default UI, served from `frontend/dist`)
-- **Legacy UI:** the original vanilla HTML/CSS/JS app under `public/`, served at `/legacy` — **frozen: security fixes only**. New features land in the React app exclusively; a feature change to the React renderer requires zero edits under `public/js/`. Shared logic (formatters, trace builder, markdown/escape pipeline) is authored once in `frontend/src/lib/pure.ts` and `frontend/src/lib/markdown.ts`, and `public/js/pure.js` is generated from them (`npm run build:legacy-pure`, also part of `build:ui`).
 - **Data:** Reads JSONL session files directly from disk
 - **Zero external CDN** — Everything is self-contained, works offline
 
@@ -362,7 +350,7 @@ Archived OpenClaw sessions (`.jsonl.reset.*`, `.jsonl.deleted.*`) are excluded f
 
 ## Development
 
-Tests live in `test/` and use Node's built-in test runner — no extra dependencies. Run `npm ci` once, then `npm test` (`node --test test/*.test.js`). The tests start their own server on a random port with `HOME` and every platform directory pointed at a throwaway copy of `test/fixtures/home`, so your real session logs are never read or modified. CI (`.github/workflows/test.yml`) runs on Node 22 for every push and pull request to `master`, in four steps: `npm ci` (whose `prepare` script builds the web UI and regenerates `public/js/pure.js`), a drift check (`git diff --exit-code public/js/pure.js lib/generated/diagnostics.cjs`), `npx biome check .`, and `npm test`.
+Tests live in `test/` and use Node's built-in test runner — no extra dependencies. Run `npm ci` once, then `npm test` (`node --test test/*.test.js`). The tests start their own server on a random port with `HOME` and every platform directory pointed at a throwaway copy of `test/fixtures/home`, so your real session logs are never read or modified. CI (`.github/workflows/test.yml`) runs on Node 22 for every push and pull request to `master`, in four steps: `npm ci` (whose `prepare` script builds the web UI), a drift check (`git diff --exit-code lib/generated/diagnostics.cjs`), `npx biome check .`, and `npm test`.
 
 **Adding a platform** takes two files: write one adapter in `lib/platforms/<name>.js` (list / find / parse / normalize for that log format — `lib/platforms/shared.js` provides the metadata cache, the normalized-message factory and the session sort), then register it in the `PLATFORMS` table in `lib/platforms/index.js`. The generic session routes, search, watch (SSE tail), insights, prompts, tool audit, OTLP and Markdown/HTML export all resolve platforms through that registry — no other file needs to change. For a **custom** platform you do not touch the source at all: drop an adapter into `~/.agentlray/platforms/` (see [Custom platforms](#custom-platforms)).
 
@@ -374,7 +362,7 @@ Tests live in `test/` and use Node's built-in test runner — no extra dependenc
 Seven platforms: OpenClaw, Codex, Claude Code, Hermes, OMP (oh-my-pi), DeepSeek Harness and Gemini CLI. Six of them store JSONL; Hermes stores SQLite at `~/.hermes/state.db`. DeepSeek Harness logs may be multi-frame zstd-compressed `.jsonl.zstd`, which AgentLRay decompresses frame by frame, tolerating a torn trailing frame left by a crash. The authoritative list is the `PLATFORMS` registry in `lib/platforms/index.js` — run `node -e 'console.log(Object.keys(require("./lib/platforms/index.js").PLATFORMS))'` to print it.
 
 **Does AgentLRay send my session data anywhere?**
-Core log inspection and offline `inspect` do not call a model or upload logs. Optional prompt rewriting and suggestions use the configured endpoint, or the `claude` CLI fallback, which may contact a remote provider. Fabric import downloads patterns from GitHub. Installing packages can access registries. Development-only remote experiments require explicit invocation and a gated sanitized payload; they are not part of a normal dashboard launch. Do not use rewrite/suggestion features if you require no model egress.
+Core log inspection and offline `inspect` do not call a model or upload logs. Optional prompt rewriting and suggestions use the configured endpoint, or the `claude` CLI fallback, which may contact a remote provider. Installing packages can access registries. Development-only remote experiments require explicit invocation and a gated sanitized payload; they are not part of a normal dashboard launch. Do not use rewrite/suggestion features if you require no model egress.
 
 **Do I have to change my agent or add instrumentation?**
 No. CLI coding agents already write complete session logs to disk, and AgentLRay just reads them. There is no SDK to add to your code and no wrapper command to run your agent under. A default install needs no configuration either, because the default directories listed under [Configuration](#configuration) are used unless you override them in the settings panel or through environment variables such as `CLAUDE_CODE_DIR`.

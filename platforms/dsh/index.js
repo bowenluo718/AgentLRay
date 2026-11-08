@@ -7,7 +7,6 @@ const { session: DSH_DIR } = require('./dirs');
 const { findDshSessionFile, chooseDshLogFile, listDshSessions, normalizeDshEvents, parseDshSessionFile } = require('./parse');
 const { searchDshFile } = require('./search');
 const { extractDshPrompts } = require('./prompts');
-const { enumerateDshFiles } = require('./backup');
 const { fileBasedGetSession } = require('@agentlray/shared/helpers');
 
 module.exports = {
@@ -69,6 +68,4 @@ module.exports = {
   searchFile: (sf, keywords) => searchDshFile(sf, keywords),
   // Prompts 面：dsh event 格式专用提取器（支持 zstd）。
   extractPromptsFromFile: (filePath) => extractDshPrompts(filePath),
-  // 备份面：.jsonl 与 .jsonl.zstd 都归档。
-  backupFiles: (dir) => enumerateDshFiles(dir),
 };

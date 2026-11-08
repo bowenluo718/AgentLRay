@@ -124,7 +124,7 @@ node bin/agentlray.js inspect --platform omp \
 
 ### 本地优先，明确外发边界
 
-核心日志浏览和 `inspect` 不把日志发给模型，UI 无外部 CDN 依赖。可选的 prompt 改写与建议会调用你配置的端点，或回退到可能访问远程服务的 `claude` CLI；Fabric 导入从 GitHub 下载内容，安装依赖可能访问包仓库。要求零模型外发时，请勿使用模型驱动的 prompt 功能。
+核心日志浏览和 `inspect` 不把日志发给模型，UI 无外部 CDN 依赖。可选的 prompt 改写与建议会调用你配置的端点，或回退到可能访问远程服务的 `claude` CLI；安装依赖可能访问包仓库。要求零模型外发时，请勿使用模型驱动的 prompt 功能。
 
 单独运行的研究实验可使用通过门禁的脱敏副本调用远程模型，但不会随正常浏览或 `inspect` 启动。信息最小化和自动脱敏都**不是匿名保证**。[隐私与使用细节 →](docs/usage.zh-CN.md#常见问题)
 

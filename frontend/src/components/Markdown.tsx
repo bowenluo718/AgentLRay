@@ -1,6 +1,5 @@
 // Shared markdown block component. The escape-then-transform pipeline lives
-// in @/lib/markdown (single definition site, also bundled into the legacy
-// UI's public/js/pure.js by scripts/build-legacy-pure.mjs).
+// in @/lib/markdown (single definition site).
 
 import { useMemo } from 'react';
 import { renderMarkdownHtml } from '@/lib/markdown';

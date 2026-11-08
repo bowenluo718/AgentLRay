@@ -6,8 +6,8 @@
 
 - **7 个平台** — OpenClaw、Codex、Claude Code、Hermes（SQLite）、OMP、DeepSeek Harness 与 Gemini CLI，均从其原生日志格式解析
 - **会话浏览器**，支持工具调用检查、trace/瀑布视图、spawn 追踪与消息时间线
-- **Prompt 工具链** — 提取（已过滤噪音）、带结果归因的模板聚类、由 Claude 驱动的改写，以及一个能把条目安装为原生斜杠命令的 prompt 资产库
-- **跨全部平台的全局搜索**、洞察面板、增量会话备份
+- **Prompt 工具链** — 提取（已过滤噪音）、带结果归因的模板聚类、由 Claude 驱动的改写
+- **跨全部平台的全局搜索**、洞察面板
 - **React + Vite 前端**，由 Express 后端服务；基于 Node 内置运行器的 400+ 测试（`npm test`，2026-11-01），CI 运行于 Node 22
 - **统一会话状态** — 由记录证据推导的四态模型（`awaiting-input` / `working` / `waiting` / `stopped`），被侧栏、任务看板视图、SSE 实时尾随与终端 CLI 共享；时间窗口可配置
 - **自定义平台适配器** — 把一个 JavaScript 适配器放进 `~/.agentlray/platforms/` 即可接入平台，无需触碰源码；启动时校验，坏文件绝不阻塞启动

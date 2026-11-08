@@ -10,21 +10,15 @@
 //
 // Every figure is derived here from committed artifacts — the platform
 // registry, lib/config.js, package.json, the workflow, the synthetic demo
-// sample log, the test fixtures — never typed in as a constant. The one receipt
-// that needs the platform directories pointed somewhere safe (backup) re-runs
-// this file in a child process with HOME aimed at a throwaway copy of
-// test/fixtures/home, so no real session log is ever read or written.
+// sample log, the test fixtures — never typed in as a constant.
 
-import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(path.join(ROOT, 'package.json'));
-const SELF = fileURLToPath(import.meta.url);
 const README = 'README.md';
 const README_ZH = 'README.zh-CN.md';
 const GUIDE = 'docs/usage.md';
@@ -117,38 +111,6 @@ const receipts = {
     return `${report.summary.failureRecords} historical failures · ${report.summary.pendingRecords} pending records · ${report.summary.pendingEvents} events · ${report.summary.recoveredRecords} matching recovery · complete=${report.complete} · both README excerpts ${agrees ? 'agree' : 'DISAGREE'}`;
   },
 
-  // README "Per-turn ledger": one row per user turn, wall-clock time, tokens =
-  // input + output + cache read + cache write, cost only when reported.
-  'ledger-fields': async () => {
-    const pure = fromRepo('public/js/pure.js');
-    const cases = [
-      [
-        'dsh',
-        'lib/platforms/dsh.js',
-        'parseDshSessionFile',
-        'test/fixtures/home/.dsh/sessions/--fixtures-project-delta--/dsh-fixture-session-0001/session.jsonl',
-      ],
-      [
-        'omp',
-        'lib/platforms/omp.js',
-        'parseOmpSessionFile',
-        'test/fixtures/home/.omp/agent/sessions/-fixtures-project-gamma/2026-01-20T08-00-00-000Z_019a0000-0000-7000-8000-00000000aaaa.jsonl',
-      ],
-    ];
-    const parts = [];
-    for (const [name, module, fn, file] of cases) {
-      const { messages } = await fromRepo(module)[fn](path.join(ROOT, file));
-      const ledger = pure.buildTurnLedger(messages);
-      const row = ledger.rows[0];
-      const sum = row.inputTokens + row.outputTokens + row.cacheReadTokens + row.cacheWriteTokens;
-      parts.push(
-        `${name}: ${ledger.rows.length} row, ${formatNumber(sum)} tok = ${row.inputTokens} in + ${row.outputTokens} out + ${row.cacheReadTokens} cache read + ${row.cacheWriteTokens} cache write` +
-          `, ${ledger.hasCost ? `cost ${pure.formatCost(row.cost)} reported` : 'cost not reported'}, ${plural(row.toolCalls, 'tool call')}, ${plural(row.toolErrors, 'error')}`
-      );
-    }
-    return parts.join(' · ');
-  },
-
   // README Development: "CI (.github/workflows/test.yml) runs on Node 22 for
   // every push and pull request to master, in four steps".
   'ci-test-workflow': () => {
@@ -159,35 +121,6 @@ const receipts = {
     const node = yaml.match(/node-version: '?([\d.x]+)'?/)[1];
     const branches = [...new Set([...yaml.matchAll(/branches: \[([^\]]*)\]/g)].map((match) => match[1]))];
     return `${jobs.length} job (${jobs.join(', ')}) on Node ${node} · ${runs.length} steps: ${runs.join(' | ')} · on ${triggers.join(', ')} of ${branches.join('/')}`;
-  },
-
-  // README Features: "Incremental archive of your Codex, Claude Code, OMP,
-  // DeepSeek Harness and Gemini CLI session logs ... (Hermes and OpenClaw are
-  // not archived)"; "unchanged files are skipped".
-  'backup-platforms': () => {
-    const tmp = mkdtempSync(path.join(os.tmpdir(), 'agentlray-claims-'));
-    try {
-      const home = path.join(tmp, 'home');
-      cpSync(path.join(ROOT, 'test', 'fixtures', 'home'), home, { recursive: true });
-      const run = () =>
-        JSON.parse(
-          execFileSync(process.execPath, [SELF, '--backup-run'], {
-            env: { ...process.env, HOME: home, AGENTLRAY_ARCHIVE_DIR: path.join(tmp, 'archive') },
-            encoding: 'utf8',
-          })
-        );
-      const first = run();
-      const second = run();
-      const archived = Object.keys(first.byPlatform);
-      const excluded = Object.keys(platforms()).filter((id) => !archived.includes(id));
-      return (
-        `archive: ${archived.length} platforms (${archived.join(', ')}) · excluded: ${excluded.join(', ')}` +
-        ` · first run ${first.copied} copied / ${first.skipped} skipped of ${first.total}` +
-        ` · re-run ${second.copied} copied / ${second.skipped} skipped`
-      );
-    } finally {
-      rmSync(tmp, { recursive: true, force: true });
-    }
   },
 
   // README Install: "npx @bowenluo718/agent-lray".
@@ -261,11 +194,4 @@ async function main() {
   process.stdout.write(`${await receipts[id]()}\n`);
 }
 
-if (process.argv[2] === '--backup-run') {
-  // Child mode for the backup receipt: HOME/AGENTLRAY_ARCHIVE_DIR are already
-  // set by the parent, and lib/config.js reads them when it is first required.
-  const { runFullBackup } = fromRepo('lib/backup.js');
-  process.stdout.write(JSON.stringify(await runFullBackup()));
-} else {
-  await main();
-}
+await main();

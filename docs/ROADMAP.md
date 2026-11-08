@@ -6,8 +6,8 @@
 
 - **7 platforms** — OpenClaw, Codex, Claude Code, Hermes (SQLite), OMP, DeepSeek Harness and Gemini CLI, parsed from their native log formats
 - **Session browser** with tool-call inspection, trace/waterfall view, spawn tracking and message timeline
-- **Prompt tooling** — extraction (noise filtered), template clustering with outcome attribution, Claude-powered rewrites, and a prompt library that installs entries as native slash commands
-- **Global search** across all platforms, insights dashboard, incremental session backup
+- **Prompt tooling** — extraction (noise filtered), template clustering with outcome attribution, Claude-powered rewrites
+- **Global search** across all platforms, insights dashboard
 - **React + Vite frontend** served by an Express backend; 400+ tests on Node's built-in runner (`npm test`, 2026-11-01), CI on Node 22
 - **Unified session status** — a four-state model (`awaiting-input` / `working` / `waiting` / `stopped`) derived from record evidence, shared by the sidebar, a kanban board view, the SSE live tail and the terminal CLI; time windows are configurable
 - **Custom platform adapters** — drop a JavaScript adapter into `~/.agentlray/platforms/` to add a platform without touching the source; validated at startup, broken files never block boot

@@ -36,8 +36,6 @@ export interface PlatformCapabilities {
   prompts: boolean;
   /** 提供 tool audit（computeToolAudit/scanToolAuditFile）hook。 */
   toolAudit: boolean;
-  /** 提供 backup hook。 */
-  backup: boolean;
   /** 提供 inspect hook。 */
   inspect: boolean;
   /** 提供 otlpSession hook。 */
@@ -458,95 +456,6 @@ export interface SearchResult {
   /** true → a Claude-cleaned history entry: display-only, not clickable */
   history?: boolean;
   project?: string;
-  [key: string]: unknown;
-}
-
-// ---------- Library ----------
-
-export type InstallTarget = 'claude' | 'codex' | 'omp';
-
-export interface LibraryPrompt {
-  name: string;
-  description: string;
-  tags: string[];
-  content: string;
-  createdAt: string;
-  source?: string;
-  installed: Record<InstallTarget, boolean>;
-  [key: string]: unknown;
-}
-
-/** GET /api/library */
-export interface LibraryData {
-  prompts: LibraryPrompt[];
-}
-
-export interface LibraryUsageEntry {
-  uses: number;
-  avgMessages: number | null;
-  errorRate: number | null;
-  lastUsed: string | null;
-}
-
-/** GET /api/library/usage */
-export interface LibraryUsageData {
-  usage: Record<string, LibraryUsageEntry>;
-}
-
-/** POST /api/library/suggest-name */
-export interface SuggestNameResult {
-  name: string | null;
-}
-
-export interface FabricPattern {
-  name: string;
-  imported: boolean;
-}
-
-/** GET /api/library/fabric-patterns */
-export interface FabricPatternsData {
-  patterns: FabricPattern[];
-}
-
-/** POST /api/library/import-fabric */
-export interface ImportFabricResult {
-  imported: string[];
-  skipped: string[];
-  failed: string[];
-}
-
-export interface LibraryCommit {
-  hash: string;
-  date: string;
-  message: string;
-}
-
-/** GET /api/library/:name/history */
-export interface LibraryHistoryData {
-  commits: LibraryCommit[];
-}
-
-/** GET /api/library/:name/history/:hash */
-export interface LibraryHistoryEntry {
-  content: string;
-  description?: string | null;
-  tags?: string[];
-}
-
-// ---------- Backup / misc ----------
-
-/** GET /api/backup/status */
-export interface BackupStatus {
-  archiveDir: string;
-  files: number;
-  bytes: number;
-  lastBackup: string | null;
-}
-
-/** POST /api/backup */
-export interface BackupResult {
-  copied: number;
-  skipped: number;
   [key: string]: unknown;
 }
 
