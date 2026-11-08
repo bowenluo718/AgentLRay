@@ -1,23 +1,21 @@
-// Child-agent (omp / claude-code spawned subagent) data hooks, shared by
-// TraceView, ChildAgentsSection and the sessions detail (via useActiveSessionDetail).
-// Behavior ported from public/js/app.js (childrenEndpoint/childAgentLabel/getSessionChildren).
+// Child-agent (capabilities.children 平台，如 omp / claude-code 派生子 agent) 数据
+// hooks，TraceView / ChildAgentsSection / 会话详情（useActiveSessionDetail）共用。
+// Behavior ported from public/js/app.js (childrenEndpoint/childAgentLabel/getSessionChildren)。
 
 import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { getSessionChild, getSessionChildren, getSessionDetail } from '@/api/client';
 import type { ChildAgentSummary, Platform, SessionDetail } from '@/api/types';
-import { dirForPlatform, useAppStore } from '@/store';
+import { dirBySettingKey, platformInfoById, useAppStore } from '@/store';
 
-export type ChildPlatform = 'omp' | 'claude-code';
-
-/** Platforms whose sessions can spawn child agents. */
-export function hasChildAgents(platform: Platform): platform is ChildPlatform {
-  return platform === 'omp' || platform === 'claude-code';
+/** 该平台是否可派生子 agent（能力位 capabilities.children）。 */
+export function hasChildAgents(platform: Platform, platforms: Parameters<typeof platformInfoById>[0]): boolean {
+  return platformInfoById(platforms, platform)?.capabilities.children === true;
 }
 
-/** Chip/span label: claude-code children carry meta (description/agentType); omp children only a name. */
-export function childAgentLabel(c: ChildAgentSummary, platform: Platform): string {
-  return (platform === 'claude-code' ? c.description || c.agentType : '') || c.name;
+/** Chip/span label：带描述/类型的子 agent 展示 meta，否则只展示名称。 */
+export function childAgentLabel(c: ChildAgentSummary): string {
+  return c.description || c.agentType || c.name;
 }
 
 /** Subagent list of the selected session. Legacy swallows fetch errors → empty list. */
@@ -25,14 +23,13 @@ export function useChildrenQuery(): UseQueryResult<ChildAgentSummary[]> {
   const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const settings = useAppStore((s) => s.settings);
-  const dir = dirForPlatform(settings, platform) || undefined;
+  const platforms = useAppStore((s) => s.platforms);
+  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined;
   return useQuery({
     queryKey: ['session-children', platform, sessionId],
-    enabled: hasChildAgents(platform) && !!sessionId,
+    enabled: hasChildAgents(platform, platforms) && !!sessionId,
     queryFn: () =>
-      getSessionChildren(platform as ChildPlatform, sessionId, dir).catch(
-        () => [] as ChildAgentSummary[]
-      ),
+      getSessionChildren(platform, sessionId, dir).catch(() => [] as ChildAgentSummary[]),
   });
 }
 
@@ -42,10 +39,12 @@ export function useSessionDetailQuery(): UseQueryResult<SessionDetail> {
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const agent = useAppStore((s) => s.detailAgent);
   const settings = useAppStore((s) => s.settings);
-  const dir = dirForPlatform(settings, platform) || undefined;
+  const platforms = useAppStore((s) => s.platforms);
+  const needsAgent = platformInfoById(platforms, platform)?.capabilities.needsAgent === true;
+  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined;
   return useQuery({
     queryKey: ['session', platform, sessionId],
-    enabled: !!sessionId && (platform !== 'openclaw' || !!agent),
+    enabled: !!sessionId && (!needsAgent || !!agent),
     queryFn: () => getSessionDetail(platform, sessionId, { agent: agent || undefined, dir }),
   });
 }
@@ -56,11 +55,12 @@ export function useChildSessionQuery(): UseQueryResult<SessionDetail> {
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const child = useAppStore((s) => s.viewingChildAgent);
   const settings = useAppStore((s) => s.settings);
-  const dir = dirForPlatform(settings, platform) || undefined;
+  const platforms = useAppStore((s) => s.platforms);
+  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined;
   return useQuery({
     queryKey: ['session-child', platform, sessionId, child],
-    enabled: hasChildAgents(platform) && !!sessionId && !!child,
-    queryFn: () => getSessionChild(platform as ChildPlatform, sessionId, child as string, dir),
+    enabled: hasChildAgents(platform, platforms) && !!sessionId && !!child,
+    queryFn: () => getSessionChild(platform, sessionId, child as string, dir),
   });
 }
 

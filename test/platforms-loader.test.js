@@ -21,6 +21,10 @@ const { spawnSync, spawn } = require('node:child_process');
 const REPO_ROOT = path.join(__dirname, '..');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-loader-test-'));
 process.env.HOME = tmpHome;
+// setup-env.cjs 已全局注入空的 AGENTLRAY_PLATFORMS_DIR；本测试用临时 HOME 下
+// 的目录放置自定义适配器，需在此重置两个来源目录为 HOME 派生路径。
+process.env.AGENTLRAY_PLATFORMS_DIR = path.join(tmpHome, '.agentlray', 'platforms');
+process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = path.join(tmpHome, 'platforms');
 
 const { loadPlatformAdapters, PLATFORM_DIR } = require('../lib/platforms/loader');
 const { PLATFORMS, listPlatformInfo } = require('../lib/platforms');

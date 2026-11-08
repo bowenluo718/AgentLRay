@@ -40,6 +40,10 @@ function serverEnv(home, port) {
     GEMINI_DIR: path.join(home, '.gemini', 'tmp'),
     AGENTLRAY_LIBRARY_DIR: path.join(home, '.agentlray', 'library'),
     AGENTLRAY_ARCHIVE_DIR: path.join(home, '.agentlray', 'archive'),
+    // 平台来源目录（P0）：指向隔离家目录下的（必然为空）子目录，确保 server
+    // 子进程不并入用户本机自定义适配器/禁用配置，保持空配置基线。
+    AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
+    AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'platforms'),
   };
 }
 

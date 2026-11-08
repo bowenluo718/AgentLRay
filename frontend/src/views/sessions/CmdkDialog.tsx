@@ -11,18 +11,12 @@ import type { Platform, SearchMatch, SearchResult, SessionMessage } from '@/api/
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { getTextContent, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
-import { useAppStore } from '@/store';
+import { dirsByParam, platformInfoById, useAppStore } from '@/store';
 import { sessionDetailOptions, sessionsListOptions } from './queries';
 import { isDisplayableMessage, messageAnchorId } from './lib';
-const PLAT_BADGE: Record<string, [string, string]> = {
-  openclaw: ['OpenClaw', '#3fb950'],
-  codex: ['Codex', '#58a6ff'],
-  'claude-code': ['Claude', '#d2a8ff'],
-  hermes: ['Hermes', '#f78166'],
-  omp: ['OMP', '#ffd33d'],
-  dsh: ['DeepSeek', '#4d6bfe'],
-  gemini: ['Gemini', '#4285f4'],
-};
+
+// 平台徽标兜底色（服务端未下发 color 时）。
+const PLAT_BADGE_FALLBACK_COLOR = 'var(--muted)';
 
 interface HitRow {
   result: SearchResult;
@@ -78,6 +72,7 @@ export function CmdkDialog({
   onNavigate?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const platforms = useAppStore((s) => s.platforms);
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<HitRow[] | null>(null);
   const [hitCount, setHitCount] = useState(0);
@@ -98,7 +93,10 @@ export function CmdkDialog({
     setSearching(true);
     try {
       const settings = useAppStore.getState().settings;
-      const results = await searchSessions(q, settings);
+      const results = await searchSessions(
+        q,
+        dirsByParam(settings, useAppStore.getState().platforms)
+      );
       if (seq !== seqRef.current) return; // stale response
       setHitCount(results.length);
       setRows(
@@ -212,7 +210,10 @@ export function CmdkDialog({
           {!searching &&
             rows?.map((row, i) => {
               const { result, match } = row;
-              const [platLabel, platColor] = PLAT_BADGE[result.platform] || [result.platform, 'var(--muted)'];
+              // 平台徽标：label + 品牌色来自 store 平台列表（服务端驱动），缺省回退 id/通用色。
+              const platInfo = platformInfoById(platforms, result.platform);
+              const platLabel = platInfo?.label ?? result.platform;
+              const platColor = platInfo?.color ?? PLAT_BADGE_FALLBACK_COLOR;
               const shortId = result.history
                 ? (result.project || '').replace(/^\/Users\/[^/]+/, '~')
                 : result.sessionId.length > 20

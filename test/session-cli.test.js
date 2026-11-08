@@ -39,7 +39,15 @@ async function addOpenClawSession(home, agent, sessionId = 'oc-1111') {
 function runCli(home, args, extraEnv = {}) {
   return spawnSync(process.execPath, [BIN, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, HOME: home, ...extraEnv },
+    // setup-env.cjs 会全局注入空的 AGENTLRAY_PLATFORMS_DIR，须覆盖为 HOME 派生的
+    // 平台目录，使 addCustomPlatform 落盘的自定义适配器在 CLI 子进程里可见。
+    env: {
+      ...process.env,
+      HOME: home,
+      AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
+      AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      ...extraEnv,
+    },
   });
 }
 
@@ -50,7 +58,13 @@ function runCli(home, args, extraEnv = {}) {
 function runCliAsync(home, args, extraEnv = {}) {
   return new Promise((resolvePromise) => {
     const child = spawn(process.execPath, [BIN, ...args], {
-      env: { ...process.env, HOME: home, ...extraEnv },
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
+        AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+        ...extraEnv,
+      },
     });
     let stdout = '';
     let stderr = '';

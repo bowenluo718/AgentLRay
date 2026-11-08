@@ -10,7 +10,7 @@ import { getResumeCommand } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
-import { dirForPlatform, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore } from '@/store';
+import { dirBySettingKey, platformInfoById, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore } from '@/store';
 import { ChildAgentsSection } from '@/views/trace/ChildAgentsSection';
 import { TurnLedger } from './TurnLedger';
 import type { ExportFormat } from './exports';
@@ -58,6 +58,7 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const selectedAgent = useAppStore((s) => s.detailAgent);
   const settings = useAppStore((s) => s.settings);
+  const platforms = useAppStore((s) => s.platforms);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<number | undefined>(undefined);
@@ -69,8 +70,8 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
       detail,
       platform,
       selectedSessionId,
-      dirForPlatform(settings, platform) || undefined,
-      platform === 'openclaw' ? selectedAgent : undefined
+      dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined,
+      platformInfoById(platforms, platform)?.capabilities.needsAgent ? selectedAgent : undefined
     );
     if (result === 'copied') {
       setCopied(true);
@@ -114,27 +115,16 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
   );
 }
 
-const RESUME_BUILTIN_IDS: Record<string, true> = {
-  codex: true,
-  'claude-code': true,
-  omp: true,
-  dsh: true,
-  gemini: true,
-  hermes: true,
-};
-
 function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const platforms = useAppStore((s) => s.platforms);
   const [copied, setCopied] = useState(false);
-  const builtin = RESUME_BUILTIN_IDS[platform] === true;
-  // 内置六平台与自定义平台统一走服务端 resume-command 生成命令串（单一真源在
-  // lib/resume.js buildResumeCommand，内部按 process.platform 出 POSIX/PowerShell 并
-  // 解析同一份 cli-bins 配置）。自定义平台是否声明原生续跑由 GET /api/platforms 的
-  // resume 标志决定。
-  const customResume = platforms.some((p) => p.id === platform && p.resume);
-  const supported = builtin || customResume;
+  // 统一走服务端 resume-command 生成命令串（单一真源在 lib/resume.js
+  // buildResumeCommand，内部按 process.platform 出 POSIX/PowerShell 并解析同一份
+  // cli-bins 配置）。是否支持续跑由 GET /api/platforms 的 resume 标志决定（内置六平台
+  // 与自定义适配器 resume opt-in 都由后端置位）。
+  const supported = platformInfoById(platforms, platform)?.resume === true;
 
   const remote = useQuery({
     queryKey: ['resume-command', platform, selectedSessionId, cwd ?? ''],

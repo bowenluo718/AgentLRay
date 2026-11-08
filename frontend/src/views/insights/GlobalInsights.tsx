@@ -8,7 +8,7 @@ import { getInsights } from '@/api/client';
 import type { ErrorCluster, ErrorClusterExample, Insights } from '@/api/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCost } from '@/lib/pure';
-import { dirForPlatform, platformLabel, useActivePlatform, useAppStore } from '@/store';
+import { dirBySettingKey, platformInfoById, platformLabel, useActivePlatform, useAppStore } from '@/store';
 import { InsightSection, ScopeChip, StatCard, UsageBar, fmtTokens } from './bits';
 import { ToolsAuditSection } from './ToolsAuditSection';
 
@@ -65,11 +65,11 @@ export function GlobalInsights() {
   const setView = useAppStore((s) => s.setView);
   const requestScrollToMessage = useAppStore((s) => s.requestScrollToMessage);
 
-  const agent = platform === 'openclaw' && selectedAgent ? selectedAgent : undefined;
+  const info = platformInfoById(platforms, platform);
+  const agent = info?.capabilities.needsAgent && selectedAgent ? selectedAgent : undefined;
   const query = useQuery({
     queryKey: ['insights', platform, agent ?? ''],
-    queryFn: () =>
-      getInsights({ platform, agent, dir: dirForPlatform(settings, platform) || undefined }),
+    queryFn: () => getInsights({ platform, agent, dir: dirBySettingKey(settings, info) || undefined }),
   });
 
   // Error-example session link: land on the failing message in the sessions view.

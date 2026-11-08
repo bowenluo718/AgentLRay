@@ -132,7 +132,7 @@ export function TraceView() {
       ? []
       : (children ?? []).map((c) => ({
           name: c.name,
-          label: childAgentLabel(c, platform),
+          label: childAgentLabel(c),
           start: parseTimestampMs(c.timestamp),
           end: parseTimestampMs(c.lastActivity),
         }));

@@ -22,6 +22,10 @@ const BIN = path.join(REPO_ROOT, 'bin', 'agentlray.js');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-platform-cli-'));
 process.env.HOME = tmpHome;
+// setup-env.cjs 已全局注入空的 AGENTLRAY_PLATFORMS_DIR；本测试在临时 HOME 下
+// 写入自定义适配器，需在此把两个来源目录重置为 HOME 派生路径，使适配器可被加载。
+process.env.AGENTLRAY_PLATFORMS_DIR = path.join(tmpHome, '.agentlray', 'platforms');
+process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR = path.join(tmpHome, 'platforms');
 
 function writeAdapter(name, source) {
   const dir = path.join(tmpHome, '.agentlray', 'platforms');

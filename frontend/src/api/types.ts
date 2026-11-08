@@ -7,7 +7,7 @@
 // 平台而不改类型；API 路径统一拼 `/api/${id}/...`。
 export type Platform = string;
 
-/** 平台能力位（与后端 lib/platforms/index.js capabilityBits 一致）。 */
+/** 平台能力位（与后端 lib/platforms/contracts.js capabilityBits 一致，包含映射 hook 的能力）。 */
 export interface PlatformCapabilities {
   list: boolean;
   find: boolean;
@@ -16,18 +16,66 @@ export interface PlatformCapabilities {
   collectFiles: boolean;
   watchParse: boolean;
   needsAgent: boolean;
+  /** 提供 listForAgent(per-agent 列举) hook。 */
+  listForAgent: boolean;
+  /** 提供 listAllAgents(合并全部 agents) hook。 */
+  listAllAgents: boolean;
+  /** 提供 listAgents(枚举 agents) hook。 */
+  listAgents: boolean;
+  /** 会话可 spawn 子 agent（omp / claude-code）。 */
+  children: boolean;
+  /** 提供 spawnMap/spawnTree hook。 */
+  spawn: boolean;
+  /** 提供 watch hook。 */
+  watch: boolean;
+  /** 提供 search hook。 */
+  search: boolean;
+  /** 提供 computeInsights hook。 */
+  insights: boolean;
+  /** 提供 computePrompts hook。 */
+  prompts: boolean;
+  /** 提供 tool audit（computeToolAudit/scanToolAuditFile）hook。 */
+  toolAudit: boolean;
+  /** 提供 backup hook。 */
+  backup: boolean;
+  /** 提供 inspect hook。 */
+  inspect: boolean;
+  /** 提供 otlpSession hook。 */
+  otlp: boolean;
 }
 
-/** GET /api/platforms 单条：内置 → 自定义 → broken。broken 条目 id 可能为 null。 */
+/** GET /api/platforms 单条：内置 → 项目 → 自定义 → broken。broken 条目 id 可能为 null。 */
 export interface PlatformInfo {
   id: string | null;
   label: string | null;
+  /** 来源：package（包内置）/ project（项目目录）/ user（~/.agentlray/platforms）。 */
+  origin: string;
   builtin: boolean;
+  /** 包内置被替代/停用时置空的相关信息。 */
+  overrides: Record<string, unknown> | null;
+  /** 声明了替代但同 id 适配器缺失/损坏 → 回退包内置。 */
+  replacementPending: boolean;
+  /** 当前生效挂载态（包含 disabled 黑名单与替代回退之后的最终状态）。 */
+  mounted: boolean;
+  /** 用户配置的挂载态（settings.platforms.disabled 之外的原生意图）。 */
+  configuredMounted: boolean;
+  /** 启停/替代需要在进程重启后生效。 */
+  restartRequired: boolean;
   capabilities: PlatformCapabilities;
   /** 是否声明原生续跑契约（内置六平台，或自定义适配器 resume: { bin, args }）。 */
   resume: boolean;
   /** 是否支持新建会话（与后端 hasCreateContract 一致：codex / claude-code / omp / gemini / hermes，或自定义适配器 create 契约）。 */
   create: boolean;
+  /** 续跑/新建 spawn 的可执行命令名（无则 null）。 */
+  bin: string | null;
+  /** 数据目录设置面板的字段键（settings.json ui section），无则缺省目录不可配。 */
+  dirSettingKey: string | null;
+  dirSettingLabel: string | null;
+  dirSettingHint: string | null;
+  /** 多平台/搜索/审计聚合时该平台目录的 query 参数名（如 dirOpenclaw）。 */
+  dirParam: string | null;
+  /** 平台品牌色（hex），前端缺省色兜底。 */
+  color: string | null;
   broken: boolean;
   /** 仅 broken 条目：加载/校验失败原因。 */
   error?: string;

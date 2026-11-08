@@ -31,9 +31,18 @@ function runInPlatform(platformName, code, extraEnv = {}) {
     Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platformName)}, configurable: true });
     ${code}
   `;
+  // setup-env.cjs 会全局注入空的 AGENTLRAY_PLATFORMS_DIR；若本用例以临时 HOME 落盘
+  // 自定义适配器（makeCustomHome），须把用户平台目录覆盖为 HOME 派生路径。放在
+  // extraEnv 之前展开以保证显式覆盖仍生效。
+  const homeDerived = extraEnv.HOME
+    ? {
+        AGENTLRAY_PLATFORMS_DIR: path.join(extraEnv.HOME, '.agentlray', 'platforms'),
+        AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(extraEnv.HOME, 'project-platforms'),
+      }
+    : {};
   const res = spawnSync(NODE, ['-e', script], {
     encoding: 'utf8',
-    env: { ...process.env, ...extraEnv },
+    env: { ...process.env, ...homeDerived, ...extraEnv },
   });
   assert.equal(res.status, 0, `子进程失败(${platformName}): ${res.stderr}\nstdout: ${res.stdout}`);
   return res.stdout.trim();

@@ -24,6 +24,9 @@
 - **design-status-config.zh-CN.md** — 状态时间配置可配置 + 设置面板页签化（`~/.agentlray/status-config.json`）
 - **design-settings-merge.zh-CN.md** — 统一设置文件 + 公用保存/重置（`~/.agentlray/settings.json`、单一 `GET/PUT /api/settings`、旧文件首启幂等迁移、`SettingsDialog` 单 draft + 统一 Save/Reset；grill 决策 R1-Q1~Q5、R2-Q-A/Q-B）
 - **glossary.zh-CN.md** — AgentLRay 术语约定（平台/会话摘要/项目/会话状态/分组模式/Agent 等）
+- **design-platform-equivalence.zh-CN.md** — 平台来源统一与全表面等价（v2）：package/project/user 三来源、`disabled`/`replaced`、catalog、Adapter v2 hook、`platform export` 薄适配器
+- **plan-platform-equivalence.zh-CN.md** — 上述 v2 设计的实施计划（P0–P6）
+- **adr-0005-platform-sources.zh-CN.md** — ADR-0005：三来源与全表面等价决策，取代 ADR-0001 的“不做 per-platform 启停开关”
 
 ## 代码库现状提示
 

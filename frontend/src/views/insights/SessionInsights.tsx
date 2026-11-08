@@ -8,7 +8,7 @@ import { getSessionDetail } from '@/api/client';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatDurationCompact } from '@/lib/pure';
-import { dirForPlatform, useActivePlatform, useAppStore } from '@/store';
+import { dirBySettingKey, platformInfoById, useActivePlatform, useAppStore } from '@/store';
 import { InsightSection, ScopeChip, StatCard, UsageBar, fmtTokens, formatNumber } from './bits';
 import { computeSessionInsights } from './sessionStats';
 
@@ -30,16 +30,18 @@ export function SessionInsights() {
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const settings = useAppStore((s) => s.settings);
+  const platforms = useAppStore((s) => s.platforms);
   const requestScrollToMessage = useAppStore((s) => s.requestScrollToMessage);
 
   // Shared cache with the sessions view — same key + queryFn opts (contract).
+  const info = platformInfoById(platforms, platform);
   const query = useQuery({
     queryKey: ['session', platform, selectedSessionId],
     enabled: !!selectedSessionId,
     queryFn: () =>
       getSessionDetail(platform, selectedSessionId, {
         agent: selectedAgent || undefined,
-        dir: dirForPlatform(settings, platform) || undefined,
+        dir: dirBySettingKey(settings, info) || undefined,
       }),
   });
 

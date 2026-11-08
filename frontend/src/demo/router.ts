@@ -12,6 +12,8 @@ import type {
   ChildAgentSummary,
   Insights,
   LibraryData,
+  PlatformCapabilities,
+  PlatformInfo,
   PromptsData,
   SearchResult,
   SessionDetail,
@@ -19,6 +21,56 @@ import type {
   SpawnLink,
 } from '@/api/types';
 import fixtures from './fixtures.json';
+
+// --- Demo 平台注册表（与 DemoFixtures.session 的 claude-code/codex/omp 三平台对齐）。
+// 真实后端为 GET /api/platforms 单一真源；demo 下 usePlatforms 被禁用（store 直接用
+// 降级表），此处 stub 仅保证 API 面完整、被意外请求时形态一致。
+const BASE_DEMO_CAPS: PlatformCapabilities = {
+  list: true, find: false, parse: false, getSession: true,
+  collectFiles: false, watchParse: false, needsAgent: false, listForAgent: false,
+  listAllAgents: false, listAgents: false, children: false, spawn: false,
+  watch: true, search: true, insights: true, prompts: true, toolAudit: false,
+  backup: false, inspect: false, otlp: false,
+};
+
+function demoPlatform(
+  id: string,
+  label: string,
+  caps: Partial<PlatformCapabilities>,
+  dirKey: string,
+  dirLabel: string,
+  dirHint: string,
+  dirParam: string,
+  color: string,
+): PlatformInfo {
+  return {
+    id,
+    label,
+    origin: 'package',
+    builtin: true,
+    overrides: null,
+    replacementPending: false,
+    mounted: true,
+    configuredMounted: true,
+    restartRequired: false,
+    capabilities: { ...BASE_DEMO_CAPS, ...caps },
+    resume: caps.spawn ? true : false,
+    create: caps.spawn ? true : false,
+    bin: caps.spawn ? id : null,
+    dirSettingKey: dirKey,
+    dirSettingLabel: dirLabel,
+    dirSettingHint: dirHint,
+    dirParam,
+    color,
+    broken: false,
+  };
+}
+
+const DEMO_PLATFORMS: PlatformInfo[] = [
+  demoPlatform('codex', 'Codex', { spawn: true }, 'codexDir', 'Codex 会话目录', 'Codex 会话日志目录', 'dirCodex', '#58a6ff'),
+  demoPlatform('claude-code', 'Claude Code', { spawn: true, children: true }, 'claudeCodeDir', 'Claude Code 会话目录', 'Claude Code 项目会话目录', 'dirClaude', '#d2a8ff'),
+  demoPlatform('omp', 'OMP', { spawn: true, children: true }, 'ompDir', 'OMP 会话目录', 'OMP（oh-my-pi）会话目录', 'dirOmp', '#ffd33d'),
+];
 
 interface DemoFixtures {
   sessions: Record<string, SessionSummary[]>;
@@ -134,6 +186,13 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
 
   // /api/version — keep the stale-page poller quiet
   if (parsed.pathname === '/api/version') return ok({ bootId: 'demo' });
+
+  // /api/platforms — demo 只含 fixture 覆盖的三平台；mt/replace 属写操作，
+  // 已被上方 read-only 守卫拒绝。
+  if (parsed.pathname === '/api/platforms') return ok(DEMO_PLATFORMS);
+
+  // /api/:platform/agents — demo 无 agent 平台（均 needsAgent=false），返回空。
+  if (seg(2) === 'agents') return ok([]);
 
   // /api/agents and /api/agents/:name/sessions[...] (openclaw — empty in demo)
   if (seg(1) === 'agents') {

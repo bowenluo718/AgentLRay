@@ -19,15 +19,12 @@ const { hasResumeContract, buildResumeCommand } = require('../lib/resume');
 const { hasCreateContract, buildNewCommand, spawnNewSession } = require('../lib/new');
 const { setStatusConfig } = require('../lib/status');
 const { loadStatusConfig } = require('../lib/status-config');
-const { findOmpSessionFile } = require('../lib/platforms/omp');
 const { loadUiSettings } = require('../lib/ui-settings');
 const { migrateLegacySettings } = require('../lib/settings');
 const { STATUS, STATUS_LABELS } = require('../lib/status');
-const { getSessionAcrossAgents } = require('../lib/platforms/openclaw');
 const {
   parsePlatformSelection,
   listSessionsBySelection,
-  listOpenclawSessionsFlat,
   filterAndPage,
 } = require('../lib/session-list');
 
@@ -182,128 +179,9 @@ function labelFor(status) {
   return STATUS_LABELS[status] || status;
 }
 
-// 检测目标 omp 会话是否正被"运行中的 omp 实例"持有（`omp --resume <path|id>`）。
-// 这类会话在 OMP 中处于"非空闲"，新续跑会触发派生（二进制内置 requireIdle→fork 逻辑），
-// 与文件尾是否有 session_exit 无关（早前"先追加 session_exit 收尾"方案已实证无效）。
-// 返回持有进程的 pid，未检测到返回 null。排除本工具自身进程树（cmdline 含 agentlray）。
-function liveOmpPidForSession(sessionFilePath, sessionId) {
-  // 依赖 /proc 扫描，仅 Linux 可用；Windows 等平台暂不支持检测运行中的 omp 持有实例。
-  if (process.platform !== 'linux') {
-    process.stderr.write('agentlray sessions: 注意：Windows 暂不支持检测运行中的 omp 持有实例。\n');
-    return null;
-  }
-  let entries;
-  try {
-    entries = fs.readdirSync('/proc');
-  } catch {
-    return null; // /proc 不可读（如受限容器）：尽力而为，不阻塞
-  }
-  for (const raw of entries) {
-    if (!/^\d+$/.test(raw)) continue;
-    let cmd;
-    try {
-      cmd = fs.readFileSync(`/proc/${raw}/cmdline`, 'utf8');
-    } catch {
-      continue; // 进程瞬时退出
-    }
-    if (!cmd.includes('omp') || !cmd.includes('--resume')) continue;
-    // 排除本工具自身进程（node .../bin/agentlray.js 或 agent-lray 垫片）
-    if (cmd.includes('bin/agentlray.js') || cmd.includes('agent-lray')) continue;
-    if (cmd.includes(sessionFilePath) || cmd.includes(sessionId)) return Number(raw);
-  }
-  return null;
-}
-
-// 收尾续跑后，在 slug 目录里找本次运行期间新建、且 parentSession 指向目标 id 的派生会话。
-function findOmpFork(slugDir, targetId, filesBefore) {
-  let entries;
-  try {
-    entries = fs.readdirSync(slugDir, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-  for (const e of entries) {
-    if (!e.isFile() || !e.name.endsWith('.jsonl') || filesBefore.has(e.name)) continue;
-    let record = null;
-    try {
-      const text = fs.readFileSync(path.join(slugDir, e.name), 'utf8');
-      for (const line of text.split('\n')) {
-        if (!line.trim()) continue;
-        const r = JSON.parse(line);
-        if (r.type === 'session') {
-          record = r;
-          break;
-        }
-      }
-    } catch {
-      continue;
-    }
-    if (record && record.parentSession === targetId && record.id !== targetId) return record.id;
-  }
-  return null;
-}
-
-// 忙等：CLI 进程内同步睡眠（不引入额外依赖）。
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// 自动结束"以 --resume 持有目标 omp 会话"的运行中实例，以便安全地同 id 续跑。
-// 优先 SIGTERM（让 OMP 有机会收尾、写 session_exit），等待退出；超时 SIGKILL 兜底。
-// 返回是否已确认进程不再存活。
-function terminateOmpHolder(pid, { termWaitMs = 8000, killWaitMs = 3000 } = {}) {
-  // Windows 无 SIGTERM/SIGKILL 语义、无 /proc 僵尸判定，暂不支持自动终止；
-  // 打印提示并视为未确认退出（返回 false），由调用方走「无法自动终止」路径。
-  if (process.platform !== 'linux') {
-    process.stderr.write(
-      'agentlray sessions: 注意：Windows 暂不支持自动终止 omp 持有实例，请手动结束。\n'
-    );
-    return false;
-  }
-  const alive = () => {
-    // 仅用 process.kill(pid, 0) 探测进程存活。僵尸进程（STAT=Z，已终止仅待父
-    // 进程回收）对 kill(pid,0) 仍返回存活，会误判为仍持有会话资源导致同 id 续跑
-    // 被拒——故 Linux 分支保留 /proc/<pid>/stat 的 Z 态判定（本函数仅 Linux 执行）。
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return false;
-    }
-    try {
-      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const idx = stat.indexOf(') ');
-      if (idx !== -1 && stat[idx + 2] === 'Z') return false; // 僵尸：视为已退出
-    } catch {
-      // 竞态：进程刚好消失
-    }
-    return true;
-  };
-  if (!alive()) return true;
-  try {
-    process.kill(pid, 'SIGTERM');
-  } catch {
-    // 竞态：刚好退出；交由下方 alive 判定
-  }
-  const STEP = 200;
-  let waited = 0;
-  while (alive() && waited < termWaitMs) {
-    sleepSync(STEP);
-    waited += STEP;
-  }
-  if (alive()) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // 同上，竞态退出
-    }
-    waited = 0;
-    while (alive() && waited < killWaitMs) {
-      sleepSync(STEP);
-      waited += STEP;
-    }
-  }
-  return !alive();
-}
+// omp 特有的续跑治理（检测运行中持有实例 / 自动终止 / 派生兜底）已迁入
+// lib/platforms/omp-resume-impl.js，经 builtin/omp.js 的 resumeHooks 对 CLI 暴露；
+// 此处不再保留任何 omp 专属逻辑。
 
 // --- list ---
 
@@ -357,17 +235,21 @@ function renderSessionsTable(shown, withAgent = false) {
 }
 
 async function listSinglePlatform(opts, json, id) {
-  // openclaw 未传 --agent：默认查该平台全部 agents 的合并会话（展平为一份，
+  // needsAgent 平台未传 --agent：默认查该平台全部 agents 的合并会话（展平为一份，
   // 每条带 agent 来源；过滤/分页在合并集上全局生效）。
-  const allAgents = id === 'openclaw' && !opts.agent;
+  const platform = PLATFORMS[id];
+  const allAgents = Boolean(platform && platform.needsAgent && !opts.agent);
   let sessions = [];
   let total = 0;
   let offset = 0;
   let limit = null;
 
   if (allAgents) {
-    // 走共享枚举层（lib/session-list.js）：扁平合并全部 agents，过滤/分页在合并集上全局生效。
-    const all = await listOpenclawSessionsFlat({ dir: opts.dir, includeArchived: false });
+    // 走平台适配器 listAllAgents hook：扁平合并全部 agents（同 lib/session-list.js
+    // listOpenclawSessionsFlat 的委托实现），过滤/分页在合并集上全局生效。
+    const all = await platform.listAllAgents(resolveDir(opts.dir, platform.defaultDir()), {
+      includeArchived: false,
+    });
     const paged = filterAndPage(all, opts);
     sessions = paged.shown;
     total = paged.total;
@@ -500,14 +382,16 @@ async function showSession(opts, json) {
     if (opts.agent) {
       payload = await platform.getSession(dir, opts.id, { agent: opts.agent });
       foundAgent = opts.agent;
-    } else {
-      const across = await getSessionAcrossAgents(dir, opts.id);
+    } else if (typeof platform.getSessionAcrossAgents === 'function') {
+      const across = await platform.getSessionAcrossAgents(dir, opts.id);
       if (across) {
         payload = { session: across.session, messages: across.messages };
         foundAgent = across.agent;
       } else {
         payload = null;
       }
+    } else {
+      payload = null;
     }
   } else {
     payload = await platform.getSession(dir, opts.id);
@@ -636,38 +520,21 @@ async function resumeSession(opts, json) {
     throw new Error(`Session cwd 不存在：${cwd}（目录已被移除或未在会话记录中保留），无法在该目录续跑。`);
   }
 
-  // 统一语义：同 id 续跑、不接受派生。OMP 目标若正被"运行中的 omp 实例"以
-  // --resume 持有（会话非空闲），OMP 续跑必然派生；--run 直接拒绝并提示先结束
-  // 该实例。早前"先追加 session_exit 收尾"方案已实证无效（非空闲是进程级状态）。
+  // 平台声明 resumeHooks（P2 起 omp 的续跑治理迁于此）：prepare 在续跑前做
+  // 平台专属的自查/清理并返回 { note, livePid, terminated, state }，after 在
+  // 续跑结束后做兜底校验（如 omp 是否仍派生新会话）。未声明 = 无特殊治理。
   let note = null;
   let livePid = null;
   let terminated = false;
-  let slugDir = null;
-  let filesBefore = null;
-  let ompFile = null;
-  if (platform.id === 'omp') {
-    ompFile = await findOmpSessionFile(dir, opts.id);
-    livePid = ompFile ? liveOmpPidForSession(ompFile, opts.id) : null;
-    if (livePid) {
-      if (opts.run) {
-        // 统一语义：同 id 续跑、不接受派生。持有者在则不派生地续跑——先自动
-        // 终止该实例（SIGTERM→SIGKILL 兜底），确认其退出后再续跑。
-        terminated = terminateOmpHolder(livePid);
-        const still = ompFile ? liveOmpPidForSession(ompFile, opts.id) : null;
-        if (!terminated || still) {
-          throw new Error(
-            `无法自动终止运行中的 omp 实例（pid=${livePid}），目标会话仍被持有，不能安全地同 id 续跑（避免 OMP 派生新会话）。请手动结束该实例后再试。`
-          );
-        }
-        note = `已自动终止运行中的 omp 实例（pid=${livePid}），继续同 id 续跑。`;
-      } else {
-        note = `目标 omp 会话正被运行中的 omp 实例（pid=${livePid}）以 --resume 持有：--run 将自动终止该实例后再同 id 续跑（不接受派生）。`;
-        process.stderr.write(`agentlray sessions: 注意：${note}\n`);
-      }
-    }
-    if (opts.run && ompFile) {
-      slugDir = path.dirname(ompFile);
-      filesBefore = new Set(fs.readdirSync(slugDir));
+  let resumeState = null;
+  const resumeHooks = platform.resumeHooks;
+  if (resumeHooks && typeof resumeHooks.prepare === 'function') {
+    const prepared = await resumeHooks.prepare({ run: opts.run, dir, id: opts.id, cwd });
+    if (prepared) {
+      note = prepared.note ?? null;
+      livePid = prepared.livePid ?? null;
+      terminated = Boolean(prepared.terminated);
+      resumeState = prepared.state ?? null;
     }
   }
 
@@ -702,14 +569,11 @@ async function resumeSession(opts, json) {
   if (result.error) throw new Error(`Failed to run '${bin}': ${result.error.message}`);
 
   // 兜底：即便检测到非持有、放行续跑，若 OMP 仍派生了新会话（并发等极端情况），如实提醒。
+  // 平台声明 resumeHooks.after 时委托（omp 派生检测），未声明无此校验。
   let forked = null;
-  if (platform.id === 'omp' && slugDir) {
-    forked = findOmpFork(slugDir, opts.id, filesBefore);
-    if (forked) {
-      process.stderr.write(
-        `agentlray sessions: 警告：OMP 仍派生了新会话 ${forked}（parentSession=${opts.id}），未能做到同 id 续跑。\n`
-      );
-    }
+  if (resumeHooks && typeof resumeHooks.after === 'function') {
+    const after = await resumeHooks.after({ run: opts.run, id: opts.id, state: resumeState });
+    if (after) forked = after.forked ?? null;
   }
 
   if (json) {

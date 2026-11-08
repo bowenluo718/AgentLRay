@@ -132,7 +132,17 @@ async function startCustomServer(t) {
 
   const port = 20000 + Math.floor(Math.random() * 10000);
   const child = spawn(process.execPath, [path.join(REPO_ROOT, 'server.js')], {
-    env: { ...process.env, HOME: home, PORT: String(port), HOST: '127.0.0.1', SMOKE_COPILOT_DIR: dataDir },
+    // setup-env.cjs 会全局注入空的 AGENTLRAY_PLATFORMS_DIR，须覆盖为临时 HOME 下的
+    // 平台目录，使本测试落盘的自定义适配器可加载。
+    env: {
+      ...process.env,
+      HOME: home,
+      AGENTLRAY_PLATFORMS_DIR: platDir,
+      AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      PORT: String(port),
+      HOST: '127.0.0.1',
+      SMOKE_COPILOT_DIR: dataDir,
+    },
     cwd: REPO_ROOT,
     stdio: ['ignore', 'ignore', 'pipe'],
   });
@@ -191,7 +201,13 @@ async function readPlatformInfo(home, dataDir) {
   const res = spawnSync(process.execPath, ['-e', script], {
     encoding: 'utf8',
     cwd: REPO_ROOT,
-    env: { ...process.env, HOME: home, SMOKE_COPILOT_DIR: dataDir },
+    env: {
+      ...process.env,
+      HOME: home,
+      AGENTLRAY_PLATFORMS_DIR: path.join(home, '.agentlray', 'platforms'),
+      AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      SMOKE_COPILOT_DIR: dataDir,
+    },
   });
   assert.equal(res.status, 0, `listPlatformInfo 子进程失败: ${res.stderr}`);
   return JSON.parse(res.stdout);
@@ -216,39 +232,76 @@ test('P1 服务端表面：自定义平台 /api/platforms、列表/详情/export
     assert.equal(got.filter((p) => p.builtin && !p.broken).length, 7, '内置 7 平台保持');
 
     const smoke = got.find((p) => p.id === 'smoke-copilot');
-    assert.deepEqual(smoke, {
-      id: 'smoke-copilot',
-      label: 'Smoke Copilot',
-      builtin: false,
-      capabilities: {
-        list: true,
-        find: true,
-        parse: true,
-        getSession: true,
-        collectFiles: false,
-        watchParse: false,
-        needsAgent: false,
+    assert.deepEqual(
+      smoke,
+      {
+        id: 'smoke-copilot',
+        label: 'Smoke Copilot',
+        builtin: false,
+        origin: 'user',
+        overrides: null,
+        replacementPending: false,
+        mounted: true,
+        configuredMounted: true,
+        restartRequired: false,
+        capabilities: {
+          list: true,
+          find: true,
+          parse: true,
+          getSession: true,
+          collectFiles: false,
+          watchParse: false,
+          needsAgent: false,
+          listForAgent: false,
+          listAllAgents: false,
+          listAgents: false,
+          children: false,
+          spawn: false,
+          watch: false,
+          search: false,
+          insights: false,
+          prompts: false,
+          toolAudit: false,
+          backup: false,
+          inspect: false,
+          otlp: false,
+        },
+        resume: true,
+        create: false,
+        bin: null,
+        dirSettingKey: null,
+        dirSettingLabel: null,
+        dirSettingHint: null,
+        dirParam: null,
+        color: null,
+        broken: false,
       },
-      resume: true,
-      create: false,
-      broken: false,
-    });
+      '自定义正常适配器的 v2 平台信息形状'
+    );
 
     const broken = got.find((p) => p.broken === true);
     assert.ok(broken, 'broken 条目可见');
     assert.equal(broken.label, null);
     assert.equal(broken.builtin, false);
-    assert.deepEqual(broken.capabilities, {
-      list: false,
-      find: false,
-      parse: false,
-      getSession: false,
-      collectFiles: false,
-      watchParse: false,
-      needsAgent: false,
-    });
+    assert.equal(broken.mounted, false);
+    assert.equal(broken.configuredMounted, false);
+    assert.equal(broken.origin, 'user');
+    assert.deepEqual(
+      broken.capabilities,
+      {
+        list: false,
+        find: false,
+        parse: false,
+        getSession: false,
+        collectFiles: false,
+        watchParse: false,
+        needsAgent: false,
+      },
+      'broken 条目仅保留 7 个基础能力字段（v2 全 false 位不展开）'
+    );
     assert.equal(broken.resume, false);
     assert.equal(broken.create, false);
+    assert.equal(broken.bin, null);
     assert.match(broken.error, /boom from broken/);
   });
 
@@ -385,7 +438,15 @@ module.exports = {
 
   const port = 20000 + Math.floor(Math.random() * 10000);
   const child = spawn(process.execPath, [path.join(REPO_ROOT, 'server.js')], {
-    env: { ...process.env, HOME: home, PORT: String(port), HOST: '127.0.0.1', PROMPTS_DIR: dataDir },
+    env: {
+      ...process.env,
+      HOME: home,
+      AGENTLRAY_PLATFORMS_DIR: platDir,
+      AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, 'project-platforms'),
+      PORT: String(port),
+      HOST: '127.0.0.1',
+      PROMPTS_DIR: dataDir,
+    },
     cwd: REPO_ROOT,
     stdio: ['ignore', 'ignore', 'pipe'],
   });

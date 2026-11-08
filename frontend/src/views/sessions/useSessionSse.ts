@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { watchUrl } from '@/api/client';
 import type { SessionDetail, SessionMessage, SessionMeta, SessionSummary } from '@/api/types';
 import { DEMO } from '@/demo/flag';
-import { dirForPlatform, useAppStore } from '@/store';
+import { dirBySettingKey, platformInfoById, useAppStore } from '@/store';
 
 export type SseStatus = 'off' | 'connecting' | 'live' | 'error';
 
@@ -22,12 +22,13 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
   const settings = useAppStore((s) => s.settings);
   const autoRefresh = useAppStore((s) => s.autoRefresh);
   const viewingChildAgent = useAppStore((s) => s.viewingChildAgent);
+  const platforms = useAppStore((s) => s.platforms);
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<SseStatus>('off');
   const onNewRef = useRef(onNewMessages);
   onNewRef.current = onNewMessages;
 
-  const dir = dirForPlatform(settings, platform);
+  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform));
   // Demo mode has no backend to stream from — the toggle stays visibly off.
   const enabled = !DEMO && autoRefresh && !!sessionId && !viewingChildAgent;
 

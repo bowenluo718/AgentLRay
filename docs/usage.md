@@ -233,9 +233,19 @@ Session status (awaiting-input / working / waiting / stopped) depends on three t
 
 ## Custom platforms
 
-AgentLRay lets you plug in extra platforms without changing the source: write a JavaScript **platform adapter** and drop it into `~/.agentlray/platforms/`. On startup the loader validates each file and merges valid adapters into the platform registry; every generic surface (session routes, search, prompts, tool audit, watch, export, CLI) then resolves the new platform by capability bit. Invalid or conflicting files are marked **broken** (visible in the UI and on `platform list`) and never break startup.
+AgentLRay lets you plug in extra platforms without changing the source: write a JavaScript **platform adapter** and drop it into a platform directory. On startup the loader validates each file and merges valid adapters into the platform registry; every generic surface (session routes, search, prompts, tool audit, watch, export, CLI) then resolves the new platform by capability bit. Invalid or conflicting files are marked **broken** (visible in the UI and on `platform list`) and never break startup.
 
-**Enable / disable:** a file present in `~/.agentlray/platforms/*.js` is enabled; remove or move it to disable. There is no per-platform switch. Files load in alphabetical order. An `id` that collides with a built-in or an earlier custom adapter marks that file broken. Set `AGENTLRAY_NO_PLUGINS=1` to skip loading entirely as an escape hatch.
+**Three sources**, loaded in order (later ones may override earlier ones for the same `id` when a replacement is declared — see below):
+
+| Source | Directory | Origin |
+|---|---|---|
+| package (built-in) | shipped in the package | `package` |
+| project | `$AGENTLRAY_PROJECT_PLATFORMS_DIR` or the repo's `platforms/` | `project` |
+| user | `$AGENTLRAY_PLATFORMS_DIR` or `~/.agentlray/platforms/` | `user` |
+
+**Enable / disable:** a file present in a platform directory (except `package`) is enabled; remove or move it to disable. There is no per-platform switch. Files load in alphabetical order. An `id` that collides with a built-in or an earlier custom adapter marks that file broken. Set `AGENTLRAY_NO_PLUGINS=1` to skip both project and user sources entirely (only package remains) as an escape hatch.
+
+**Replacing a built-in (declare intent first):** a project or user adapter whose `id` collides with a built-in is only allowed to override it when that replacement is *declared* — either in the user `settings.json` (`platforms.replaced`) via `platform replace <id>`, or in the project directory's `platforms/manifest.json` `replaces` array (merged with `settings.replaced`; a missing/corrupt manifest is ignored). Without a declaration the same-id file is marked broken with a hint to run `platform export <id>` / `platform replace <id>`. Once declared but not (yet) provided by a file, the built-in stays active and is marked `replacementPending`.
 
 **Required contract** (validated by the loader): `id` (`^[a-z0-9][a-z0-9-]*$`), `label` (string), `defaultDir()` → session root, `parse(file)` → `{ session, messages }`, `getSession(dir, id)` → `{ session, messages } | null`; `list(dir)` → newest-first `SessionSummary[]` (the loader tolerates `list: null` like OpenClaw, but a listing platform needs it).
 
@@ -254,11 +264,19 @@ AgentLRay lets you plug in extra platforms without changing the source: write a 
 **CLI:**
 
 ```bash
-agentlray platform list                 # built-in + custom + broken, same source as GET /api/platforms
-agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json   # same checks as the loader, dry-run
+agentlray platform list                                                     # built-in + project + custom + broken, same source as GET /api/platforms
+agentlray platform list --json                                              # + origin/mounted/configuredMounted/restartRequired per entry
+agentlray platform validate ~/.agentlray/platforms/my-copilot.js --json     # same checks as the loader, dry-run
+agentlray platform mount <id> | unmount <id>                                # enable/disable a platform (writes settings.platforms.disabled, restart to take effect)
+agentlray platform replace <id> | unreplace <id>                            # declare/undo replacement of a built-in (writes settings.platforms.replaced, restart to take effect)
+agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]   # migrate package/project platform to a user thin adapter
 ```
 
-`platform validate` reuses the loader's own validation, then calls the adapter's real `list(defaultDir())` and reports the session count and the first session id — passing it means the platform is actually listable. `list --json` prints `{schemaVersion:1, kind:"platforms", platforms:[…]}`; `validate --json` on success prints `{schemaVersion:1, kind:"platform-validate", ok:true, platform:{id,label}, sessionCount, firstId, note}`.
+`platform validate` reuses the loader's own validation, then calls the adapter's real `list(defaultDir())` and reports the session count and the first session id — passing it means the platform is actually listable. `list --json` prints `{schemaVersion:1, kind:"platforms", platforms:[…]}` (each entry carries `origin`, `mounted`, `configuredMounted`, `restartRequired`); `validate --json` on success prints `{schemaVersion:1, kind:"platform-validate", ok:true, platform:{id,label}, sessionCount, firstId, note}`.
+
+`mount` / `unmount` write `~/.agentlray/settings.json` (`platforms.disabled`) and take effect after a restart — the last queryable platform cannot be unmounted (errors `last-platform`). `replace` / `unreplace` write `platforms.replaced`; `unreplace` warns if a same-id project/user file still exists (it would be broken on the next load).
+
+**`platform export`** migrates a package (built-in) or project platform to a **user thin adapter** in the platform directory (default `~/.agentlray/platforms`, override with `--out <dir>` or `AGENTLRAY_PLATFORMS_DIR`): it writes `<id>.js` plus, by default, adds the id to `settings.replaced` (`--no-replace` skips that) and removes it from `settings.disabled` if present. The generated adapter is a thin wrapper that resolves the real implementation via `AGENTLRAY_PKG_ROOT` (set by the loader to the package root), so a package upgrade follows automatically. Options: `--force` overwrites an existing file; `--out <dir>` targets a directory; `--json` prints `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`. A source already `user`-origin is refused (`export-user-origin`); conflicts error `export-exists` (use `--force`). Because the adapter runs with your user permissions, the CLI prints a trust note — only deliver trusted adapter files.
 
 **Web UI:** built-in and custom platforms appear in the same platform bar (both React and legacy UI). A custom platform whose file fails to load shows a broken badge with its error and takes no part in queries.
 
