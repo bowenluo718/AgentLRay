@@ -87,7 +87,7 @@ A global install (`npm i -g @bowenluo718/agent-lray`) exposes the same launcher 
 **Option 2 — npx straight from GitHub** (works today, no clone)
 
 ```bash
-npx github:alloevil/AgentLRay
+npx github:bowenluo718/AgentLRay
 ```
 
 The first run builds the web UI locally (takes a minute); later runs reuse the cached install.
@@ -95,7 +95,7 @@ The first run builds the web UI locally (takes a minute); later runs reuse the c
 **Option 3 — from source**
 
 ```bash
-git clone https://github.com/alloevil/AgentLRay.git
+git clone https://github.com/bowenluo718/AgentLRay.git
 cd AgentLRay
 npm install               # also builds the web UI on first install
 npm start
@@ -368,7 +368,7 @@ Core log inspection and offline `inspect` do not call a model or upload logs. Op
 No. CLI coding agents already write complete session logs to disk, and AgentLRay just reads them. There is no SDK to add to your code and no wrapper command to run your agent under. A default install needs no configuration either, because the default directories listed under [Configuration](#configuration) are used unless you override them in the settings panel or through environment variables such as `CLAUDE_CODE_DIR`.
 
 **How do I try it without installing anything?**
-Open <https://alloevil.github.io/AgentLRay/>. That GitHub Pages deployment is the real React UI, built by `.github/workflows/pages.yml`, running against `frontend/src/demo/fixtures.json` — API fixtures generated from the synthetic sample logs committed under `frontend/demo/sample-logs` by `scripts/build-demo-fixtures.mjs`. It contains no real user sessions, so treat it as a UI tour rather than as data.
+Open <https://bowenluo718.github.io/AgentLRay/>. That GitHub Pages deployment is the real React UI, built by `.github/workflows/pages.yml`, running against `frontend/src/demo/fixtures.json` — API fixtures generated from the synthetic sample logs committed under `frontend/demo/sample-logs` by `scripts/build-demo-fixtures.mjs`. It contains no real user sessions, so treat it as a UI tour rather than as data.
 
 **How do I add support for a log format that is not listed?**
 Two files: write an adapter at `lib/platforms/<name>.js` implementing list / find / parse / normalize for that format, then register it in the `PLATFORMS` table in `lib/platforms/index.js`. Every generic route resolves platforms through that registry, so no other file needs to change. See [Development](#development).

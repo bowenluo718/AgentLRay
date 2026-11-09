@@ -60,7 +60,7 @@ node scripts/demo-diagnostics.cjs
 
 ## 发布与托管演示的后续
 
-该功能版本以 [v1.18.0](https://github.com/alloevil/AgentLRay/releases/tag/v1.18.0) 形式发布。其 [Publish 运行](https://github.com/alloevil/AgentLRay/actions/runs/35880348489)成功，并附带包 tarball 与 provenance。从 `https://registry.npmjs.org` 的隔离安装返回 CLI 版本 `1.18.0`；所安装的服务器提供了一条带规范化状态与打包复查 UI 的合成 OMP 失败。初始 registry 查询先于 npm 处理并返回 404；仅在 registry 与安装可用后才记录成功。
+该功能版本以 [v1.18.0](https://github.com/bowenluo718/AgentLRay/releases/tag/v1.18.0) 形式发布。其 [Publish 运行](https://github.com/bowenluo718/AgentLRay/actions/runs/35880348489)成功，并附带包 tarball 与 provenance。从 `https://registry.npmjs.org` 的隔离安装返回 CLI 版本 `1.18.0`；所安装的服务器提供了一条带规范化状态与打包复查 UI 的合成 OMP 失败。初始 registry 查询先于 npm 处理并返回 404；仅在 registry 与安装可用后才记录成功。
 
 一个独立的托管演示增量加入了明确为合成的 `0199demo-diagnostics` 会话与 **Try diagnostics** 入口，保留默认的 Claude demo 与既有样例。原始解析器输出与打包消息经测试断言相等；Node 测试总数现为 216 个通过（另加两个托管 fixture 测试）。上述 214 的计数记录的是发布验收，而非更新后的套件规模。
 

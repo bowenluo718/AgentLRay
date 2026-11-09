@@ -45,11 +45,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alloevil/AgentLRay.git"
+    "url": "git+https://github.com/bowenluo718/AgentLRay.git"
   },
-  "homepage": "https://github.com/alloevil/AgentLRay#readme",
+  "homepage": "https://github.com/bowenluo718/AgentLRay#readme",
   "bugs": {
-    "url": "https://github.com/alloevil/AgentLRay/issues"
+    "url": "https://github.com/bowenluo718/AgentLRay/issues"
   },
   "license": "MIT",
   "dependencies": {

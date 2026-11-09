@@ -60,7 +60,7 @@ The preceding private, already-inspected regression set had 30 sessions and 9,07
 
 ## Release and hosted walkthrough follow-up
 
-The feature release is available as [v1.18.0](https://github.com/alloevil/AgentLRay/releases/tag/v1.18.0). Its [Publish run](https://github.com/alloevil/AgentLRay/actions/runs/35880348489) succeeded with a package tarball and provenance attached. An isolated installation from `https://registry.npmjs.org` returned CLI version `1.18.0`; the installed server served a synthetic OMP failure with normalized status and the bundled review UI. The initial registry query preceded npm processing and returned 404; success was recorded only after the registry and installation became available.
+The feature release is available as [v1.18.0](https://github.com/bowenluo718/AgentLRay/releases/tag/v1.18.0). Its [Publish run](https://github.com/bowenluo718/AgentLRay/actions/runs/35880348489) succeeded with a package tarball and provenance attached. An isolated installation from `https://registry.npmjs.org` returned CLI version `1.18.0`; the installed server served a synthetic OMP failure with normalized status and the bundled review UI. The initial registry query preceded npm processing and returned 404; success was recorded only after the registry and installation became available.
 
 A separate hosted-demo increment adds the explicitly synthetic `0199demo-diagnostics` session and a **Try diagnostics** entry, leaving the default Claude demo and previous samples intact. Raw parser output and bundled messages are asserted equal by tests; 216 total Node tests now pass (two additional hosted-fixture tests). The existing 214-test count above records the release acceptance, not the updated suite size.
 

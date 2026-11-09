@@ -4,7 +4,7 @@ AgentLRay is a local-first web dashboard that reads and visualizes the session l
 
 ## What it is
 
-AgentLRay is a single Node.js + Express server plus a React/Vite UI that points at the session-log directories your existing agent CLIs already write to (`~/.claude/projects`, `~/.codex/sessions`, `~/.openclaw/agents`, `~/.omp/agent/sessions`, `~/.dsh/sessions`, `~/.gemini/tmp`, `~/.hermes/state.db`) and renders them as browsable sessions. It is a reader, not a tracing SDK: there is nothing to instrument, no API key, no hosted backend, and no data leaves the machine it runs on. Seven different on-disk formats are normalized into one model, so tool calls are paired with their results, token usage and cost are summed per user turn, per-turn time is split into model inference versus tool execution, real human prompts are extracted with tool results and slash-command echoes filtered out, and one search box queries every platform at once. The published GitHub Pages site at https://alloevil.github.io/AgentLRay/ is the same React UI running on the synthetic sample logs committed under `frontend/demo/sample-logs`, so it can be evaluated without installing anything.
+AgentLRay is a single Node.js + Express server plus a React/Vite UI that points at the session-log directories your existing agent CLIs already write to (`~/.claude/projects`, `~/.codex/sessions`, `~/.openclaw/agents`, `~/.omp/agent/sessions`, `~/.dsh/sessions`, `~/.gemini/tmp`, `~/.hermes/state.db`) and renders them as browsable sessions. It is a reader, not a tracing SDK: there is nothing to instrument, no API key, no hosted backend, and no data leaves the machine it runs on. Seven different on-disk formats are normalized into one model, so tool calls are paired with their results, token usage and cost are summed per user turn, per-turn time is split into model inference versus tool execution, real human prompts are extracted with tool results and slash-command echoes filtered out, and one search box queries every platform at once. The published GitHub Pages site at https://bowenluo718.github.io/AgentLRay/ is the same React UI running on the synthetic sample logs committed under `frontend/demo/sample-logs`, so it can be evaluated without installing anything.
 
 ## Install
 
@@ -25,13 +25,13 @@ agentlray
 Run straight from GitHub without cloning (the first run builds the web UI locally):
 
 ```bash
-npx github:alloevil/AgentLRay
+npx github:bowenluo718/AgentLRay
 ```
 
 From source:
 
 ```bash
-git clone https://github.com/alloevil/AgentLRay.git
+git clone https://github.com/bowenluo718/AgentLRay.git
 cd AgentLRay
 npm install               # also builds the web UI on first install
 npm start
@@ -66,9 +66,9 @@ curl 'http://localhost:3800/api/search?platform=all&q=refactor'
 - **7 agent log formats have a registered adapter.** The number is the count of keys in the `PLATFORMS` registry in `lib/platforms/index.js`, which is the single dispatch table that every session route, search, watch, insights, prompt and export path resolves through. Reproduce from a clone with
   `node -e 'console.log(Object.keys(require("./lib/platforms/index.js").PLATFORMS).join(", "))'`,
   which prints `openclaw, codex, claude-code, omp, dsh, gemini, hermes`.
-  Evidence: https://github.com/alloevil/AgentLRay/blob/master/lib/platforms/index.js
+  Evidence: https://github.com/bowenluo718/AgentLRay/blob/master/lib/platforms/index.js
 - **The test suite never reads your real session logs.** The tests in `test/` start their own server on a random port with `HOME` and every platform directory pointed at a throwaway copy of `test/fixtures/home`. Reproduce with `npm ci && npm test`, which uses Node's built-in test runner and no extra dependencies. CI runs the same two commands on Node 22 for every push and pull request to `master`.
-  Evidence: https://github.com/alloevil/AgentLRay/tree/master/test and https://github.com/alloevil/AgentLRay/blob/master/.github/workflows/test.yml
+  Evidence: https://github.com/bowenluo718/AgentLRay/tree/master/test and https://github.com/bowenluo718/AgentLRay/blob/master/.github/workflows/test.yml
 
 No performance, accuracy or benchmark numbers are published for AgentLRay, because none are measured in the repository. Any such figure quoted elsewhere does not come from this project.
 
@@ -105,7 +105,7 @@ No. AgentLRay is a local Node.js server that reads files from your own disk and 
 No, and that is the point: CLI coding agents already write complete session logs to disk, and AgentLRay just reads them. There is no SDK to add to your code, no wrapper command to run your agent under, and no configuration needed for a default install, because the default directories (`~/.openclaw/agents`, `~/.codex/sessions`, `~/.claude/projects`, `~/.hermes`, `~/.omp/agent/sessions`, `~/.dsh/sessions`, `~/.gemini/tmp`) are used unless you override them in the settings panel or through environment variables such as `CLAUDE_CODE_DIR`.
 
 **How do I try it without installing anything?**
-Open https://alloevil.github.io/AgentLRay/. That GitHub Pages deployment is the real React UI, built by `.github/workflows/pages.yml`, running against the synthetic sample logs committed under `frontend/demo/sample-logs`. It contains no real user sessions, so treat it as a UI tour rather than as data. To use it on your own logs, run `npx @bowenluo718/agent-lray` and open http://localhost:3800.
+Open https://bowenluo718.github.io/AgentLRay/. That GitHub Pages deployment is the real React UI, built by `.github/workflows/pages.yml`, running against the synthetic sample logs committed under `frontend/demo/sample-logs`. It contains no real user sessions, so treat it as a UI tour rather than as data. To use it on your own logs, run `npx @bowenluo718/agent-lray` and open http://localhost:3800.
 
 **How do I add support for a log format that is not listed?**
 It takes two files. Write one adapter at `lib/platforms/<name>.js` implementing list / find / parse / normalize for that format, using the metadata cache, normalized-message factory and session sort provided by `lib/platforms/shared.js`, then register it in the `PLATFORMS` table in `lib/platforms/index.js`. The generic session routes, search, watch (SSE tail), insights, prompts, tool audit, OTLP and Markdown/HTML export all resolve platforms through that registry, so no other file needs to change.

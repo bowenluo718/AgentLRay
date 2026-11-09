@@ -8,9 +8,9 @@
   <img src="assets/readme/hero.svg" width="100%" alt="AgentLRay 执行证据：检查通过后又发生修改，下一次检查仍未知。概念时间线，不是任务通过的判定。">
 </p>
 
-[**在线体验**](https://alloevil.github.io/AgentLRay/) · [快速开始](#快速开始) · [证据与边界](#证据与边界) · [路线图](docs/ROADMAP.md) · [English](README.md)
+[**在线体验**](https://bowenluo718.github.io/AgentLRay/) · [快速开始](#快速开始) · [证据与边界](#证据与边界) · [路线图](docs/ROADMAP.md) · [English](README.md)
 
-[![测试](https://img.shields.io/github/actions/workflow/status/alloevil/AgentLRay/test.yml?label=tests)](https://github.com/alloevil/AgentLRay/actions/workflows/test.yml)
+[![测试](https://img.shields.io/github/actions/workflow/status/bowenluo718/AgentLRay/test.yml?label=tests)](https://github.com/bowenluo718/AgentLRay/actions/workflows/test.yml)
 [![npm](https://img.shields.io/npm/v/@bowenluo718/agent-lray)](https://www.npmjs.com/package/@bowenluo718/agent-lray)
 ![Node.js](https://img.shields.io/badge/Node.js-22.13+-339933)
 [![MIT 协议](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -29,7 +29,7 @@ AgentLRay 把这些记录放在一起，并提供原始调用与结果的跳转�
 
 ## 快速开始
 
-**无需安装：**打开[在线 Demo](https://alloevil.github.io/AgentLRay/)，点击 **体验自动体检 / Try diagnostics**。合成案例把 **7 条待闭合失败记录归为 2 个事件**，每条原始证据仍可访问。示例不含真实用户会话。
+**无需安装：**打开[在线 Demo](https://bowenluo718.github.io/AgentLRay/)，点击 **体验自动体检 / Try diagnostics**。合成案例把 **7 条待闭合失败记录归为 2 个事件**，每条原始证据仍可访问。示例不含真实用户会话。
 
 **查看自己的日志** — 需要 Node.js ≥ 22.13：
 
@@ -133,7 +133,7 @@ node bin/agentlray.js inspect --platform omp \
 - [使用、配置与 HTTP API](docs/usage.zh-CN.md) · [English reference](docs/usage.md)
 - [离线报告契约](docs/offline-inspect.md) · [自动证据与可选复核](docs/diagnostics.md)
 - [路线图与验收标准](docs/ROADMAP.md) · [实验评测协议](experiments/prospective-study/REMOTE.md)
-- [开发、测试与平台适配](docs/usage.zh-CN.md#开发) · [提交问题](https://github.com/alloevil/AgentLRay/issues)
+- [开发、测试与平台适配](docs/usage.zh-CN.md#开发) · [提交问题](https://github.com/bowenluo718/AgentLRay/issues)
 
 反馈解析或证据问题时，请提供 CLI/版本、预期行为，以及**最小合成或谨慎脱敏的复现样本**。不要上传完整个人会话日志或凭据；可执行的复现比没有上下文的截图更有帮助。
 

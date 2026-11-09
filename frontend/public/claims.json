@@ -1,7 +1,7 @@
 {
   "project": "AgentLRay",
-  "url": "https://alloevil.github.io/AgentLRay/",
-  "repository": "https://github.com/alloevil/AgentLRay",
+  "url": "https://bowenluo718.github.io/AgentLRay/",
+  "repository": "https://github.com/bowenluo718/AgentLRay",
   "updated": "2026-09-08",
   "claims": [
     {
@@ -11,7 +11,7 @@
       "metric": "number of platform adapters registered in the PLATFORMS dispatch table that every session route, search, watch, insights, prompt and export path resolves through",
       "method": "counted the keys of the PLATFORMS object exported by lib/platforms/index.js in the committed source",
       "repro": "node -e 'console.log(Object.keys(require(\"./lib/platforms/index.js\").PLATFORMS).join(\", \"))'",
-      "evidence": "https://github.com/alloevil/AgentLRay/blob/master/lib/platforms/index.js",
+      "evidence": "https://github.com/bowenluo718/AgentLRay/blob/master/lib/platforms/index.js",
       "verified": "2026-09-08"
     }
   ],

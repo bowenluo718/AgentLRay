@@ -1,7 +1,7 @@
 {
   "$comment": "Receipts for every number AgentLRay publishes in prose: the README first screen, the hero figure caption, the FAQ, the roadmap and the CI description. Each claim carries the command that recomputes it from committed artifacts (scripts/claims-receipts.mjs derives the figures from the platform registry, lib/config.js, package.json, the workflow, the demo sample log and the test fixtures) or check.manual with the reason no command can. The readme-no-version receipt keeps version-specific installation details in release notes rather than the README. .github/workflows/claims.yml runs the lot weekly and on every push.",
   "project": "AgentLRay",
-  "repository": "https://github.com/alloevil/AgentLRay",
+  "repository": "https://github.com/bowenluo718/AgentLRay",
   "updated": "2026-09-27",
   "claims": [
     {
@@ -268,7 +268,7 @@
       "value": "required check: test",
       "metric": "the required status checks on the master branch",
       "method": "Branch protection and rulesets are GitHub repository state, not committed files; inspect them with an authenticated GitHub API request. The committed half — that test.yml defines exactly one job, named test — is machine-checked by ci-test-workflow.",
-      "repro": "gh api repos/alloevil/AgentLRay/rulesets (then inspect the active default-branch ruleset by ID)",
+      "repro": "gh api repos/bowenluo718/AgentLRay/rulesets (then inspect the active default-branch ruleset by ID)",
       "evidence": ".github/workflows/test.yml",
       "as_of": "2026-09-13",
       "check": {
@@ -290,11 +290,11 @@
     },
     {
       "id": "hosted-demo-is-synthetic",
-      "claim": "The hosted demo at https://alloevil.github.io/AgentLRay/ is the real React UI running against frontend/src/demo/fixtures.json — synthetic sample data, no real sessions.",
+      "claim": "The hosted demo at https://bowenluo718.github.io/AgentLRay/ is the real React UI running against frontend/src/demo/fixtures.json — synthetic sample data, no real sessions.",
       "value": "synthetic fixtures, not user logs",
       "metric": "what the deployed site actually serves",
       "method": "pages.yml builds frontend/ with VITE_DEMO=1 and deploys frontend/dist, and the fixtures are generated from frontend/demo/sample-logs by scripts/build-demo-fixtures.mjs; whether the deployment currently serves that bundle can only be answered over the network.",
-      "repro": "curl -s https://alloevil.github.io/AgentLRay/ | grep -o '<title>[^<]*'",
+      "repro": "curl -s https://bowenluo718.github.io/AgentLRay/ | grep -o '<title>[^<]*'",
       "evidence": "frontend/src/demo/fixtures.json",
       "as_of": "2026-09-13",
       "check": {

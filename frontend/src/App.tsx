@@ -107,7 +107,7 @@ export default function App() {
               <Copy className="h-3 w-3" />
             </button>
             <a
-              href="https://github.com/alloevil/AgentLRay"
+              href="https://github.com/bowenluo718/AgentLRay"
               target="_blank"
               rel="noreferrer"
               className="underline underline-offset-2 hover:text-foreground"
@@ -119,7 +119,7 @@ export default function App() {
                 <summary className="cursor-pointer text-center">演示步骤 / Guide: 7 failure records → 2 events</summary>
                 <p>自动整理重复失败、后续候选和调用结果缺口，无需人工标注。6 次同参 edit 失败 + 1 次搜索失败；早先测试通过只恢复那次测试，不验证后续修改。</p>
                 <p>Inspect the automatic facts and original evidence. Human notes are optional and never change the automatic result. This static sample does not append live results.</p>
-                <a href="https://github.com/alloevil/AgentLRay/blob/master/docs/diagnostics.md" target="_blank" rel="noreferrer"
+                <a href="https://github.com/bowenluo718/AgentLRay/blob/master/docs/diagnostics.md" target="_blank" rel="noreferrer"
                   className="underline underline-offset-2">本机使用与判定边界 / Local walkthrough and limits</a>
               </details>
             ) : null}

@@ -84,7 +84,7 @@ npx @bowenluo718/agent-lray --port 3900 --host 127.0.0.1
 **方式二 — 直接从 GitHub 运行 npx**（现在即可用，无需克隆）
 
 ```bash
-npx github:alloevil/AgentLRay
+npx github:bowenluo718/AgentLRay
 ```
 
 首次运行会在本地构建 Web UI（约一分钟），之后会复用缓存。
@@ -92,7 +92,7 @@ npx github:alloevil/AgentLRay
 **方式三 — 源码运行**
 
 ```bash
-git clone https://github.com/alloevil/AgentLRay.git
+git clone https://github.com/bowenluo718/AgentLRay.git
 cd AgentLRay
 npm install               # 首次安装会自动构建 Web UI
 npm start
@@ -356,7 +356,7 @@ OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳�
 不需要。CLI coding agent 本来就把完整会话日志写在磁盘上，AgentLRay 只是读它们。你不需要在代码里接 SDK，也不需要用什么包装命令来启动 agent。默认安装同样无需配置，[配置](#配置) 一节列出的默认目录会直接生效，除非你在设置面板里改，或用 `CLAUDE_CODE_DIR` 之类的环境变量覆盖。
 
 **不装任何东西能先试试吗？**
-可以，打开 <https://alloevil.github.io/AgentLRay/>。这个 GitHub Pages 部署就是真实的 React UI，由 `.github/workflows/pages.yml` 构建，跑在 `frontend/src/demo/fixtures.json` 上 —— 这些 API fixture 由 `scripts/build-demo-fixtures.mjs` 从仓库里提交的合成示例日志 `frontend/demo/sample-logs` 生成。它不含任何真实用户会话，所以请把它当作界面导览，而不是数据。
+可以，打开 <https://bowenluo718.github.io/AgentLRay/>。这个 GitHub Pages 部署就是真实的 React UI，由 `.github/workflows/pages.yml` 构建，跑在 `frontend/src/demo/fixtures.json` 上 —— 这些 API fixture 由 `scripts/build-demo-fixtures.mjs` 从仓库里提交的合成示例日志 `frontend/demo/sample-logs` 生成。它不含任何真实用户会话，所以请把它当作界面导览，而不是数据。
 
 **想支持一个没列出的日志格式怎么办？**
 两个文件：在 `lib/platforms/<name>.js` 写一个适配器，实现该格式的 list / find / parse / normalize，然后在 `lib/platforms/index.js` 的 `PLATFORMS` 表里登记一条。所有通用路由都通过该注册表解析平台，无需改动其他文件。详见 [开发](#开发)。

@@ -8,9 +8,9 @@ Read existing session logs locally. Connect tool calls, background exits and che
   <img src="assets/readme/hero.svg" width="100%" alt="AgentLRay execution evidence: a check passes, an edit follows, and the next check is unknown. Conceptual timeline, not a task-success verdict.">
 </p>
 
-[**Try the demo**](https://alloevil.github.io/AgentLRay/) · [Quick start](#quick-start) · [Evidence & limits](#evidence--limits) · [Roadmap](docs/ROADMAP.md) · [中文](README.zh-CN.md)
+[**Try the demo**](https://bowenluo718.github.io/AgentLRay/) · [Quick start](#quick-start) · [Evidence & limits](#evidence--limits) · [Roadmap](docs/ROADMAP.md) · [中文](README.zh-CN.md)
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/alloevil/AgentLRay/test.yml?label=tests)](https://github.com/alloevil/AgentLRay/actions/workflows/test.yml)
+[![Tests](https://img.shields.io/github/actions/workflow/status/bowenluo718/AgentLRay/test.yml?label=tests)](https://github.com/bowenluo718/AgentLRay/actions/workflows/test.yml)
 [![npm](https://img.shields.io/npm/v/@bowenluo718/agent-lray)](https://www.npmjs.com/package/@bowenluo718/agent-lray)
 ![Node.js](https://img.shields.io/badge/Node.js-22.13+-339933)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -29,7 +29,7 @@ That is the difference between counting green tool results and inspecting execut
 
 ## Quick start
 
-**Without installing:** open the [live demo](https://alloevil.github.io/AgentLRay/) and choose **Try diagnostics / 体验自动体检**. The synthetic walkthrough groups **7 pending failure records into 2 events**, with every source record still accessible. It contains no real user sessions.
+**Without installing:** open the [live demo](https://bowenluo718.github.io/AgentLRay/) and choose **Try diagnostics / 体验自动体检**. The synthetic walkthrough groups **7 pending failure records into 2 events**, with every source record still accessible. It contains no real user sessions.
 
 **With your own logs** — Node.js ≥ 22.13:
 
@@ -133,7 +133,7 @@ Separately invoked research runners can make remote calls with gated sanitized c
 - [Usage, configuration and HTTP API](docs/usage.md) · [中文使用参考](docs/usage.zh-CN.md)
 - [Offline report contract](docs/offline-inspect.md) · [Automatic evidence and optional reviews](docs/diagnostics.md)
 - [Roadmap and acceptance criteria](docs/ROADMAP.md) · [Experimental evaluation protocol](experiments/prospective-study/REMOTE.md)
-- [Development, tests and platform adapters](docs/usage.md#development) · [Report a bug](https://github.com/alloevil/AgentLRay/issues)
+- [Development, tests and platform adapters](docs/usage.md#development) · [Report a bug](https://github.com/bowenluo718/AgentLRay/issues)
 
 For a parser or evidence bug, include the CLI/version, expected behavior and a **minimal synthetic or carefully sanitized reproducer**. Do not post full personal session logs or credentials. Findings with an executable reproducer are more useful than an unexplained screenshot.
 
