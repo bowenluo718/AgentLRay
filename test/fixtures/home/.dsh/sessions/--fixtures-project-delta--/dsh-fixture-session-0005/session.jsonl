@@ -1,0 +1,6 @@
+{"type":"session","version":0,"id":"dsh-fixture-session-0005","createdAt":1768471300000,"cwd":"/fixtures/project-delta","parentSession":"dsh-fixture-session-0001","origin":"subagent","delegationDepth":1}
+{"type":"turn/start","seq":1,"time":1768471300500,"data":{"turn":1}}
+{"type":"user/message","seq":2,"time":1768471301000,"data":{"content":[{"type":"text","text":"fixture: dsh-subagent-needle delta child task"}],"source":{"kind":"user"},"role":"user","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},"surfaceOp":"append"}
+{"type":"step/start","seq":3,"time":1768471302000,"data":{"turn":1,"step":1}}
+{"type":"assistant/message","seq":4,"time":1768471305000,"data":{"turn":1,"step":1,"message":{"role":"assistant","content":[{"type":"text","text":"fixture: subagent done."}],"source":{"kind":"model","provider":"deepseek","model":"deepseek-v4"},"id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},"usage":{"inputTokens":20,"outputTokens":10}},"sourceEventSeqs":[3],"surfaceOp":"append"}
+{"type":"step/end","seq":5,"time":1768471307100,"data":{"turn":1,"step":1}}

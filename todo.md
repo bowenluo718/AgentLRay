@@ -3,9 +3,9 @@
 3. 支持windows系统 done
 4. 根据代码更新文档，添加安装使用说明 done
 5. 支持新建任务 done
-6. 平台解耦：lib/config.js
-7. 自定义平台跟内置平台一致性
-8. 移除会话备份、资产库、legacy等不必要功能。inspect暂时不移除。
+6. 平台解耦：lib/config.js done
+7. 自定义平台跟内置平台一致性 done
+8. 移除会话备份、资产库、legacy等不必要功能。inspect暂时不移除。 done
 9. windows系统omp续跑会话激活状态先关闭再激活处理
 10. 支持远程连接共享会话数据
 

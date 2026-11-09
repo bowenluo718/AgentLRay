@@ -426,6 +426,8 @@ async function _parseDshSessionMetadataRaw(filePath, fileName, sessionDirName) {
     title: firstUserMessage || null,
     cwd: header?.cwd || null,
     origin: header?.origin || null,
+    parentSessionId: header?.parentSession || null,
+    delegationDepth: header?.delegationDepth ?? 0,
     tokens,
     tail: finishTail(tail),
     mtimeMs,
@@ -461,6 +463,16 @@ async function listDshSessions(baseDir) {
   }
 
   const resolved = (await Promise.all(sessions)).filter(Boolean);
+  // dsh 子会话 = header.parentSession 指向本会话的会话（origin:'subagent'，delegation≥1）。
+  const childCountMap = new Map();
+  for (const s of resolved) {
+    if (s.parentSessionId) {
+      childCountMap.set(s.parentSessionId, (childCountMap.get(s.parentSessionId) || 0) + 1);
+    }
+  }
+  for (const s of resolved) {
+    s.childrenCount = childCountMap.get(s.id) || 0;
+  }
   return sortSessionsByStatusGroups(resolved, { nowMs: Date.now(), sortBy: 'timestamp' });
 }
 
@@ -476,6 +488,8 @@ async function parseDshSessionFile(filePath) {
         timestamp: msToIso(header.createdAt),
         version: header.version,
         origin: header.origin || null,
+        parentSessionId: header.parentSession || null,
+        delegationDepth: header.delegationDepth ?? 0,
         model: null,
       };
     }
@@ -488,6 +502,67 @@ async function parseDshSessionFile(filePath) {
   return { session, messages };
 }
 
+// dsh 子会话 = header.parentSession 指向 sessionId 的会话（origin:'subagent'）。
+// 枚举目录下所有会话，筛选 parentSession === sessionId 返回子会话摘要。
+async function listDshChildren(baseDir, sessionId) {
+  const dir = baseDir || DSH_DIR;
+  const sessions = [];
+  let projects;
+  try {
+    projects = await fsp.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  for (const p of projects) {
+    if (!p.isDirectory()) continue;
+    const projDir = path.join(dir, p.name);
+    const sessionDirs = await fsp.readdir(projDir, { withFileTypes: true }).catch(() => []);
+    for (const s of sessionDirs) {
+      if (!s.isDirectory()) continue;
+      const sessionDir = path.join(projDir, s.name);
+      const files = await fsp.readdir(sessionDir, { withFileTypes: true }).catch(() => []);
+      const logFile = chooseDshLogFile(files);
+      if (!logFile) continue;
+      sessions.push(
+        parseDshSessionMetadata(path.join(sessionDir, logFile), logFile, s.name).catch(() => null)
+      );
+    }
+  }
+  const resolved = (await Promise.all(sessions)).filter(Boolean);
+  return resolved
+    .filter((s) => s.parentSessionId === sessionId)
+    .sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')))
+    .map((s) => ({
+      name: s.id,
+      file: s.file,
+      id: s.id,
+      title: s.title || null,
+      timestamp: s.timestamp || null,
+      lastActivity: s.lastActivity || null,
+      messageCount: s.messageCount || 0,
+      toolCallCount: s.toolCallCount || 0,
+    }));
+}
+
+// 读取一个子会话详情。先找文件、校验其 parentSession 属于 sessionId，再按普通会话读取。
+async function getDshChild(baseDir, sessionId, name) {
+  const dir = baseDir || DSH_DIR;
+  const filePath = await findDshSessionFile(dir, name);
+  if (!filePath) return null;
+  let parentSession = null;
+  try {
+    const lines = await readDshSessionLines(filePath);
+    if (lines.length > 0) {
+      const header = parseDshHeader(lines[0]);
+      parentSession = header ? header.parentSession || null : null;
+    }
+  } catch {
+    return null;
+  }
+  if (parentSession !== sessionId) return null;
+  return parseDshSessionFile(filePath);
+}
+
 module.exports = {
   dshLogFileVersion,
   chooseDshLogFile,
@@ -495,6 +570,8 @@ module.exports = {
   extractDshUserPromptText,
   parseDshSessionMetadata,
   listDshSessions,
+  listDshChildren,
+  getDshChild,
   normalizeDshEvents,
   parseDshSessionFile,
   // zstd 格式工具已下沉 shared/zstd，此处重导出保持 parse 模块既有公开面。

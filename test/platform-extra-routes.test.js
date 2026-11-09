@@ -103,16 +103,18 @@ describe('平台等价 P2：通用能力路由', () => {
     // children 路由按 `typeof platform.listChildren === 'function'` 挂载，路由纯数据
     // 层不落 404 区分（未挂载的能力路径会落到 SPA 兜底/静态 404，取决于部署形态）。
     // 这里直接断言 platform info 的能力位（capabilityBits 单一真源）：omp/claude-code/
-    // gemini/hermes 声明 listChildren→children=true；dsh/codex/openclaw 无。
+    // gemini/hermes/dsh 声明 listChildren→children=true；codex/openclaw 无。
     const list = await getJson(srv.base, '/api/platforms');
     const cap = Object.fromEntries(list.filter((p) => !p.broken).map((p) => [p.id, p.capabilities]));
     assert.equal(cap.omp.children, true);
     assert.equal(cap['claude-code'].children, true);
-    // gemini（chats/<id>/ 子目录）与 hermes（parent_session_id 子代理）已补 children。
+    // gemini（chats/<id>/ 子目录）、hermes（parent_session_id）、dsh（header.parentSession
+    // 的 subagent delegation）均已在列表注入 childrenCount 并提供 children 路由。
     assert.equal(cap.gemini.children, true);
     assert.equal(cap.hermes.children, true);
+    assert.equal(cap.dsh.children, true);
     assert.equal(cap.openclaw.children, false);
-    for (const p of ['dsh', 'codex']) {
+    for (const p of ['codex']) {
       assert.equal(cap[p].children, false, `${p} should not advertise children`);
       assert.equal(cap[p].listForAgent, false, `${p} should not advertise listForAgent`);
     }

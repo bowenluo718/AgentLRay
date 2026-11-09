@@ -18,6 +18,7 @@ const DSH_PLAIN = 'dsh-fixture-session-0001';
 const DSH_ZSTD = 'dsh-fixture-session-0002';
 const DSH_V3 = 'dsh-fixture-session-0003'; // legacy v0 + current v3 in one dir
 const DSH_V4 = 'dsh-fixture-session-0004'; // v4-only (current harness default)
+const DSH_CHILD = 'dsh-fixture-session-0005'; // 0001 的子会话（parentSession=0001, origin:subagent）
 
 const ZSTD_OPTS = { params: { [zlib.constants.ZSTD_c_checksumFlag]: 1 } };
 const frame = (text) => zlib.zstdCompressSync(Buffer.from(text, 'utf8'), ZSTD_OPTS);
@@ -213,10 +214,10 @@ describe('sessions: dsh', () => {
 
   it('lists all formats newest-first with metadata, reading the current versioned log', async () => {
     const sessions = await getJson(srv.base, '/api/dsh/sessions');
-    assert.equal(sessions.length, 4);
+    assert.equal(sessions.length, 5);
     assert.deepEqual(
       sessions.map((s) => s.id),
-      [DSH_V4, DSH_V3, DSH_ZSTD, DSH_PLAIN]
+      [DSH_V4, DSH_V3, DSH_ZSTD, DSH_CHILD, DSH_PLAIN]
     );
     const byId = new Map(sessions.map((s) => [s.id, s]));
 
@@ -230,6 +231,14 @@ describe('sessions: dsh', () => {
     assert.ok(plain.firstUserMessage.startsWith('fixture: dsh-needle-delta'));
     assert.deepEqual(plain.topTools, [{ name: 'run_command', count: 1 }]);
     assert.equal(plain.file, 'session.jsonl');
+    // 0001 的子会话 0005（parentSession=0001）→ 1 sub。
+    assert.equal(plain.childrenCount, 1);
+
+    const child = byId.get(DSH_CHILD);
+    assert.equal(child.parentSessionId, DSH_PLAIN);
+    assert.equal(child.delegationDepth, 1);
+    assert.equal(child.origin, 'subagent');
+    assert.equal(child.childrenCount, 0);
 
     const zstd = byId.get(DSH_ZSTD);
     assert.equal(zstd.file, 'session.jsonl.zstd');
@@ -254,6 +263,20 @@ describe('sessions: dsh', () => {
     assert.equal(v4.cwd, '/fixtures/project-zeta');
     assert.equal(v4.userCount, 1);
     assert.ok(v4.firstUserMessage.startsWith('fixture: dsh-v4-needle-zeta'));
+  });
+
+  it('lists a session subagents via /children and serves a child detail', async () => {
+    const children = await getJson(srv.base, `/api/dsh/sessions/${DSH_PLAIN}/children`);
+    assert.equal(children.length, 1);
+    assert.equal(children[0].name, DSH_CHILD);
+    const child = await getJson(srv.base, `/api/dsh/sessions/${DSH_PLAIN}/children/${DSH_CHILD}`);
+    assert.equal(child.session.id, DSH_CHILD);
+    assert.equal(child.session.parentSessionId, DSH_PLAIN);
+    assert.equal(child.session.origin, 'subagent');
+    // 无子会话的主会话：空列表；不属于该主会话的 id 返回 404。
+    assert.deepEqual(await getJson(srv.base, `/api/dsh/sessions/${DSH_V4}/children`), []);
+    const res = await fetch(`${srv.base}/api/dsh/sessions/${DSH_PLAIN}/children/${DSH_V4}`);
+    assert.equal(res.status, 404);
   });
 
   it('serves a v3 session from its current versioned log (dual-file selection)', async () => {
@@ -346,8 +369,8 @@ describe('sessions: dsh', () => {
 
   it('extracts dsh prompts grouped by cwd', async () => {
     const data = await getJson(srv.base, '/api/prompts?platform=dsh');
-    assert.equal(data.totalSessions, 4);
-    assert.equal(data.totalPrompts, 5); // 0001:1 + 0002:1 + 0003:2 + 0004:1
+    assert.equal(data.totalSessions, 5);
+    assert.equal(data.totalPrompts, 6); // 0001:1 + 0002:1 + 0003:2 + 0004:1 + 0005:1
     const dirs = data.groups.map((g) => g.directory).sort();
     assert.deepEqual(dirs, [
       '/fixtures/project-delta',

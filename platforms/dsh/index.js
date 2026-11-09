@@ -4,7 +4,7 @@
 const fsp = require('fs/promises');
 const path = require('path');
 const { session: DSH_DIR } = require('./dirs');
-const { findDshSessionFile, chooseDshLogFile, listDshSessions, normalizeDshEvents, parseDshSessionFile } = require('./parse');
+const { findDshSessionFile, chooseDshLogFile, listDshSessions, listDshChildren, getDshChild, normalizeDshEvents, parseDshSessionFile } = require('./parse');
 const { searchDshFile } = require('./search');
 const { extractDshPrompts } = require('./prompts');
 const { fileBasedGetSession } = require('@agentlray/shared/helpers');
@@ -32,6 +32,9 @@ module.exports = {
   find: findDshSessionFile,
   parse: parseDshSessionFile,
   getSession: fileBasedGetSession(findDshSessionFile, parseDshSessionFile),
+  // dsh 子会话 = header.parentSession 指向本会话的会话（origin:'subagent'，delegation≥1）。
+  listChildren: (dir, sessionId) => listDshChildren(dir, sessionId),
+  getChild: (dir, sessionId, name) => getDshChild(dir, sessionId, name),
   collectFiles: async (dir) => {
     const files = [];
     // dsh sessions live at <dir>/<projectKey>/<sessionId>/<versioned durable
