@@ -12,6 +12,8 @@ output/
 .playwright-cli/
 *.tgz
 
+!.github/
+
 # 测试夹具目录 test/fixtures/home 必须整体入库（含各平台点目录与 dsh 版本化夹具），
 # 不能因上面的 .*/ 点目录规则被排除。
 !test/fixtures/home/

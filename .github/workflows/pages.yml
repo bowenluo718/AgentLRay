@@ -1,0 +1,53 @@
+name: Deploy GitHub Pages demo
+
+on:
+  # 推送到 master 时构建并部署 demo（GitHub Pages 只读界面导览）
+  push:
+    branches: [master]
+  # 允许在 Actions 页手动触发
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 生成 demo fixtures（真实后端跑 sample-logs）
+        run: node scripts/build-demo-fixtures.mjs
+
+      - name: 安装前端依赖并以 demo 模式构建
+        working-directory: frontend
+        run: |
+          npm ci
+          VITE_DEMO=1 npm run build
+
+      - name: 上传 Pages 构建产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
