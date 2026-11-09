@@ -1,9 +1,7 @@
 'use strict';
-// hermes 会话数据库读取机制（openclaw/内置 与 hermes 平台共享）。
-//
-// openclaw 与会话来源 hermes 都需要读取 hermes 的 SQLite 会话库（state.db）。
-// 平台之间不允许相互依赖（Q9/Q10 落地），这些与平台无关的数据库机制函数聚合到
-// shared，两个平台通过相对路径（或 @agentlray/shared/hermes-db 裸名）统一引用。
+// hermes 会话数据库（state.db）读取机制，随 hermes 平台内聚。
+// 缺省家目录取 ./dirs 的 session（HERMES_DIR 覆盖，缺省 ~/.hermes），显式传入
+// dir 时以入参优先。
 const fs = require('fs');
 const path = require('path');
 // node:sqlite 在 22.x 仍打印 ExperimentalWarning；它是服务端唯一吞掉的警告。
@@ -14,10 +12,7 @@ process.emitWarning = (warning, ...rest) => {
   return originalEmitWarning.call(process, warning, ...rest);
 };
 const { DatabaseSync } = require('node:sqlite');
-// hermes 家目录缺省在此声明（与 hermes 平台 dirs 一致：HERMES_DIR 覆盖，缺省
-// ~/.hermes）。显式传入 dir 时以入参优先。
-const { resolveDirs } = require('./config');
-const HERMES_HOME = resolveDirs({ env: 'HERMES_DIR', segments: ['.hermes'] });
+const { session: HERMES_HOME } = require('./dirs');
 
 function getHermesDbPath(dir) {
   const base = dir || HERMES_HOME;

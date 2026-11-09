@@ -6,7 +6,9 @@ const path = require('path');
 const { session: GEMINI_DIR } = require('./dirs');
 const { withMetadataCache, makeMessage, topToolsOf, captureLastMessage } = require('@agentlray/shared/helpers');
 const { createTailState, noteAssistant, notePrompt, finishTail, fileMtimeMs } = require('@agentlray/shared/tail-state');
-const { foldGeminiRecords, stringifyToolResult } = require('@agentlray/shared/gemini-format');
+const { stringifyToolResult } = require('@agentlray/shared/tool-result');
+// foldGeminiRecords 随 gemini 平台内聚（见 ./format.js）。
+const { foldGeminiRecords } = require('./format');
 const { sortSessionsByStatusGroups } = require('@agentlray/shared/status');
 
 // --- Gemini CLI platform adapter ---
@@ -352,7 +354,9 @@ module.exports = {
   parseGeminiSessionMetadata,
   listGeminiSessions,
   parseGeminiSessionFile,
-  // gemini 格式工具已下沉 shared/gemini-format，此处重导出保持 parse 模块既有公开面。
-  foldGeminiRecords: require('@agentlray/shared/gemini-format').foldGeminiRecords,
-  stringifyToolResult: require('@agentlray/shared/gemini-format').stringifyToolResult,
+  // foldGeminiRecords 随 gemini 平台内聚（./format）；stringifyToolResult
+  // 留在 shared/tool-result（通用扫描器 shared/insights 依赖）。重导出保持
+  // parse 模块既有公开面。
+  foldGeminiRecords,
+  stringifyToolResult: require('@agentlray/shared/tool-result').stringifyToolResult,
 };

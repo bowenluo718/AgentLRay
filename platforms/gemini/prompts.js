@@ -4,7 +4,7 @@
 // prompts come from user records ($rewindTo/$set folds applied first, so
 // rewound prompts don't resurface).
 const fsp = require('fs/promises');
-const { foldGeminiRecords } = require('@agentlray/shared/gemini-format');
+const { foldGeminiRecords } = require('./format');
 const { extractGeminiUserPromptText } = require('./parse');
 
 async function extractGeminiPrompts(filePath) {

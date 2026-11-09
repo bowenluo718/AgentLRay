@@ -1,8 +1,8 @@
 'use strict';
-// Gemini CLI 记录格式工具（Q25/Q26=A 下沉自 gemini.js）。
-//  - foldGeminiRecords —— 把记录流折叠为 { metadata, messages }（处理 $rewindTo/$set/id 覆盖）
-//  - stringifyToolResult —— 工具结果文本化
-// 供共享通用扫描器（shared/insights）与 gemini 平台解析（platforms/gemini/parse.js）共用。
+// Gemini CLI 记录格式工具——foldGeminiRecords（随 gemini 平台内聚）。
+// 把记录流折叠为 { metadata, messages }（处理 $rewindTo/$set/id 覆盖）。
+// stringifyToolResult 仍留在 shared/tool-result：它被共享通用扫描器
+// shared/insights.js（scanFileForInsights 的 gemini 记录分支）依赖，随共享层。
 function foldGeminiRecords(lines) {
   let metadata = {};
   const messagesMap = new Map(); // id → record, insertion-ordered
@@ -63,27 +63,6 @@ function foldGeminiRecords(lines) {
   return { metadata, messages: [...messagesMap.values()] };
 }
 
-function stringifyToolResult(result) {
-  if (result === null || result === undefined) return '';
-  if (typeof result === 'string') return result;
-  if (Array.isArray(result)) {
-    const text = result.map((p) => (p && typeof p === 'object' && typeof p.text === 'string' ? p.text : '')).join('');
-    if (text) return text;
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
-  }
-  if (typeof result === 'object' && typeof result.text === 'string') return result.text;
-  try {
-    return JSON.stringify(result, null, 2);
-  } catch {
-    return String(result);
-  }
-}
-
 module.exports = {
   foldGeminiRecords,
-  stringifyToolResult,
 };

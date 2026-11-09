@@ -4,7 +4,7 @@
 // fold history via $rewindTo/$set — reuse the shared fold, then match.
 const fsp = require('fs/promises');
 const { createSessionMatcher } = require('@agentlray/shared/search');
-const { foldGeminiRecords } = require('@agentlray/shared/gemini-format');
+const { foldGeminiRecords } = require('./format');
 
 async function searchGeminiFile(sf, keywords) {
   let folded;

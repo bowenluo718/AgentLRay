@@ -1,12 +1,12 @@
 const { makeMessage } = require('@agentlray/shared/helpers');
 const { sortSessionsByStatusGroups } = require('@agentlray/shared/status');
-// 数据库读取机制与 openclaw 平台共享（平台间不允许相互依赖，见 shared/hermes-db.js）。
+// hermes 会话库读取机制随平台内聚（见 ./db.js）。
 const {
   getHermesDbPath,
   openHermesDb,
   openHermesDbForWatch,
   unixToIso,
-} = require('@agentlray/shared/hermes-db');
+} = require('./db');
 
 function listHermesSessions(dir) {
   const db = openHermesDb(dir);
