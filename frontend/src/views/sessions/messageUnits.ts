@@ -13,6 +13,37 @@ export interface TurnUnit {
 
 export type MessageUnit = { type: 'single'; msg: SessionMessage } | TurnUnit;
 
+/**
+ * 以 user 消息为边界的外层分组：把「一条 user 输入 + 其后续整个回复回合（assistant
+ * 文本/工具调用，直到下一条 user 前）」打包为一个可折叠模块。时间正序输入。
+ * - 首个块若无 user 头（会话起始的孤儿 toolResult / reasoning 等），user 为 null，不可折叠。
+ * - 其余每块以一条 user 消息开头，items 为其引发的回复单元。
+ */
+export interface UserBlock {
+  type: 'block';
+  user: SessionMessage | null;
+  items: MessageUnit[];
+}
+
+export function buildUserBlocks(units: MessageUnit[]): UserBlock[] {
+  const blocks: UserBlock[] = [];
+  let current: UserBlock = { type: 'block', user: null, items: [] };
+  for (const unit of units) {
+    if (unit.type === 'single' && unit.msg.role === 'user') {
+      if (current.user !== null || current.items.length > 0) {
+        blocks.push(current);
+      }
+      current = { type: 'block', user: unit.msg, items: [] };
+    } else {
+      current.items.push(unit);
+    }
+  }
+  if (current.user !== null || current.items.length > 0) {
+    blocks.push(current);
+  }
+  return blocks;
+}
+
 // Group messages into display units:
 // - user / reasoning messages: standalone
 // - assistant with text only: standalone
@@ -98,6 +129,30 @@ export function buildMessageUnits(filtered: SessionMessage[], isCodex: boolean):
           } else {
             break;
           }
+        } else {
+          break;
+        }
+      }
+      units.push(group);
+      continue;
+    }
+
+    // Standalone toolCall sequence (no preceding assistant text), e.g. a tool
+    // invoked right after a user turn. Aggregate the toolCall(s) and their
+    // following toolResult(s) into a collapsible turn group, mirroring the
+    // assistant-anchored one; the first toolCall anchors the row/graph lane.
+    if (msg.role === 'toolCall') {
+      const group: TurnUnit = { type: 'turn', assistant: msg, tools: [msg], steps: [msg] };
+      i++;
+      while (i < filtered.length) {
+        const next = filtered[i];
+        if (next.role === 'toolCall') {
+          group.tools.push(next);
+          group.steps.push(next);
+          i++;
+        } else if (next.role === 'toolResult') {
+          group.steps.push(next);
+          i++;
         } else {
           break;
         }

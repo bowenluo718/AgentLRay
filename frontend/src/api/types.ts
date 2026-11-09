@@ -114,6 +114,8 @@ export interface SessionSummary {
   model?: string | null;
   source?: string | null;
   spawnCount?: number | null;
+  /** omp/claude-code 子会话数量（children 能力平台在 list 阶段注入） */
+  childrenCount?: number | null;
   archived?: boolean | null;
   /** 聚合视图（/api/sessions platform=all）注入的来源平台与 openclaw agent，单平台列表不带 */
   platform?: Platform;

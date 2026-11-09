@@ -144,6 +144,7 @@ export function SessionsView() {
   const detailAgent = useAppStore((s) => s.detailAgent);
 
   const [msgFilter, setMsgFilter] = useState<MsgFilter>(null);
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [visibleUnitCount, setVisibleUnitCount] = useState<number>(MSG_BATCH_SIZE);
   const messagesRef = useRef<HTMLDivElement>(null);
   const pendingAnchorRef = useRef<string | null>(null);
@@ -211,12 +212,20 @@ export function SessionsView() {
     );
   }, []);
 
-  // SSE real-time tail: append → expand pagination; auto-scroll to newest (top)
+  // SSE real-time tail: append → expand pagination; auto-scroll to newest
+  // (desc → top, asc → bottom; "newest" 方向随 sortOrder 变化)
   const sseStatus = useSessionSse(
-    useCallback((count: number) => {
-      setVisibleUnitCount((c) => (Number.isFinite(c) ? c + count + 5 : c));
-      if (useAppStore.getState().autoScroll) messagesRef.current?.scrollTo({ top: 0 });
-    }, [])
+    useCallback(
+      (count: number) => {
+        setVisibleUnitCount((c) => (Number.isFinite(c) ? c + count + 5 : c));
+        if (!useAppStore.getState().autoScroll) return;
+        const el = messagesRef.current;
+        if (!el) return;
+        if (sortOrder === 'desc') el.scrollTo({ top: 0 });
+        else el.scrollTo({ top: el.scrollHeight });
+      },
+      [sortOrder]
+    )
   );
 
   if (!selectedSessionId) {
@@ -248,7 +257,7 @@ export function SessionsView() {
         )}
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {(['messages', 'trace'] as const).map((sv) => (
+          {(['messages', 'trace', 'diagnostics'] as const).map((sv) => (
             <button
               key={sv}
               type="button"
@@ -260,16 +269,32 @@ export function SessionsView() {
                   : 'border-border text-muted-foreground hover:text-foreground'
               )}
             >
-              {sv === 'messages' ? '💬 消息' : '📊 Trace'}
+              {sv === 'messages' ? '💬 消息' : sv === 'trace' ? '📊 Trace' : '💚 体检'}
             </button>
           ))}
+          {sessionView === 'messages' ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'));
+                setVisibleUnitCount(MSG_BATCH_SIZE);
+              }}
+              className={cn(
+                'rounded-md border px-3 py-1 text-xs',
+                'border-border text-muted-foreground hover:text-foreground'
+              )}
+              title={sortOrder === 'asc' ? '按时间正序（最早在上）' : '按时间倒序（最新在上）'}
+            >
+              {sortOrder === 'asc' ? '⬆ 正序' : '⬇ 倒序'}
+            </button>
+          ) : null}
           {sseStatus === 'live' ? (
             <span className="text-[11px] text-muted-foreground" title="Real-time tail active">
-              🟢 Live
+              ✅ Live 
             </span>
           ) : sseStatus === 'error' ? (
             <span className="text-[11px] text-muted-foreground" title="Real-time connection lost, will retry">
-              🔴 Live
+              🔴 Live 
             </span>
           ) : null}
         </div>
@@ -278,21 +303,31 @@ export function SessionsView() {
           <div className="min-h-0 flex-1 overflow-auto">
             <TraceView />
           </div>
+        ) : sessionView === 'diagnostics' ? (
+          <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+            <ChildAgentBanner />
+            {activeDetail ? (
+              <SessionDiagnostics key={reviewScope} reviewScope={reviewScope} messages={activeDetail.messages} onScrollToMessage={scrollToMessage} />
+            ) : activeQuery.isError ? (
+              <div className="py-8 text-center text-sm text-destructive">{(activeQuery.error as Error).message}</div>
+            ) : (
+              <div className="py-8 text-center text-sm text-muted-foreground">Loading messages…</div>
+            )}
+          </div>
         ) : (
           <div ref={messagesRef} className="min-h-0 flex-1 overflow-y-auto pr-1" data-testid="messages-scroll">
             <ChildAgentBanner />
             {activeDetail ? (
-              <>
-                <SessionDiagnostics key={reviewScope} reviewScope={reviewScope} messages={activeDetail.messages} onScrollToMessage={scrollToMessage} />
-                <MessageList
-                  messages={activeDetail.messages}
-                  platform={platform}
-                  msgFilter={msgFilter}
-                  timing={timing}
-                  visibleUnitCount={visibleUnitCount}
-                  onLoadMore={() => setVisibleUnitCount((c) => c + MSG_BATCH_SIZE)}
-                />
-              </>
+              <MessageList
+                key={activeKey}
+                messages={activeDetail.messages}
+                platform={platform}
+                msgFilter={msgFilter}
+                timing={timing}
+                sortOrder={sortOrder}
+                visibleUnitCount={visibleUnitCount}
+                onLoadMore={() => setVisibleUnitCount((c) => c + MSG_BATCH_SIZE)}
+              />
             ) : activeQuery.isError ? (
               <div className="py-8 text-center text-sm text-destructive">{(activeQuery.error as Error).message}</div>
             ) : (

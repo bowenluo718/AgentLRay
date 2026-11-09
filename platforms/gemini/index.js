@@ -10,6 +10,8 @@ const {
   listGeminiSessions,
   normalizeGeminiRecord,
   parseGeminiSessionFile,
+  listGeminiChildren,
+  getGeminiChild,
 } = require('./parse');
 const { fileBasedGetSession } = require('@agentlray/shared/helpers');
 const { searchGeminiFile } = require('./search');
@@ -33,6 +35,9 @@ module.exports = {
   find: findGeminiSessionFile,
   parse: parseGeminiSessionFile,
   getSession: fileBasedGetSession(findGeminiSessionFile, parseGeminiSessionFile),
+  // Gemini 子会话：chats/<sessionId>/ 下的 .jsonl 文件（与 omp/claude-code 同形）。
+  listChildren: (dir, sessionId) => listGeminiChildren(dir, sessionId),
+  getChild: (dir, sessionId, name) => getGeminiChild(dir, sessionId, name),
   collectFiles: async (dir, opts = {}) => {
     const files = [];
     // gemini sessions live at <dir>/<projectHash>/chats/session-*.jsonl

@@ -90,6 +90,64 @@ async function readGeminiMetadataLine(filePath) {
   }
 }
 
+// 定位一个主会话的子会话目录：chats/<sessionId>/。先找到主会话文件，其所在
+// chats 目录下以主会话 id 命名的同名目录即子会话存放处。无子目录返回 null。
+async function findGeminiSpawnDir(baseDir, sessionId) {
+  const filePath = await findGeminiSessionFile(baseDir, sessionId);
+  if (!filePath) return null;
+  const spawnDir = path.join(path.dirname(filePath), sessionId);
+  try {
+    const st = await fsp.stat(spawnDir);
+    return st.isDirectory() ? spawnDir : null;
+  } catch {
+    return null;
+  }
+}
+
+// 统计一个主会话的子会话数量（chats/<sessionId>/ 下的 .jsonl 文件数）。
+async function countGeminiChildren(baseDir, sessionId) {
+  const dir = baseDir || GEMINI_DIR;
+  const spawnDir = await findGeminiSpawnDir(dir, sessionId);
+  if (!spawnDir) return 0;
+  const entries = await fsp.readdir(spawnDir, { withFileTypes: true }).catch(() => []);
+  return entries.filter((e) => e.isFile() && e.name.endsWith('.jsonl')).length;
+}
+
+// 列出一个主会话的子会话摘要列表（与 omp/claude-code 的 listChildren 契约同形）。
+async function listGeminiChildren(baseDir, sessionId) {
+  const dir = baseDir || GEMINI_DIR;
+  const spawnDir = await findGeminiSpawnDir(dir, sessionId);
+  if (!spawnDir) return [];
+  const entries = await fsp.readdir(spawnDir, { withFileTypes: true }).catch(() => []);
+  const children = [];
+  for (const e of entries) {
+    if (!e.isFile() || !e.name.endsWith('.jsonl')) continue;
+    const filePath = path.join(spawnDir, e.name);
+    const meta = await parseGeminiSessionMetadata(filePath, e.name).catch(() => null);
+    children.push({
+      name: e.name.replace(/\.jsonl$/, ''),
+      file: e.name,
+      id: meta?.id || e.name.replace(/\.jsonl$/, ''),
+      title: meta?.title || null,
+      timestamp: meta?.timestamp || null,
+      lastActivity: meta?.lastActivity || null,
+      messageCount: meta?.messageCount || 0,
+      toolCallCount: meta?.toolCallCount || 0,
+    });
+  }
+  children.sort((a, b) => String(a.timestamp || '').localeCompare(String(b.timestamp || '')));
+  return children;
+}
+
+// 读取一个主会话的某个子会话详情。无子目录返回 null（路由 → No subagents）；
+// 子文件缺失抛 ENOENT（路由 → 404）。
+async function getGeminiChild(baseDir, sessionId, name) {
+  const dir = baseDir || GEMINI_DIR;
+  const spawnDir = await findGeminiSpawnDir(dir, sessionId);
+  if (!spawnDir) return null;
+  return parseGeminiSessionFile(path.join(spawnDir, name + '.jsonl'));
+}
+
 // Map one folded Gemini message record onto normalized messages. A 'gemini'
 // record fans out codex-style: reasoning (thoughts) → text → per-tool-call
 // toolCall + toolResult (Gemini stores the result inline on the call record).
@@ -312,7 +370,16 @@ async function listGeminiSessions(baseDir) {
       // Subagent transcripts nest in chats/<parentSessionId>/ — main sessions
       // are the session-*.jsonl files directly under chats/.
       if (!f.isFile() || !SESSION_FILE_RE.test(f.name)) continue;
-      sessions.push(parseGeminiSessionMetadata(path.join(chatsDir, f.name), f.name).catch(() => null));
+      sessions.push(
+        (async () => {
+          const filePath = path.join(chatsDir, f.name);
+          const meta = await parseGeminiSessionMetadata(filePath, f.name).catch(() => null);
+          if (!meta) return null;
+          // Gemini 子会话目录：chats/<sessionId>/（见 findGeminiSpawnDir）。
+          meta.childrenCount = await countGeminiChildren(dir, meta.id);
+          return meta;
+        })()
+      );
     }
   }
 
@@ -354,6 +421,10 @@ module.exports = {
   parseGeminiSessionMetadata,
   listGeminiSessions,
   parseGeminiSessionFile,
+  // 子会话面：countGeminiChildren / listGeminiChildren / getGeminiChild。
+  countGeminiChildren,
+  listGeminiChildren,
+  getGeminiChild,
   // foldGeminiRecords 随 gemini 平台内聚（./format）；stringifyToolResult
   // 留在 shared/tool-result（通用扫描器 shared/insights 依赖）。重导出保持
   // parse 模块既有公开面。

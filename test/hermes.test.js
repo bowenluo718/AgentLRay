@@ -12,6 +12,7 @@ const { startServer, getJson } = require('./helpers.js');
 
 const S1 = 'hermes-session-0001';
 const S2 = 'hermes-session-0002';
+const S3 = 'hermes-session-0003'; // S1 的子会话（parent_session_id = S1）
 const T0 = 1737000000; // 2025-01-16T04:00:00Z
 
 function seedHermesDb(home) {
@@ -35,6 +36,12 @@ function seedHermesDb(home) {
     );
     ins.run(S1, 'cli', 'hermes-4', 'first', T0, T0 + 60, 4, 1, 120, 40, 0.0031);
     ins.run(S2, 'cli', 'hermes-4', 'second', T0 + 3600, null, 1, 0, 10, 0, null);
+    // S3 是 S1 的子会话（子代理）：parent_session_id = S1，时间更早排在列表末尾。
+    ins.run(S3, 'agent', 'hermes-4', 'child-of-first', T0 - 1000, T0 + 30, 2, 0, 8, 0, null);
+    const childIns = db.prepare(
+      'UPDATE sessions SET parent_session_id = ? WHERE id = ?'
+    );
+    childIns.run(S1, S3);
     const msg = db.prepare(
       'INSERT INTO messages (session_id, role, content, tool_calls, tool_call_id, tool_name, timestamp, token_count, reasoning) VALUES (?,?,?,?,?,?,?,?,?)'
     );
@@ -72,9 +79,9 @@ describe('sessions: hermes (node:sqlite)', () => {
     const sessions = await getJson(srv.base, '/api/hermes/sessions');
     assert.deepEqual(
       sessions.map((s) => s.id),
-      [S2, S1]
+      [S2, S3, S1]
     );
-    const s1 = sessions[1];
+    const s1 = sessions[2];
     assert.equal(s1.timestamp, new Date(T0 * 1000).toISOString());
     assert.equal(s1.userCount, 1);
     assert.equal(s1.assistantCount, 2);
@@ -85,6 +92,23 @@ describe('sessions: hermes (node:sqlite)', () => {
     assert.equal(s1.status, 'stopped');
     assert.equal(sessions[0].status, 'stopped');
     assert.equal(s1.estimatedCost, 0.0031);
+    assert.equal(s1.childrenCount, 1); // 仅 S3 以 parent_session_id 指向 S1
+    // 子会话 S3 自身无子会话，且不重复计数。
+    assert.equal(sessions[1].childrenCount, 0);
+    assert.equal(sessions[1].parentSessionId, S1);
+  });
+
+  it('lists a session subagents via /children and serves a child detail', async () => {
+    const children = await getJson(srv.base, `/api/hermes/sessions/${S1}/children`);
+    assert.equal(children.length, 1);
+    assert.equal(children[0].name, S3);
+    const child = await getJson(srv.base, `/api/hermes/sessions/${S1}/children/${S3}`);
+    assert.equal(child.session.id, S3);
+    assert.equal(child.session.parentSessionId, S1);
+    // 无子会话的主会话：空列表；不属于该主会话的 id 返回 404。
+    assert.deepEqual(await getJson(srv.base, `/api/hermes/sessions/${S2}/children`), []);
+    const res = await fetch(`${srv.base}/api/hermes/sessions/${S1}/children/${S2}`);
+    assert.equal(res.status, 404);
   });
 
   it('serves a session detail with normalized roles and reasoning', async () => {

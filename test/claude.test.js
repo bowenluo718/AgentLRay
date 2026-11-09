@@ -296,3 +296,19 @@ test('parseClaudeCodeSessionMetadata 中断后 resume 但无新内容 → 会话
   assert.equal(st, 'stopped');
 });
 
+// --- childrenCount：子会话目录计数（fixtures 里已含真实 subagents 结构） ---
+
+test('listClaudeCodeSessions 统计 subagents 子会话数（agent-*.jsonl，排除 .meta.json）', async (t) => {
+  const { FIXTURE_HOME } = require(path.join(__dirname, 'helpers.js'));
+  const baseDir = path.join(FIXTURE_HOME, '.claude', 'projects');
+  const sessions = await claude.listClaudeCodeSessions(baseDir);
+  const s = sessions.find((x) => x.id === 'aaaa1111-2222-4333-8444-555566667777');
+  assert.ok(s, 'fixture 会话 aaaa1111-… 应被列出');
+  // subagents/ 内含 agent-fx001.jsonl + agent-fx001.meta.json → 只数 1 个
+  assert.equal(s.childrenCount, 1);
+  // 无子会话目录的会话 → 0
+  const other = sessions.find((x) => x.id === 'bbbb1111-2222-4333-8444-555566667778');
+  assert.ok(other, 'fixture 会话 bbbb1111-… 应被列出');
+  assert.equal(other.childrenCount, 0);
+});
+

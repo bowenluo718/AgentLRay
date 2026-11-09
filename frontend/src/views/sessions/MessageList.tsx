@@ -1,7 +1,7 @@
 // Messages area: unit grouping, turn-group folds, retry annotations, and
 // newest-first pagination (>200 msgs → first 60 + load more) — legacy renderMessages.
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { Platform, SessionMessage } from '@/api/types';
 import { formatDurationCompact, getTextContent, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,7 @@ import type { MsgFilter, TimingAnalysis } from './lib';
 import { applyMsgFilter, messageAnchorId } from './lib';
 import { GraphLane, MessageBubble } from './MessageItem';
 import type { MessageUnit, RetryInfo, TurnUnit } from './messageUnits';
-import { buildMessageUnits, buildRetryChains } from './messageUnits';
+import { buildMessageUnits, buildRetryChains, buildUserBlocks } from './messageUnits';
 
 export const MSG_BATCH_SIZE = 60; // units added per "load more" click
 
@@ -156,6 +156,7 @@ export function MessageList({
   platform,
   msgFilter,
   timing,
+  sortOrder,
   visibleUnitCount,
   onLoadMore,
 }: {
@@ -163,38 +164,78 @@ export function MessageList({
   platform: Platform;
   msgFilter: MsgFilter;
   timing: TimingAnalysis;
+  sortOrder: 'asc' | 'desc';
   visibleUnitCount: number;
   onLoadMore: () => void;
 }) {
   const isCodex = platform === 'codex' || platform === 'omp' || platform === 'dsh' || platform === 'gemini';
 
+  // units 保持时间正序；正序/倒序通过渲染方向控制
   const units = useMemo<MessageUnit[]>(() => {
     const filtered = applyMsgFilter(timing.visibleMessages, msgFilter);
-    // Newest on top (legacy units.reverse())
-    return buildMessageUnits(filtered, isCodex).reverse();
+    return buildMessageUnits(filtered, isCodex);
   }, [timing, msgFilter, isCodex]);
+
+  // 折叠的 user 块（默认展开：collapsed 为空集合）
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
   if (!messages.length) {
     return <div className="py-8 text-center text-sm text-muted-foreground">Session messages will appear here.</div>;
   }
 
-  const endIdx = Math.min(units.length, visibleUnitCount);
-  const remaining = units.length - endIdx;
+  // 分页：单侧可见单元数（从时间两端相对计数），渲染方向由 sortOrder 决定
+  const n = Math.min(visibleUnitCount, units.length);
+  const remaining = units.length - n;
+  const displayUnits = sortOrder === 'asc' ? units.slice(0, n) : units.slice(units.length - n);
+  // 分组后再决定块级方向：块内保持「user → 回复」，块之间按时间排序
+  const blocks = buildUserBlocks(displayUnits);
+  const orderedBlocks = sortOrder === 'asc' ? blocks : blocks.slice().reverse();
 
   return (
     <div className="space-y-2" data-testid="message-list">
-      {units.slice(0, endIdx).map((unit, i) =>
-        unit.type === 'single' ? (
-          <div key={unit.msg.id || i} className="flex gap-2" id={`row-${messageAnchorId(unit.msg) || ''}`}>
-            <GraphLane message={unit.msg} />
+      {orderedBlocks.map((block) => {
+        if (block.user === null) {
+          return block.items.map((unit, i) => renderUnit(unit, i, timing, isCodex));
+        }
+        const key = messageAnchorId(block.user) || block.user.id || '';
+        const isCollapsed = collapsed.has(key);
+        const collapseToggle = (
+          <button
+            type="button"
+            onClick={() =>
+              setCollapsed((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+            title={isCollapsed ? '展开该用户回合' : '折叠该用户回合'}
+            aria-label={isCollapsed ? '展开该用户回合' : '折叠该用户回合'}
+            className="text-muted-foreground transition-transform hover:text-foreground"
+            style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'none' }}
+          >
+            ▼
+          </button>
+        );
+        return (
+          <div key={key} className="flex gap-2" id={`row-${messageAnchorId(block.user) || ''}`}>
+            <GraphLane message={block.user} />
             <div className="min-w-0 flex-1">
-              <MessageBubble message={unit.msg} timing={timing.timingByMessage.get(unit.msg)} />
+              <MessageBubble
+                message={block.user}
+                timing={timing.timingByMessage.get(block.user)}
+                collapseToggle={collapseToggle}
+              />
+              {isCollapsed ? null : (
+                <div className="mt-2 space-y-2">
+                  {block.items.map((unit, i) => renderUnit(unit, i, timing, isCodex))}
+                </div>
+              )}
             </div>
           </div>
-        ) : (
-          <TurnGroup key={unit.assistant.id || i} unit={unit} timing={timing} isCodex={isCodex} />
-        )
-      )}
+        );
+      })}
       {remaining > 0 ? (
         <div className="flex justify-center py-2" id="loadMoreBar">
           <button
@@ -202,10 +243,27 @@ export function MessageList({
             onClick={onLoadMore}
             className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground"
           >
-            ▼ Load {Math.min(remaining, MSG_BATCH_SIZE)} earlier messages ({remaining} hidden)
+            {sortOrder === 'asc'
+              ? `▼ Load ${Math.min(remaining, MSG_BATCH_SIZE)} later messages (${remaining} hidden)`
+              : `▼ Load ${Math.min(remaining, MSG_BATCH_SIZE)} earlier messages (${remaining} hidden)`}
           </button>
         </div>
       ) : null}
     </div>
   );
+}
+
+// 渲染单个消息单元（single 或 turn）
+function renderUnit(unit: MessageUnit, i: number, timing: TimingAnalysis, isCodex: boolean) {
+  if (unit.type === 'single') {
+    return (
+      <div key={unit.msg.id || i} className="flex gap-2" id={`row-${messageAnchorId(unit.msg) || ''}`}>
+        <GraphLane message={unit.msg} />
+        <div className="min-w-0 flex-1">
+          <MessageBubble message={unit.msg} timing={timing.timingByMessage.get(unit.msg)} />
+        </div>
+      </div>
+    );
+  }
+  return <TurnGroup key={unit.assistant.id || i} unit={unit} timing={timing} isCodex={isCodex} />;
 }

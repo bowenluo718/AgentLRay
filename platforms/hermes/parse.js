@@ -37,6 +37,17 @@ function listHermesSessions(dir) {
       .all();
     const statsMap = new Map(stats.map((r) => [r.session_id, r]));
 
+    // 子会话数：有多少条会话的 parent_session_id 指向本会话（hermes 子代理关系）。
+    const childCounts = db
+      .prepare(`
+      SELECT parent_session_id AS pid, COUNT(*) AS n
+      FROM sessions
+      WHERE parent_session_id IS NOT NULL AND parent_session_id != ''
+      GROUP BY parent_session_id
+    `)
+      .all();
+    const childCountMap = new Map(childCounts.map((r) => [r.pid, r.n]));
+
     // First user message per session (one query)
     const firstUsers = db
       .prepare(`
@@ -182,6 +193,7 @@ function listHermesSessions(dir) {
         outputTokens: s.output_tokens || 0,
         estimatedCost: s.estimated_cost_usd || null,
         parentSessionId: s.parent_session_id || null,
+        childrenCount: childCountMap.get(s.id) || 0,
         tail,
         mtimeMs: null,
         file: 'state.db',
@@ -235,6 +247,45 @@ function getHermesSession(dir, sessionId) {
   } finally {
     db.close();
   }
+}
+
+// hermes 子会话 = parent_session_id 指向主会话的独立会话记录（子代理）。
+function listHermesChildren(dir, sessionId) {
+  const db = openHermesDb(dir);
+  if (!db) return [];
+  try {
+    const rows = db
+      .prepare(
+        `SELECT id, source, model, title, started_at, ended_at, message_count, tool_call_count
+         FROM sessions WHERE parent_session_id = ? ORDER BY started_at ASC`
+      )
+      .all(sessionId);
+    return rows.map((s) => ({
+      name: s.id,
+      file: s.id,
+      id: s.id,
+      title: s.title || null,
+      timestamp: unixToIso(s.started_at),
+      lastActivity: unixToIso(s.ended_at) || unixToIso(s.started_at),
+      messageCount: s.message_count || 0,
+      toolCallCount: s.tool_call_count || 0,
+    }));
+  } finally {
+    db.close();
+  }
+}
+
+function getHermesChild(dir, sessionId, name) {
+  // child 名即其自身会话 id；先校验它确属本主会话，再按普通会话读取。
+  const db = openHermesDb(dir);
+  if (!db) return null;
+  try {
+    const s = db.prepare('SELECT parent_session_id FROM sessions WHERE id = ?').get(name);
+    if (!s || s.parent_session_id !== sessionId) return null;
+  } finally {
+    db.close();
+  }
+  return getHermesSession(dir, name);
 }
 
 function normalizeHermesMessage(row) {
@@ -368,6 +419,8 @@ module.exports = {
   unixToIso,
   listHermesSessions,
   getHermesSession,
+  listHermesChildren,
+  getHermesChild,
   normalizeHermesMessage,
   searchHermesSessions,
 };

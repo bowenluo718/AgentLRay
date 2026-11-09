@@ -270,6 +270,13 @@ export function SessionSummary({
                 >
                   💬 Total: {msgs.length}
                 </FilterBadge>
+                <FilterBadge
+                  active={msgFilter === 'focus'}
+                  onClick={() => setMsgFilter('focus')}
+                  title="聚焦模式：仅显示 User 消息与每个回合的最后一条 Assistant 消息"
+                >
+                  🎯 聚焦
+                </FilterBadge>
               </div>
             </div>
             <div>

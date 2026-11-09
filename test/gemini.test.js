@@ -152,15 +152,28 @@ describe('sessions: gemini', () => {
     assert.equal(plain.assistantCount, 1);
     assert.equal(plain.toolCallCount, 1);
     assert.equal(plain.toolResultCount, 1);
+    assert.equal(plain.childrenCount, 1); // chats/<id>/agent-child.jsonl
     assert.ok(plain.firstUserMessage.startsWith('fixture: gemini-needle-zeta'));
     assert.deepEqual(plain.topTools, [{ name: 'list_directory', count: 1 }]);
     assert.deepEqual(plain.tokens, { input: 200, output: 50, cacheRead: 120, reasoning: 15 });
 
     const rewound = sessions[0];
+    assert.equal(rewound.childrenCount, 0); // no chats/<id>/ dir under fixture-hash-eta
     assert.equal(rewound.title, 'fixture: eta session summary');
     // /rewind removed the first exchange: only the post-rewind pair remains
     assert.equal(rewound.userCount, 1);
     assert.equal(rewound.assistantCount, 1);
+  });
+
+  it('lists a session subagents via /children and serves a child detail', async () => {
+    const children = await getJson(srv.base, `/api/gemini/sessions/${GEM_PLAIN}/children`);
+    assert.equal(children.length, 1);
+    assert.equal(children[0].name, 'agent-child');
+    const child = await getJson(srv.base, `/api/gemini/sessions/${GEM_PLAIN}/children/agent-child`);
+    assert.equal(child.session.id, 'gemini-fixture-subagent-0001');
+    // 无子会话目录的主会话：children 列表为空、子详情 404。
+    const none = await getJson(srv.base, `/api/gemini/sessions/${GEM_REWIND}/children`);
+    assert.deepEqual(none, []);
   });
 
   it('serves a session detail with normalized roles and the inline tool result paired', async () => {

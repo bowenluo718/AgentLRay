@@ -16,6 +16,12 @@ const MARKDOWN_STYLES =
   '[&_h6]:mt-2 [&_h6]:text-sm [&_h6]:font-semibold ' +
   '[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 ' +
   '[&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 ' +
+  '[&_li_input]:mr-1.5 ' +
+  '[&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground ' +
+  '[&_table]:my-2 [&_table]:block [&_table]:w-full [&_table]:max-w-full [&_table]:overflow-x-auto [&_table]:border-collapse [&_table]:text-sm ' +
+  '[&_thead]:bg-muted/60 ' +
+  '[&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_th]:font-semibold ' +
+  '[&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_td]:align-top ' +
   '[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-2.5 ' +
   '[&_pre_code]:bg-transparent [&_pre_code]:p-0 ' +
   '[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] ' +

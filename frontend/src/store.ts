@@ -304,7 +304,7 @@ export function isMainView(v: unknown): v is MainView {
   return v === 'sessions' || v === 'insights' || v === 'prompts' || v === 'kanban';
 }
 export type InsightsScope = 'global' | 'session';
-export type SessionView = 'messages' | 'trace';
+export type SessionView = 'messages' | 'trace' | 'diagnostics';
 /** 侧栏会话列表分组模式：按平台 / 按项目 / 不分组。 */
 export type GroupBy = 'platform' | 'project' | 'none';
 

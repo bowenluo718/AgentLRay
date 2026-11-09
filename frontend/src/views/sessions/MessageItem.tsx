@@ -2,7 +2,7 @@
 // ported from legacy renderMessage/renderToolCall/renderToolResult/renderGraphLane.
 // Collapses are native <details> so DOM-driven jumps (legacy parity) can expand them.
 
-import { createContext, useContext } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { MessageContentPart, SessionMessage } from '@/api/types';
 import { Markdown } from '@/components/Markdown';
 import { formatDurationCompact, getTextContent } from '@/lib/pure';
@@ -35,18 +35,46 @@ function DurationBadge({ ms, warnAt, dangerAt, prefix, title }: { ms: number | n
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable */
+        }
+      }}
+      className="text-muted-foreground transition-colors hover:text-foreground"
+      title="复制消息内容"
+      aria-label="复制消息内容"
+    >
+      {copied ? '✓' : (<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+      </svg>) }
+    </button>
+  );
+}
+
 function MessageHead({
   role,
   meta,
   timestamp,
   timing,
   withToolDuration,
+  actions,
 }: {
   role: React.ReactNode;
   meta?: React.ReactNode;
   timestamp: string | null;
   timing: TimingMeta | undefined;
   withToolDuration?: boolean;
+  actions?: React.ReactNode;
 }) {
   const deltaMs = timing?.deltaMs ?? null;
   const toolMs = timing?.toolDurationMs ?? null;
@@ -57,6 +85,7 @@ function MessageHead({
         {meta}
       </div>
       <div className="flex items-center gap-1.5 text-muted-foreground">
+        {actions}
         {timestamp ? <span>{formatDate(timestamp)}</span> : null}
         {/* tool duration ≥200ms on toolResults; delta ≥5s on everything (legacy badges) */}
         {withToolDuration && toolMs !== null && toolMs >= 200 ? (
@@ -245,7 +274,15 @@ export function GraphLane({ message }: { message: SessionMessage }) {
   );
 }
 
-export function MessageBubble({ message, timing }: { message: SessionMessage; timing: TimingMeta | undefined }) {
+export function MessageBubble({
+  message,
+  timing,
+  collapseToggle,
+}: {
+  message: SessionMessage;
+  timing: TimingMeta | undefined;
+  collapseToggle?: React.ReactNode;
+}) {
   const text = getTextContent(message.content);
   const anchor = messageAnchorId(message) || '';
 
@@ -260,6 +297,12 @@ export function MessageBubble({ message, timing }: { message: SessionMessage; ti
           role={<span className="font-semibold text-primary">User</span>}
           timestamp={message.timestamp}
           timing={timing}
+          actions={
+            <>
+              {collapseToggle}
+              <CopyButton text={text} />
+            </>
+          }
         />
         <Markdown text={preview} />
       </article>
@@ -328,6 +371,7 @@ export function MessageBubble({ message, timing }: { message: SessionMessage; ti
           }
           timestamp={message.timestamp}
           timing={timing}
+          actions={<CopyButton text={text} />}
         />
         {message.reasoning ? (
           <details className="mb-1 rounded border border-border/60 bg-secondary/30 px-2 py-1 text-xs">

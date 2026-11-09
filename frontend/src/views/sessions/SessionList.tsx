@@ -18,7 +18,8 @@ import { statusMetaFor, useServerStatusLabels } from './statusMeta';
 
 const VIRT_THRESHOLD = 200; // below this many sessions, render everything
 const VIRT_OVERSCAN = 10; // extra cards above/below the visible range
-const VIRT_ESTIMATE = 96; // estimated card height incl. gap
+const VIRT_CARD_ESTIMATE = 96; // estimated session card height incl. gap
+const VIRT_HEADER_ESTIMATE = 32; // estimated group/status header height
 
 // 聚合视图跨平台归并时用到的状态展示顺序（与服务端 STATUS_ORDER 一致）。
 const STATUS_ORDER = ['awaiting-input', 'working', 'waiting', 'stopped'];
@@ -257,6 +258,7 @@ function chipTexts(session: SessionSummary): string[] {
   if (session.assistantCount) chips.push(`🤖 ${session.assistantCount}`);
   if (session.toolCallCount) chips.push(`🔧 ${session.toolCallCount}`);
   if (session.spawnCount) chips.push(`🌳 ${session.spawnCount} spawn`);
+  if (session.childrenCount) chips.push(`🧩 ${session.childrenCount} sub`);
   if (session.model) chips.push(`🧠 ${session.model.split('/').pop()}`);
   if (session.source) chips.push(`${SOURCE_ICONS[session.source.toLowerCase()] || '📡'} ${session.source}`);
   const startMs = parseTimestampMs(session.timestamp);
@@ -399,7 +401,14 @@ export function SessionList({ filterTerm, onNavigate }: { filterTerm: string; on
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => VIRT_ESTIMATE,
+    // 关键：按稳定行 key（非 index）关联测量尺寸缓存。折叠/展开/筛选改变行数后，
+    // 行 index 会移动；若缺失 getItemKey，measureElement 的 itemSizeCache 按 index
+    // 关联，重排后命中错误行的尺寸 → translateY 定位错乱，多组展开时累积偏移明显。
+    getItemKey: (index) => rows[index]?.key ?? index,
+    estimateSize: (index) => {
+      const row = rows[index];
+      return row && row.kind === 'session' ? VIRT_CARD_ESTIMATE : VIRT_HEADER_ESTIMATE;
+    },
     overscan: VIRT_OVERSCAN,
     enabled: virtualized,
     // Defers measurement flushes out of React's commit phase (flushSync warning)

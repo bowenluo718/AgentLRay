@@ -3,7 +3,7 @@
 import type { MessageContentPart, SessionMessage, SessionSummary } from '@/api/types';
 import { getTextContent, parseTimestampMs } from '@/lib/pure';
 
-export type MsgFilter = null | 'user' | 'assistant' | 'toolCall' | 'toolResult' | 'error' | 'spawn';
+export type MsgFilter = null | 'user' | 'assistant' | 'toolCall' | 'toolResult' | 'error' | 'spawn' | 'focus';
 
 export function formatDate(value: string | number | null | undefined): string {
   if (!value) return 'Unknown time';
@@ -268,6 +268,28 @@ export function computeSessionStats(msgs: SessionMessage[]): SessionStats {
 
 // Message list stat filter (legacy renderMessages filter block)
 export function applyMsgFilter(msgs: SessionMessage[], f: MsgFilter): SessionMessage[] {
+  if (f === 'focus') {
+    // 聚焦模式：只保留所有 user 消息 + 每个 user 回合（到下一条 user 前）的最后一条 assistant 消息
+    const out: SessionMessage[] = [];
+    for (let i = 0; i < msgs.length; i++) {
+      const msg = msgs[i];
+      if (msg.role === 'user') {
+        out.push(msg);
+        continue;
+      }
+      if (msg.role !== 'assistant') continue;
+      // 是否为当前回合的最后一条 assistant（其后直到下一条 user 前不再有 assistant）
+      let last = true;
+      for (let j = i + 1; j < msgs.length && msgs[j].role !== 'user'; j++) {
+        if (msgs[j].role === 'assistant') {
+          last = false;
+          break;
+        }
+      }
+      if (last) out.push(msg);
+    }
+    return out;
+  }
   if (!f) return msgs;
   return msgs.filter((msg) => {
     if (f === 'user') return msg.role === 'user';

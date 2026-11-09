@@ -61,3 +61,20 @@ test('extractOmpUserPromptText 仍过滤无任务描述的 < 开头注入', () =
 test('extractOmpUserPromptText 普通用户输入原样返回', () => {
   assert.equal(extractOmpUserPromptText(userMsg('帮我查一下天气')), '帮我查一下天气');
 });
+
+// --- childrenCount：同名目录内子会话计数（fixtures 含真实 aaaa/Scout.jsonl） ---
+
+test('listOmpSessions 统计同名目录内子会话数', async (t) => {
+  const { FIXTURE_HOME } = require(path.join(__dirname, 'helpers.js'));
+  const { listOmpSessions } = require(path.join(__dirname, '..', 'lib', 'platforms', 'builtin', 'omp', 'parse'));
+  const baseDir = path.join(FIXTURE_HOME, '.omp', 'agent', 'sessions');
+  const sessions = await listOmpSessions(baseDir);
+  // 有子会话：2026-01-20T08-00-00-000Z_019a0000-0000-7000-8000-00000000aaaa.jsonl + aaaa/Scout.jsonl
+  const withChild = sessions.find((x) => x.id === '019a0000-0000-7000-8000-00000000aaaa');
+  assert.ok(withChild, 'aaa… 会话应被列出');
+  assert.equal(withChild.childrenCount, 1);
+  // 无子会话目录 → 0
+  const withoutChild = sessions.find((x) => x.id === '019a0000-0000-7000-8000-00000000bbbb');
+  assert.ok(withoutChild, 'bbb… 会话应被列出');
+  assert.equal(withoutChild.childrenCount, 0);
+});

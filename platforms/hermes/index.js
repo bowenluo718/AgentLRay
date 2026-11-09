@@ -2,7 +2,7 @@
 // 内置平台 hermes 适配器（P1 从 lib/platforms/index.js 逐字搬迁 + 声明字段）。
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
 const { session: HERMES_DIR } = require('./dirs');
-const { listHermesSessions, getHermesSession, searchHermesSessions } = require('./parse');
+const { listHermesSessions, getHermesSession, listHermesChildren, getHermesChild, searchHermesSessions } = require('./parse');
 const { computeHermesInsights } = require('./insights');
 const { extractHermesPromptGroups } = require('./prompts');
 const { watchHermes } = require('./watch');
@@ -34,6 +34,9 @@ module.exports = {
   find: null,
   parse: null,
   getSession: (dir, sessionId) => getHermesSession(dir, sessionId),
+  // hermes 子会话 = parent_session_id 指向主会话的独立会话记录。
+  listChildren: (dir, sessionId) => listHermesChildren(dir, sessionId),
+  getChild: (dir, sessionId, name) => getHermesChild(dir, sessionId, name),
   collectFiles: null,
   watchParse: null,
   // WAL 文件监听型的 SSE 尾随（SQLite 支撑，无文件可尾随）。
