@@ -75,15 +75,8 @@ function EmptyState() {
         </p>
         <p>
           <b className="text-foreground">Prompts</b> — 自动提取你在所有会话里输入过的真人
-          prompt（滤掉工具输出和系统注入），按目录分组。每条可 <b className="text-foreground">⭐ 收藏</b>入库、
-          <b className="text-foreground">优化</b>（Claude 改写）、<b className="text-foreground">🗑 隐藏</b>
+          prompt（滤掉工具输出和系统注入），按目录分组。每条可 <b className="text-foreground">优化</b>（Claude 改写）、<b className="text-foreground">🗑 隐藏</b>
           （可恢复）；「🧮 聚类分析」把相似 prompt 聚成模板并统计效果。
-        </p>
-        <p>
-          <b className="text-foreground">资产库</b> — prompt 资产库：标签分类、编辑、搜索。每条有{' '}
-          <b className="text-foreground">Claude / Codex / OMP</b> 三个开关，点亮即安装为该工具的 slash
-          command——之后在工具里输 <code className="rounded bg-secondary px-1">/名字</code> 直接调用，
-          <code className="rounded bg-secondary px-1">$ARGUMENTS</code> 传参。
         </p>
         <p>
           <b className="text-foreground">⚙ 设置</b> — 自定义各平台的日志目录（默认已指向本机标准路径）。

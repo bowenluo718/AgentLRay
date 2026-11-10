@@ -11,14 +11,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Switch } from '@/components/ui/switch';
 import { useAppStore } from '@/store';
 
-// 平台设置全部内聚到「平台」tab：每个平台一张卡片，聚合启停 toggle、数据目录、
+// 平台设置全部内聚到「平台」面板：每个平台一张卡片，聚合启停 Switch、数据目录、
 // CLI 命令。目录真源在服务端 settings.json `dirs` section（env > dirs > 默认）、
 // CLI 命令在 `cliBins` section、启停/替代在 `platforms` section——三者都随底部
-// Save 一次 `PUT /api/settings` 提交（Q4-B）。设置面板目录回显自 GET /api/settings
-// 的 `dirs` section，前端不再维护 localStorage 目录，也不再传 dir query（Q12-A）。
+// Save 一次 `PUT /api/settings` 提交。设置面板目录回显自 GET /api/settings 的
+// `dirs` section，前端不再维护 localStorage 目录，也不再传 dir query。
 
 // 会话状态时间配置：存服务端 ~/.agentlray/settings.json 的 status section，
 // 保存即注入 lib/status.js setStatusConfig，使各平台状态判定立即使用新窗口。
@@ -58,8 +58,8 @@ const UNIT_MS = { min: 60_000, hour: 3_600_000 };
 type StatusKey = 'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs';
 type SectionKey = 'platforms' | 'llm' | 'status' | 'kanban';
 
-// 全对话框单一 draft：所有 tab 的待保存输入。服务器 section 的「空串 = 回默认」。
-// 平台按 id 聚合 { mounted, replaced, dir, bin }（Q15）：mounted/replaced 初始 =
+// 全对话框单一 draft：所有 panel 的待保存输入。服务器 section 的「空串 = 回默认」。
+// 平台按 id 聚合 { mounted, replaced, dir, bin }：mounted/replaced 初始 =
 // 服务端 platforms 镜像（configuredMounted / replaced），dir 初始 = 服务端 dirs 值，
 // bin 初始 = 服务端 cliBins 生效值。
 interface PlatformDraft {
@@ -84,6 +84,14 @@ function emptyDraft(): Draft {
   };
 }
 
+// 左侧导航项（桌面纵向 / 移动端横向滚动栏）。key 复用 SectionKey。
+const MENU: { key: SectionKey; label: string }[] = [
+  { key: 'platforms', label: '平台' },
+  { key: 'llm', label: 'LLM 接口' },
+  { key: 'status', label: '状态时间配置' },
+  { key: 'kanban', label: '任务看板' },
+];
+
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -106,11 +114,12 @@ export function SettingsDialog({
     status: false,
     kanban: false,
   });
+  // 当前激活的左侧导航面板。
+  const [menu, setMenu] = useState<SectionKey>('platforms');
   // 打开后仅在 settings 数据首次就绪时种 draft（此后编辑不被打断）。
   const seeded = useRef(false);
 
   // 平台列表：优先完整 catalog（含未挂载/broken），否则回退 store 运行时列表。
-  // 平台卡片必须看到未挂载条目（否则「启用」无从出现）。
   const platformInfos: PlatformInfo[] = full.data ?? platforms;
 
   const llmBackendText = () => {
@@ -135,8 +144,6 @@ export function SettingsDialog({
       const dirInfo = dirs[id];
       const binInfo = cliBins[id];
       seed[id] = {
-        // mounted 初始 = 服务端配置态（未挂载 = !configuredMounted）。注意：catalog 里
-        // 未挂载平台的 mounted=false 但 configuredMounted=配置态，故用 configuredMounted。
         mounted: !disabled[id],
         replaced: repl[id] === true,
         dir: dirInfo?.value ?? '',
@@ -168,7 +175,6 @@ export function SettingsDialog({
   }
 
   // 对话框打开但 settings 数据未就绪时，数据到达后补种一次（防表单闪现空值）。
-  // 依赖 platformInfos：目录/CLI 初始值以服务端 settings 为准，平台 id 全集来自 catalog。
   useEffect(() => {
     if (open && all.data && !seeded.current) {
       seeded.current = true;
@@ -211,12 +217,8 @@ export function SettingsDialog({
 
   function buildPatch(): SettingsPatch {
     const patch: SettingsPatch = {};
-    // platforms section：仅提交「启停 或 替代」被编辑的平台（draft 未触碰则不发）。
-    // 提交 disabled/replaced 全集（服务端逐 id diff 当前配置，只对变更调用守卫）。
     if (touched.platforms) {
       const setMount = Object.entries(draft.platforms).filter(([, pf]) => pf.mounted !== undefined);
-      // 无法精确知道哪些平台未被编辑 vs 服务端基线 → 全集提交 disabled/replaced，
-      // 服务端 setPlatformMounted 内部 diff 控制实际写盘，安全幂等（Q14-A）。
       const disabled: string[] = [];
       const replaced: string[] = [];
       for (const [id, pf] of setMount) {
@@ -225,7 +227,6 @@ export function SettingsDialog({
       }
       patch.platforms = { disabled, replaced };
     }
-    // dirs section：只提交目录被编辑的平台（key = dirSettingKey，空串 = 清除）。
     if (touched.platforms && draft.platforms) {
       const dirsPatch: NonNullable<SettingsPatch['dirs']> = {};
       let any = false;
@@ -242,7 +243,6 @@ export function SettingsDialog({
       }
       if (any) patch.dirs = dirsPatch;
     }
-    // cliBins section：只提交命令被编辑的平台（空串 = 回默认命令名）。
     if (touched.platforms && draft.platforms) {
       const binsPatch: NonNullable<SettingsPatch['cliBins']> = {};
       let any = false;
@@ -264,9 +264,7 @@ export function SettingsDialog({
         if (raw !== undefined) {
           const n = Number(raw.trim());
           if (Number.isFinite(n) && n > 0) ms = Math.round(n * UNIT_MS[field.unit]);
-          // 空/非法输入 = 清除该 key（回退默认）
         } else {
-          // 未编辑的字段沿用当前已配置值，避免保存时被误清。
           ms = all.data?.status[field.key]?.value;
         }
         if (ms !== undefined) status[field.key] = ms;
@@ -281,7 +279,6 @@ export function SettingsDialog({
     if (touched.llm) {
       const baseUrl = draft.llm.baseUrl.trim();
       const timeoutRaw = draft.llm.analysisTimeoutMs.trim();
-      // 分钟→毫秒；空/非法 = 0 → 服务端清除该键回默认。
       let analysisTimeoutMs = 0;
       if (timeoutRaw !== '') {
         const n = Number(timeoutRaw);
@@ -290,7 +287,6 @@ export function SettingsDialog({
       patch.llm = {
         baseUrl,
         model: draft.llm.model.trim(),
-        // apiKey 语义：非空 = 替换；空时 baseUrl 非空 = 保留服务器密钥，baseUrl 空 = 清除。
         apiKey: draft.llm.apiKey !== '' ? draft.llm.apiKey : baseUrl ? undefined : '',
         analysisTimeoutMs,
       };
@@ -303,7 +299,7 @@ export function SettingsDialog({
   };
 
   // 恢复默认到表单（须再点 Save 才落盘）：目录/CLI 留空 = 回默认；
-  // 启停/替代不重置（Q9-A，防误伤——平台挂载态改动需重启才能生效，不应被 Reset 顺带清掉）。
+  // 启停/替代不重置（防误伤——平台挂载态改动需重启才能生效，不应被 Reset 顺带清掉）。
   const reset = () => {
     setDraft((d) => {
       const platforms: Record<string, PlatformDraft> = {};
@@ -330,322 +326,368 @@ export function SettingsDialog({
       </span>
     );
 
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl overflow-y-auto md:max-h-[85vh] max-md:max-w-none max-md:w-[calc(100vw-2rem)] max-md:max-h-[calc(100dvh-2rem)] max-md:rounded-2xl max-md:p-4 max-md:gap-3 max-md:grid-cols-[minmax(0,1fr)]">
-        <DialogHeader>
-          <DialogTitle>Settings</DialogTitle>
-        </DialogHeader>
-        <Tabs defaultValue="platforms">
-          <TabsList className="w-full min-w-0 justify-start overflow-x-auto">
-            <TabsTrigger className="shrink-0" value="platforms">平台</TabsTrigger>
-            <TabsTrigger className="shrink-0" value="llm">LLM 接口</TabsTrigger>
-            <TabsTrigger className="shrink-0" value="status">状态时间配置</TabsTrigger>
-            <TabsTrigger className="shrink-0" value="kanban">任务看板</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="platforms" className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              各平台的启用、会话数据目录与 CLI 命令集中在此。目录留空 = 用默认目录（env
-              优先）；命令留空 = 默认命令名。随底部 Save 一次提交，目录/命令立即生效，启停与替代在重启后生效。
-            </p>
-            <div className="space-y-2">
-              {platformInfos.map((p) => {
-                if (!p || p.id == null) return null;
-                const id = p.id;
-                const pf = platformDraft(id);
-                const originLabel = p.origin === 'project' ? '项目' : p.origin === 'user' ? '用户' : '内置';
-                const canMount = !p.broken;
-                // 目录可配 / 命令可配（dirSettingKey / bin 非 null 或置位 resume）
-                const dirKey = p.dirSettingKey;
-                const binConfigurable = p.bin != null || p.resume;
-                const envActive = all.data?.dirs?.[id]?.envActive === true;
-                const broken = p.broken === true;
-                // 未挂载（配置态）→ 目录/CLI 输入灰化，启停仍可点（Q5-A）
-                const disabled = broken || !pf.mounted;
-                return (
-                  <div
-                    key={id}
-                    className="rounded border border-border px-3 py-2"
+  // ---- 各导航面板内容 ----
+  const renderPlatforms = () => (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">平台</h3>
+        <p className="text-xs text-muted-foreground">
+          各平台的启用、会话数据目录与 CLI 命令集中在此。目录留空 = 用默认目录（env
+          优先）；命令留空 = 默认命令名。随底部 Save 一次提交，目录/命令立即生效，启停与替代在重启后生效。
+        </p>
+      </div>
+      <div className="space-y-2">
+        {platformInfos.map((p) => {
+          if (!p || p.id == null) return null;
+          const id = p.id;
+          const pf = platformDraft(id);
+          const originLabel = p.origin === 'project' ? '项目' : p.origin === 'user' ? '用户' : '内置';
+          const canMount = !p.broken;
+          const dirKey = p.dirSettingKey;
+          const binConfigurable = p.bin != null || p.resume;
+          const envActive = all.data?.dirs?.[id]?.envActive === true;
+          const broken = p.broken === true;
+          const disabled = broken || !pf.mounted;
+          return (
+            <div key={id} className="rounded-md border border-border px-3 py-2.5">
+              {/* 头部: label/来源/挂载态/启停 Switch/撤销替代 */}
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="text-sm font-medium">{p.label ?? id}</span>
+                  <span
+                    className="rounded px-1 text-[10px]"
+                    style={{
+                      color: p.color ?? 'var(--muted-foreground)',
+                      border: `1px solid ${p.color ?? 'var(--border)'}55`,
+                    }}
                   >
-                    {/* 头部: label/来源/挂载态/启停 toggle/撤销替代 */}
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="text-sm">{p.label ?? id}</span>
-                        <span
-                          className="rounded px-1 text-[10px]"
-                          style={{
-                            color: p.color ?? 'var(--muted-foreground)',
-                            border: `1px solid ${p.color ?? 'var(--border)'}55`,
-                          }}
-                        >
-                          {id}
-                        </span>
-                        <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{originLabel}</span>
-                        {p.builtin ? (
-                          <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">包内置</span>
-                        ) : null}
-                        {p.replacementPending ? (
-                          <span className="text-[10px] text-amber-500">替代待生效</span>
-                        ) : p.restartRequired ? (
-                          <span className="text-[10px] text-amber-500">重启生效</span>
-                        ) : null}
-                      </div>
-                      {canMount ? (
-                        <div className="flex shrink-0 items-center gap-2">
-                          {pf.replaced ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              title="撤销对包内置平台的替代声明"
-                              onClick={() => {
-                                setDraft((d) => ({
-                                  ...d,
-                                  platforms: { ...d.platforms, [id]: { ...pf, replaced: false } },
-                                }));
-                                touch('platforms');
-                              }}
-                            >
-                              撤销替代
-                            </Button>
-                          ) : null}
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            title="切换启用状态（重启后生效）"
-                            onClick={() => {
-                              setDraft((d) => ({
-                                ...d,
-                                platforms: { ...d.platforms, [id]: { ...pf, mounted: !pf.mounted } },
-                              }));
-                              touch('platforms');
-                            }}
-                          >
-                            {pf.mounted ? '停用' : '启用'}
-                          </Button>
-                        </div>
-                      ) : (
-                        <span className="shrink-0 text-[10px] text-muted-foreground">不可配置</span>
-                      )}
+                    {id}
+                  </span>
+                  <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{originLabel}</span>
+                  {p.builtin ? (
+                    <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">包内置</span>
+                  ) : null}
+                  {p.replacementPending ? (
+                    <span className="text-[10px] text-amber-500">替代待生效</span>
+                  ) : p.restartRequired ? (
+                    <span className="text-[10px] text-amber-500">重启生效</span>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {pf.replaced ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      title="撤销对包内置平台的替代声明"
+                      onClick={() => {
+                        setDraft((d) => ({
+                          ...d,
+                          platforms: { ...d.platforms, [id]: { ...pf, replaced: false } },
+                        }));
+                        touch('platforms');
+                      }}
+                    >
+                      撤销替代
+                    </Button>
+                  ) : null}
+                  {canMount ? (
+                    <div
+                      className="flex items-center gap-1.5"
+                      title={`切换启用状态（${pf.mounted ? '停用' : '启用'}，重启后生效）`}
+                    >
+                      <span className="text-xs text-muted-foreground">{pf.mounted ? '已启用' : '已停用'}</span>
+                      <Switch
+                        checked={pf.mounted}
+                        disabled={broken}
+                        onClick={() => {
+                          setDraft((d) => ({
+                            ...d,
+                            platforms: { ...d.platforms, [id]: { ...pf, mounted: !pf.mounted } },
+                          }));
+                          touch('platforms');
+                        }}
+                      />
                     </div>
-
-                    {broken && p.error ? (
-                      <p className="mt-1 break-all text-[11px] text-destructive">{p.error}</p>
-                    ) : null}
-
-                    {/* 数据目录行 */}
-                    {dirKey ? (
-                      <div className="mt-2 space-y-1">
-                        <label className="text-xs text-muted-foreground" htmlFor={`setting-dir-${id}`}>
-                          {p.dirSettingLabel ?? `${p.label ?? id} 会话目录`}
-                          {envActive ? (
-                            <span className="ml-1 text-[10px] text-amber-500">
-                              由 {all.data?.dirs?.[id]?.envActive ? '环境变量' : '环境'} 决定，此配置不生效
-                            </span>
-                          ) : all.data?.dirs?.[id]?.configured ? (
-                            <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
-                          ) : (
-                            <span className="ml-1 text-[10px] text-muted-foreground">
-                              默认：{all.data?.dirs?.[id]?.default ?? p.defaultDir}
-                            </span>
-                          )}
-                        </label>
-                        <Input
-                          id={`setting-dir-${id}`}
-                          value={dirValue(id)}
-                          placeholder={all.data?.dirs?.[id]?.default ?? p.defaultDir ?? ''}
-                          disabled={disabled || envActive}
-                          onChange={(e) => {
-                            setDraft((d) => ({
-                              ...d,
-                              platforms: { ...d.platforms, [id]: { ...pf, dir: e.target.value } },
-                            }));
-                            touch('platforms');
-                          }}
-                        />
-                        {p.dirSettingHint ? (
-                          <p className="text-[11px] text-muted-foreground">{p.dirSettingHint}</p>
-                        ) : null}
-                      </div>
-                    ) : null}
-
-                    {/* CLI 命令行：平台不支持配置命令（bin 为 null 且无 resume，
-                        如 OpenClaw）→ 整行隐藏，而非灰化占位 */}
-                    {binConfigurable ? (
-                      <div className="mt-2 space-y-1">
-                        <label className="text-xs text-muted-foreground" htmlFor={`setting-bin-${id}`}>
-                          CLI 命令
-                          {all.data?.cliBins?.[id]?.configured ? (
-                            <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
-                          ) : (
-                            <span className="ml-1 text-[10px] text-muted-foreground">
-                              默认：{all.data?.cliBins?.[id]?.default ?? p.bin ?? ''}
-                            </span>
-                          )}
-                        </label>
-                        <Input
-                          id={`setting-bin-${id}`}
-                          value={cliBinValue(id)}
-                          placeholder={all.data?.cliBins?.[id]?.default ?? p.bin ?? ''}
-                          disabled={disabled}
-                          onChange={(e) => {
-                            setDraft((d) => ({
-                              ...d,
-                              platforms: { ...d.platforms, [id]: { ...pf, bin: e.target.value } },
-                            }));
-                            touch('platforms');
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="llm" className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              prompt 优化 / 聚类建议 / 命名建议的后端；留空 Base URL = 回退本机 claude CLI 探测。
-              当前后端：{llmBackendText()}
-            </p>
-            <div className="space-y-2">
-              <div>
-                <label className="text-xs text-muted-foreground" htmlFor="llm-baseurl">
-                  Base URL（OpenAI 兼容端点）
-                </label>
-                <Input
-                  id="llm-baseurl"
-                  placeholder="https://api.openai.com/v1 或 http://localhost:11434/v1"
-                  value={draft.llm.baseUrl}
-                  onChange={(e) => {
-                    setDraft((d) => ({ ...d, llm: { ...d.llm, baseUrl: e.target.value } }));
-                    touch('llm');
-                  }}
-                />
-                <p className="text-[11px] text-muted-foreground">留空 = 回退本机 claude CLI 探测；配置 OpenAI 兼容端点时必填</p>
+                  ) : (
+                    <span className="shrink-0 text-[10px] text-muted-foreground">不可配置</span>
+                  )}
+                </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground" htmlFor="llm-model">
-                  模型名
-                </label>
-                <Input
-                  id="llm-model"
-                  placeholder="gpt-4o-mini / qwen2.5"
-                  value={draft.llm.model}
-                  onChange={(e) => {
-                    setDraft((d) => ({ ...d, llm: { ...d.llm, model: e.target.value } }));
-                    touch('llm');
-                  }}
-                />
-                <p className="text-[11px] text-muted-foreground">Base URL 已配置时模型名必填</p>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground" htmlFor="llm-apikey">
-                  API Key
-                </label>
-                <Input
-                  id="llm-apikey"
-                  type="password"
-                  placeholder={all.data?.llm.hasApiKey ? '已保存，留空保持不变' : '本地端点可留空'}
-                  value={draft.llm.apiKey}
-                  onChange={(e) => {
-                    setDraft((d) => ({ ...d, llm: { ...d.llm, apiKey: e.target.value } }));
-                    touch('llm');
-                  }}
-                />
-                <p className="text-[11px] text-muted-foreground">本地服务可留空；密钥只在服务端保存、不回显</p>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground" htmlFor="llm-analysis-timeout">
-                  提示词分析超时（分钟）
-                </label>
-                <Input
-                  id="llm-analysis-timeout"
-                  type="number"
-                  min="1"
-                  value={draft.llm.analysisTimeoutMs}
-                  placeholder="15"
-                  onChange={(e) => {
-                    setDraft((d) => ({ ...d, llm: { ...d.llm, analysisTimeoutMs: e.target.value } }));
-                    touch('llm');
-                  }}
-                />
-                <p className="text-[11px] text-muted-foreground">
-                  「提示词画像」分析的单次 LLM 请求上限，默认 15 分钟；留空 = 默认。超过时限自动中止并提示，遇慢端点可调大
-                </p>
-              </div>
-            </div>
-          </TabsContent>
 
-          <TabsContent value="status" className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              会话四态（awaiting-input / working / waiting / stopped）的判定时间窗口；保存即对后续状态判定生效。
-            </p>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">
-                状态判定时间窗口（单位：分钟 / 小时；保存即对后续状态判定生效）
-              </label>
-              {STATUS_FIELDS.map((field) => (
-                <div key={field.key} className="space-y-1">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <label className="text-xs text-muted-foreground" htmlFor={`setting-status-${field.key}`}>
-                      {field.label}（{field.unit === 'min' ? '分钟' : '小时'}）
-                      {statusFieldBadge(field)}
-                    </label>
-                  </div>
+              {broken && p.error ? (
+                <p className="mt-1 break-all text-[11px] text-destructive">{p.error}</p>
+              ) : null}
+
+              {/* 数据目录行 */}
+              {dirKey ? (
+                <div className="mt-2 space-y-1">
+                  <label className="text-xs text-muted-foreground" htmlFor={`setting-dir-${id}`}>
+                    {p.dirSettingLabel ?? `${p.label ?? id} 会话目录`}
+                    {envActive ? (
+                      <span className="ml-1 text-[10px] text-amber-500">
+                        由 {all.data?.dirs?.[id]?.envActive ? '环境变量' : '环境'} 决定，此配置不生效
+                      </span>
+                    ) : all.data?.dirs?.[id]?.configured ? (
+                      <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
+                    ) : (
+                      <span className="ml-1 text-[10px] text-muted-foreground">
+                        默认：{all.data?.dirs?.[id]?.default ?? p.defaultDir}
+                      </span>
+                    )}
+                  </label>
                   <Input
-                    id={`setting-status-${field.key}`}
-                    type="number"
-                    min="1"
-                    value={statusDisplay(field.key, field.unit)}
-                    placeholder={field.placeholder}
+                    id={`setting-dir-${id}`}
+                    value={dirValue(id)}
+                    placeholder={all.data?.dirs?.[id]?.default ?? p.defaultDir ?? ''}
+                    disabled={disabled || envActive}
                     onChange={(e) => {
-                      setDraft((d) => ({ ...d, status: { ...d.status, [field.key]: e.target.value } }));
-                      touch('status');
+                      setDraft((d) => ({
+                        ...d,
+                        platforms: { ...d.platforms, [id]: { ...pf, dir: e.target.value } },
+                      }));
+                      touch('platforms');
                     }}
                   />
-                  <p className="text-[11px] text-muted-foreground">{field.hint}</p>
+                  {p.dirSettingHint ? (
+                    <p className="text-[11px] text-muted-foreground">{p.dirSettingHint}</p>
+                  ) : null}
                 </div>
-              ))}
-            </div>
-          </TabsContent>
+              ) : null}
 
-          <TabsContent value="kanban" className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              任务看板每列（待用户输入 / 工作中 / 等待中 / 已停止）最多显示的会话条数；截断在前端客户端完成，保存即生效。
-            </p>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground" htmlFor="setting-kanban-max">
-                每列最多会话条数
-                {all.data?.kanban?.maxPerStatus?.configured ? (
-                  <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
-                ) : (
-                  <span className="ml-1 text-[10px] text-muted-foreground">
-                    默认：{all.data?.kanban?.maxPerStatus?.default ?? 20}
-                  </span>
-                )}
-              </label>
-              <Input
-                id="setting-kanban-max"
-                type="number"
-                min="1"
-                value={kanbanDisplay()}
-                placeholder="20"
-                onChange={(e) => {
-                  setDraft((d) => ({ ...d, kanban: e.target.value }));
-                  touch('kanban');
-                }}
-              />
-              <p className="text-[11px] text-muted-foreground">每列最多显示的会话条数，默认 20；正整数</p>
+              {/* CLI 命令行：平台不支持配置命令（bin 为 null 且无 resume）→ 整行隐藏 */}
+              {binConfigurable ? (
+                <div className="mt-2 space-y-1">
+                  <label className="text-xs text-muted-foreground" htmlFor={`setting-bin-${id}`}>
+                    CLI 命令
+                    {all.data?.cliBins?.[id]?.configured ? (
+                      <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
+                    ) : (
+                      <span className="ml-1 text-[10px] text-muted-foreground">
+                        默认：{all.data?.cliBins?.[id]?.default ?? p.bin ?? ''}
+                      </span>
+                    )}
+                  </label>
+                  <Input
+                    id={`setting-bin-${id}`}
+                    value={cliBinValue(id)}
+                    placeholder={all.data?.cliBins?.[id]?.default ?? p.bin ?? ''}
+                    disabled={disabled}
+                    onChange={(e) => {
+                      setDraft((d) => ({
+                        ...d,
+                        platforms: { ...d.platforms, [id]: { ...pf, bin: e.target.value } },
+                      }));
+                      touch('platforms');
+                    }}
+                  />
+                </div>
+              ) : null}
             </div>
-          </TabsContent>
-        </Tabs>
+          );
+        })}
+      </div>
+    </section>
+  );
+
+  const renderLlm = () => (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">LLM 接口</h3>
+        <p className="text-xs text-muted-foreground">
+          prompt 优化 / 聚类建议 / 命名建议的后端；留空 Base URL = 回退本机 claude CLI 探测。
+          当前后端：{llmBackendText()}
+        </p>
+      </div>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="llm-baseurl">
+            Base URL（OpenAI 兼容端点）
+          </label>
+          <Input
+            id="llm-baseurl"
+            placeholder="https://api.openai.com/v1 或 http://localhost:11434/v1"
+            value={draft.llm.baseUrl}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, llm: { ...d.llm, baseUrl: e.target.value } }));
+              touch('llm');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">留空 = 回退本机 claude CLI 探测；配置 OpenAI 兼容端点时必填</p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="llm-model">
+            模型名
+          </label>
+          <Input
+            id="llm-model"
+            placeholder="gpt-4o-mini / qwen2.5"
+            value={draft.llm.model}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, llm: { ...d.llm, model: e.target.value } }));
+              touch('llm');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">Base URL 已配置时模型名必填</p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="llm-apikey">
+            API Key
+          </label>
+          <Input
+            id="llm-apikey"
+            type="password"
+            placeholder={all.data?.llm.hasApiKey ? '已保存，留空保持不变' : '本地端点可留空'}
+            value={draft.llm.apiKey}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, llm: { ...d.llm, apiKey: e.target.value } }));
+              touch('llm');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">本地服务可留空；密钥只在服务端保存、不回显</p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="llm-analysis-timeout">
+            提示词分析超时（分钟）
+          </label>
+          <Input
+            id="llm-analysis-timeout"
+            type="number"
+            min="1"
+            value={draft.llm.analysisTimeoutMs}
+            placeholder="15"
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, llm: { ...d.llm, analysisTimeoutMs: e.target.value } }));
+              touch('llm');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            「提示词画像」分析的单次 LLM 请求上限，默认 15 分钟；留空 = 默认。超过时限自动中止并提示，遇慢端点可调大
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+
+  const renderStatus = () => (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">状态时间配置</h3>
+        <p className="text-xs text-muted-foreground">
+          会话四态（awaiting-input / working / waiting / stopped）的判定时间窗口；保存即对后续状态判定生效。
+        </p>
+      </div>
+      <div className="space-y-3">
+        {STATUS_FIELDS.map((field) => (
+          <div key={field.key} className="space-y-1">
+            <div className="flex items-baseline justify-between gap-2">
+              <label className="text-xs text-muted-foreground" htmlFor={`setting-status-${field.key}`}>
+                {field.label}（{field.unit === 'min' ? '分钟' : '小时'}）
+                {statusFieldBadge(field)}
+              </label>
+            </div>
+            <Input
+              id={`setting-status-${field.key}`}
+              type="number"
+              min="1"
+              value={statusDisplay(field.key, field.unit)}
+              placeholder={field.placeholder}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, status: { ...d.status, [field.key]: e.target.value } }));
+                touch('status');
+              }}
+            />
+            <p className="text-[11px] text-muted-foreground">{field.hint}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+
+  const renderKanban = () => (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">任务看板</h3>
+        <p className="text-xs text-muted-foreground">
+          任务看板每列（待用户输入 / 工作中 / 等待中 / 已停止）最多显示的会话条数；截断在前端客户端完成，保存即生效。
+        </p>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs text-muted-foreground" htmlFor="setting-kanban-max">
+          每列最多会话条数
+          {all.data?.kanban?.maxPerStatus?.configured ? (
+            <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
+          ) : (
+            <span className="ml-1 text-[10px] text-muted-foreground">
+              默认：{all.data?.kanban?.maxPerStatus?.default ?? 20}
+            </span>
+          )}
+        </label>
+        <Input
+          id="setting-kanban-max"
+          type="number"
+          min="1"
+          value={kanbanDisplay()}
+          placeholder="20"
+          onChange={(e) => {
+            setDraft((d) => ({ ...d, kanban: e.target.value }));
+            touch('kanban');
+          }}
+        />
+        <p className="text-[11px] text-muted-foreground">每列最多显示的会话条数，默认 20；正整数</p>
+      </div>
+    </section>
+  );
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      {/* 桌面（≥768px）：两栏 12rem 左 Nav + 内容；移动端全宽，左 Nav 折叠为顶部横向滚动栏 */}
+      <DialogContent
+        className="max-w-3xl overflow-y-auto top-[6%] translate-y-0 md:max-h-[85vh] md:min-h-[50vh] max-md:max-w-none max-md:w-[calc(100vw-2rem)] max-md:max-h-[calc(100dvh-2rem)] max-md:rounded-2xl max-md:p-4 max-md:gap-3 max-md:grid-cols-[minmax(0,1fr)]"
+        style={{ gridTemplateRows: 'auto 1fr auto' }}
+      >
+        <DialogHeader>
+          <DialogTitle>设置</DialogTitle>
+        </DialogHeader>
+
+        <div className="grid gap-4 md:grid-cols-[12rem_minmax(0,1fr)]">
+          {/* 左导航：桌面纵向 / 移动端顶部横向可滚动栏 */}
+          <nav className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible md:border-r md:border-border md:pr-2">
+            {MENU.map((item) => {
+              const active = menu === item.key;
+              const base =
+                'shrink-0 rounded-md px-3 py-1.5 text-left text-sm font-medium whitespace-nowrap transition-colors md:whitespace-normal ';
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => setMenu(item.key)}
+                  className={
+                    base +
+                    (active
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground')
+                  }
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* 右内容区 */}
+          <div className="min-w-0 border-t border-border pt-3 md:border-t-0 md:pt-0">
+            {menu === 'platforms' && renderPlatforms()}
+            {menu === 'llm' && renderLlm()}
+            {menu === 'status' && renderStatus()}
+            {menu === 'kanban' && renderKanban()}
+          </div>
+        </div>
+
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="destructive" onClick={reset}>
-            Reset to Defaults
+            全部恢复默认值
           </Button>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={save}>保存</Button>
         </div>
       </DialogContent>
     </Dialog>

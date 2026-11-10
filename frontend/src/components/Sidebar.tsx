@@ -88,7 +88,7 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           >
             <SlidersHorizontal className="h-4 w-4" />
           </Button>
-          <Button variant="outline" size="icon" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}>
+          <Button variant="outline" size="icon" title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}>
             <Settings className="h-4 w-4" />
           </Button>
           <Button
