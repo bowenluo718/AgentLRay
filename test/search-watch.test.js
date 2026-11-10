@@ -137,3 +137,26 @@ test('parseWatchLines routes lines through the platform watchParse', () => {
   assert.equal(messages[0].role, 'user');
   assert.equal(messages[0].content[0].text, 'hi');
 });
+
+test('parseWatchLines：声明式 ended 标记经平台 watchParse 透出，共享层不识别具体平台 id（C2）', () => {
+  // omp 的 session_exit custom 记录归一化出 ended（回调时间戳），不再由共享层按 id 扫描。
+  const { messages, ended } = parseWatchLines(PLATFORMS.omp, [
+    JSON.stringify({ type: 'custom', customType: 'session_exit', timestamp: '2026-10-23T01:30:00.000Z' }),
+  ]);
+  assert.equal(messages.length, 0);
+  assert.equal(ended, '2026-10-23T01:30:00.000Z');
+
+  // 任何声明 ended 的适配器（含非 omp）都被平等识别——共享层对具体平台 id 无感知。
+  const genericAdapter = {
+    watchParse: (rec) => {
+      if (rec.kind === 'exit') return { ended: rec.ts };
+      return { session: { id: rec.id } };
+    },
+  };
+  const out = parseWatchLines(
+    genericAdapter,
+    [JSON.stringify({ kind: 'exit', ts: '2026-10-24T00:00:00.000Z' })]
+  );
+  assert.equal(out.ended, '2026-10-24T00:00:00.000Z');
+  assert.equal(out.messages.length, 0);
+});
