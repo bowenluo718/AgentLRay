@@ -15,7 +15,6 @@ const mountSettingsRoutes = require('./lib/routes/settings');
 const mountPlatformsRoutes = require('./lib/routes/platforms');
 const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
-const { migrateLegacySettings } = require('./lib/settings');
 const { loadDirsConfigSync } = require('./lib/dirs-config');
 const { csrfGuard } = require('./lib/csrf');
 
@@ -73,15 +72,14 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 
-// 启动：先做旧独立设置文件的一次性迁移（幂等），再加载状态时间配置注入
-// lib/status.js，最后监听端口。迁移/加载失败不阻塞启动（回退默认窗口）。
+// 启动：加载状态时间配置注入 lib/status.js 与目录配置，最后监听端口。
+// 配置加载失败不阻塞启动（回退默认窗口）。
 async function boot() {
   try {
-    await migrateLegacySettings();
     setStatusConfig(await loadStatusConfig());
     loadDirsConfigSync();
   } catch {
-    // 迁移或配置加载异常 → 维持默认时间窗口，不阻塞服务。
+    // 配置加载异常 → 维持默认时间窗口，不阻塞服务。
   }
   app.listen(PORT, HOST, () => {
     console.log(`AgentLRay listening on http://${HOST}:${PORT}`);

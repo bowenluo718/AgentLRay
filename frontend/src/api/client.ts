@@ -323,8 +323,8 @@ export interface LlmSettings {
   backend: 'openai' | 'claude-cli' | null;
 }
 
-/** 平台 CLI 命令配置（key = 平台 id）。GET 目前只回传内置六平台
- *  （codex / claude-code / omp / dsh / gemini / hermes）；自定义平台 id 的 bin 由后端 resolveCliBin 从
+/** 平台 CLI 命令配置（key = 平台 id）。GET 目前只回传内置五平台
+ *  （codex / claude-code / omp / gemini / hermes）；自定义平台 id 的 bin 由后端 resolveCliBin 从
  *  `~/.agentlray/settings.json` 的 cliBins section 手工配置键读取。 */
 export type CliBins = Partial<Record<string, CliBinSetting>>;
 
@@ -409,7 +409,8 @@ export function getSettings(): Promise<AllSettings> {
 
 /** PUT /api/settings 可选项：只含已编辑的 section，未提供者原样保留。 */
 export type SettingsPatch = {
-  ui?: { platform: Platform; selectedPlatforms: Platform[] };
+  /** ui section 部分更新：platform（默认平台）/ selectedPlatforms（侧栏多选）独立，未传字段保留原值 */
+  ui?: { platform?: Platform; selectedPlatforms?: Platform[] };
   cliBins?: Partial<Record<string, string>>;
   /** 平台目录：key = dirSettingKey（codexDir/openclawDir/…），空串 = 清除 */
   dirs?: Partial<Record<string, string>>;
@@ -435,9 +436,10 @@ export async function getKanbanConfig(): Promise<KanbanConfig> {
   return (await getSettings()).kanban;
 }
 
-/** 平台选择同步（store 在平台选择变化时调用）：写服务端 ui section，
- *  CLI（bin/sessions.js）未传 --platform 时读同一 section 作为默认。 */
-export function saveUiSettings(body: { platform: Platform; selectedPlatforms: Platform[] }): Promise<AllSettings> {
+/** ui section 部分更新（写服务端 ui，CLI 未传 --platform 时读同一 section 作为默认）：
+ *  platform 由设置面板「默认平台」独占管理；selectedPlatforms 由侧栏 persistState 同步。
+ *  未传字段保留服务端原值（两者互不覆盖）。 */
+export function saveUiSettings(body: { platform?: Platform; selectedPlatforms?: Platform[] }): Promise<AllSettings> {
   return requestJson('/api/settings', 'PUT', { ui: body });
 }
 

@@ -30,7 +30,7 @@
 - **Spawn 追踪** — 检测并导航父子 Agent 之间的调用关系
 - **OMP 子 Agent** — OMP 会话派生的子 Agent 会在摘要区以标签列出，点击即可查看子 Agent 的完整对话
 - **消息时间线** — 可视化对话流程图，不同角色用不同颜色标识
-- **Resume 命令** — 一键复制该会话在原 CLI 中的续跑命令（`codex resume`、`claude --resume`、`omp --resume=`、`dsh --profile pi-tui --preset standard --resume`、`gemini -r`、`hermes --resume`）
+- **Resume 命令** — 一键复制该会话在原 CLI 中的续跑命令（`codex resume`、`claude --resume`、`omp --resume=`、`gemini -r`、`hermes --resume`）
 - **摘要可折叠** — 需要更多阅读空间时可折叠会话摘要
 - **自动刷新** — 会话列表和消息实时更新；状态徽标随日志增长即时变化（SSE 推送）并按 5s 轮询校准
 - **任务看板视图** — 按会话四态（待用户输入 / 工作中 / 等待中 / 已停止）分桶的任务看板，与侧栏共用同一份列表缓存与实时状态；每列按 `maxPerStatus`（默认 20，可在 设置 → 任务看板 调整）截断，窄屏纵向堆叠。点击卡片即可在 Sessions 视图打开该会话
@@ -193,9 +193,9 @@ npm start
 
 ### 平台 CLI 命令
 
-`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`、`dsh`、`gemini`、`hermes`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/settings.json` 的 `cliBins` section）> 默认命令名**。
+`agentlray sessions resume --run` 会 spawn 各平台的原生 CLI 来续跑会话。默认使用裸命令名（`codex`、`claude`、`omp`、`gemini`、`hermes`）从 `PATH` 解析；当 CLI 不在 `PATH` 上（例如 nvm 安装的 `claude`）时，可配置覆盖。解析优先级：**环境变量 > 设置面板（服务端 `~/.agentlray/settings.json` 的 `cliBins` section）> 默认命令名**。
 
-**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp / dsh / gemini / hermes 填写可执行命令（绝对路径）。经对话框底部统一 Save 提交后写服务端 `~/.agentlray/settings.json`（`cliBins` section）；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
+**通过设置面板：** 打开 web 界面的 Settings（齿轮），在「平台 CLI 命令」分区为 codex / claude-code / omp / gemini / hermes 填写可执行命令（绝对路径）。经对话框底部统一 Save 提交后写服务端 `~/.agentlray/settings.json`（`cliBins` section）；终端 `resume --run` 与前端「复制恢复命令」按钮都会立即使用该命令；留空 = 清除该平台配置（回退默认命令名）。
 
 **通过环境变量（优先级最高）：**
 
@@ -203,7 +203,6 @@ npm start
 AGENTLRAY_CODEX_BIN=/path/to/codex \
 AGENTLRAY_CLAUDE_CODE_BIN=/home/0668000603/.nvm/versions/node/v22.19.0/bin/claude \
 AGENTLRAY_OMP_BIN=/path/to/omp \
-AGENTLRAY_DSH_BIN=/path/to/dsh \
 AGENTLRAY_GEMINI_BIN=/path/to/gemini \
 AGENTLRAY_HERMES_BIN=/path/to/hermes \
 npm start

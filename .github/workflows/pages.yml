@@ -27,6 +27,10 @@ jobs:
           node-version: 22
           cache: npm
 
+      # 根依赖（express 等）供 build-demo-fixtures.mjs spawn server.js 使用
+      - name: 安装根依赖
+        run: npm ci
+
       - name: 生成 demo fixtures（真实后端跑 sample-logs）
         run: node scripts/build-demo-fixtures.mjs
 

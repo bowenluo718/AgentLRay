@@ -29,7 +29,7 @@ Detailed feature catalog, screenshots, installation alternatives, configuration 
 - **Spawn tracking** — Detect and navigate parent/child agent relationships
 - **OMP sub-agents** — Sub-agents spawned by an OMP session show up as chips in the summary; click one to read the child agent's full transcript
 - **Message timeline** — Visual graph showing conversation flow with role indicators
-- **Resume command** — One click copies the exact command to resume a session in its own CLI (`codex resume`, `claude --resume`, `omp --resume=`, `dsh --profile pi-tui --preset standard --resume`, `gemini -r`, `hermes --resume`)
+- **Resume command** — One click copies the exact command to resume a session in its own CLI (`codex resume`, `claude --resume`, `omp --resume=`, `gemini -r`, `hermes --resume`)
 - **Collapsible summary** — Fold the session summary away when you want the full height for messages
 - **Auto-refresh** — Live-updating session list and messages
 - **Kanban board** — A four-state task board view (`awaiting-input` / `working` / `waiting` / `stopped`) built from the same list cache and live status as the sidebar; columns truncate at `maxPerStatus` (default 20, configurable under Settings → 任务看板), stack vertically on narrow screens. Click a card to open that session in the Sessions view.
@@ -197,9 +197,9 @@ npm start
 
 ### Platform CLI commands
 
-`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`, `dsh`, `gemini`, `hermes`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/settings.json` `cliBins` section) > default command name**.
+`agentlray sessions resume --run` spawns each platform's native CLI to continue a session. By default it uses the bare command name (`codex`, `claude`, `omp`, `gemini`, `hermes`) resolved from `PATH`. Resolution priority: **environment variable > settings panel (server-side `~/.agentlray/settings.json` `cliBins` section) > default command name**.
 
-**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp / dsh / gemini / hermes. Submitted with the dialog's single Save button, persisted server-side in `~/.agentlray/settings.json` (cliBins section); both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
+**Via settings panel:** In the web UI open Settings (gear) and, under "Platform CLI commands", set the executable command (absolute path) for codex / claude-code / omp / gemini / hermes. Submitted with the dialog's single Save button, persisted server-side in `~/.agentlray/settings.json` (cliBins section); both terminal `resume --run` and the frontend "copy resume command" button use it immediately. Leave blank to clear a platform's config (fall back to the default command name).
 
 **Via environment variables (highest priority):**
 
@@ -207,7 +207,6 @@ npm start
 AGENTLRAY_CODEX_BIN=/path/to/codex \
 AGENTLRAY_CLAUDE_CODE_BIN=/home/0668000603/.nvm/versions/node/v22.19.0/bin/claude \
 AGENTLRAY_OMP_BIN=/path/to/omp \
-AGENTLRAY_DSH_BIN=/path/to/dsh \
 AGENTLRAY_GEMINI_BIN=/path/to/gemini \
 AGENTLRAY_HERMES_BIN=/path/to/hermes \
 npm start

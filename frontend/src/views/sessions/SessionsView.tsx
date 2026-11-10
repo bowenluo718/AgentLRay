@@ -78,9 +78,6 @@ function EmptyState() {
           prompt（滤掉工具输出和系统注入），按目录分组。每条可 <b className="text-foreground">优化</b>（Claude 改写）、<b className="text-foreground">🗑 隐藏</b>
           （可恢复）；「🧮 聚类分析」把相似 prompt 聚成模板并统计效果。
         </p>
-        <p>
-          <b className="text-foreground">⚙ 设置</b> — 自定义各平台的日志目录（默认已指向本机标准路径）。
-        </p>
       </div>
     </div>
   );

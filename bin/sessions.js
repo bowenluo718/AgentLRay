@@ -3,7 +3,7 @@
 //
 //   list   按条件查询会话列表（全部平台；openclaw 缺省 --agent = 合并全部 agents）
 //   show   查看单个会话详细信息（会话元信息 + 消息时间线；openclaw 缺省 --agent 跨 agent 查找）
-//   resume 生成并（可选）执行续跑命令（内置 codex / claude-code / omp / dsh /
+//   resume 生成并（可选）执行续跑命令（内置 codex / claude-code / omp /
 //          gemini / hermes；自定义平台可经适配器 resume opt-in 接入）
 //
 // 与 inspect.js 相同的输出约定：--json 输出 {schemaVersion:1,…}，错误为
@@ -20,7 +20,6 @@ const { hasCreateContract, buildNewCommand, spawnNewSession } = require('../lib/
 const { setStatusConfig } = require('../lib/status');
 const { loadStatusConfig } = require('../lib/status-config');
 const { loadUiSettings } = require('../lib/ui-settings');
-const { migrateLegacySettings } = require('../lib/settings');
 const { STATUS, STATUS_LABELS } = require('../lib/status');
 const {
   parsePlatformSelection,
@@ -448,8 +447,8 @@ async function showSession(opts, json) {
 
 // --- resume ---
 
-// 原生续跑参数生成器与命令串构建的统一真源在 lib/resume.js（RESUME_BINS +
-// hasResumeContract + buildResumeCommand），CLI 与 web「复制恢复命令」共用。
+// 原生续跑参数生成器与命令串构建的统一真源在 lib/resume.js（hasResumeContract +
+// buildResumeCommand），CLI 与 web「复制恢复命令」共用。
 
 function runChild(bin, args, cwd) {
   return new Promise((resolvePromise) => {
@@ -511,11 +510,11 @@ function binWithSuffix(bin) {
 async function resumeSession(opts, json) {
   const platform = resolvePlatform(opts.platform);
   if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
-  // 无原生续跑契约的平台快速失败（内置六平台，或自定义 resume opt-in；契约判断
+  // 无原生续跑契约的平台快速失败（内置五平台，或自定义 resume opt-in；契约判断
   // 与命令串构建统一在 lib/resume.js，避免此处与 web 端点各维护一份）。
   if (!hasResumeContract(platform)) {
     throw new Error(
-      `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp / dsh / gemini / hermes, or custom platforms declaring resume, are supported.`
+      `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp / gemini / hermes, or custom platforms declaring resume, are supported.`
     );
   }
 
@@ -729,9 +728,6 @@ async function main(args, _mode = 'sessions') {
       e.usage = true;
       throw e;
     }
-    // 入口幂等迁移旧独立设置文件 → ~/.agentlray/settings.json（Q-B：CLI 单独运行时
-    // 升级也能读到页面/旧文件落的配置；settings.json 已存在则无操作）。
-    await migrateLegacySettings();
     loadDirsConfigSync();
     // new 的提示词 = 位置参数 join(' ')，可空；先拆分再解析选项。
     const newSplit = command === 'new' ? splitNewArgs(rest) : { filtered: rest, positionals: [] };

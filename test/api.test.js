@@ -201,7 +201,7 @@ describe('AgentLRay API', () => {
   });
 
   describe('resume-command 端点（复制恢复命令，与 CLI resume 同源）', () => {
-    it('内置六平台返回命令串（?cwd= 拼 cd 前缀）', async () => {
+    it('内置五平台返回命令串（?cwd= 拼 cd 前缀）', async () => {
       const codex = await getJson(
         srv.base,
         `/api/codex/sessions/${CODEX1}/resume-command?cwd=${encodeURIComponent('/fixtures/project-alpha')}`
@@ -219,13 +219,6 @@ describe('AgentLRay API', () => {
       assert.equal(omp.supported, true);
       assert.equal(omp.command, `omp --auto-approve --resume=${OMP1}`);
 
-      const dshSid = 'session-9f8e7d6c-0101-1010-2323-abcde';
-      const dsh = await getJson(srv.base, `/api/dsh/sessions/${dshSid}/resume-command`);
-      assert.equal(dsh.supported, true);
-      assert.equal(dsh.bin, 'dsh');
-      assert.deepEqual(dsh.args, ['--profile', 'pi-tui', '--preset', 'standard', '--resume', dshSid]);
-      assert.equal(dsh.command, `dsh --profile pi-tui --preset standard --resume ${dshSid}`);
-
       const gemini = await getJson(srv.base, '/api/gemini/sessions/gem-0123/resume-command');
       assert.equal(gemini.supported, true);
       assert.equal(gemini.command, 'gemini -r gem-0123 --approval-mode=yolo');
@@ -240,6 +233,12 @@ describe('AgentLRay API', () => {
       assert.equal(openclaw.supported, false);
       assert.match(openclaw.error, /no native resume command/);
 
+      // dsh：无 resume 契约（交互式 TUI 不可续跑）
+      const dshSid = 'session-9f8e7d6c-0101-1010-2323-abcde';
+      const dsh = await getJson(srv.base, `/api/dsh/sessions/${dshSid}/resume-command`);
+      assert.equal(dsh.supported, false);
+      assert.match(dsh.error, /no native resume command/);
+
       await getJson(srv.base, '/api/nope/sessions/x/resume-command', 404);
     });
 
@@ -249,9 +248,9 @@ describe('AgentLRay API', () => {
       assert.equal(byId.codex.resume, true);
       assert.equal(byId['claude-code'].resume, true);
       assert.equal(byId.omp.resume, true);
-      assert.equal(byId.dsh.resume, true);
       assert.equal(byId.gemini.resume, true);
       assert.equal(byId.hermes.resume, true);
+      assert.equal(byId.dsh.resume, false);
       assert.equal(byId.openclaw.resume, false);
     });
   });
@@ -664,7 +663,6 @@ describe('GET /api/settings 全量返回各 section 默认形态（单一聚合�
       codex: { bin: 'codex', configured: false, default: 'codex' },
       'claude-code': { bin: 'claude', configured: false, default: 'claude' },
       omp: { bin: 'omp', configured: false, default: 'omp' },
-      dsh: { bin: 'dsh', configured: false, default: 'dsh' },
       gemini: { bin: 'gemini', configured: false, default: 'gemini' },
       hermes: { bin: 'hermes', configured: false, default: 'hermes' },
     });
@@ -747,11 +745,36 @@ describe('ui / cliBins 平台选择与 CLI 命令（CLI 缺省 --platform 与 re
     assert.deepEqual(saved.ui, { platform: 'codex', selectedPlatforms: ['codex'] });
   });
 
+  it('ui section 部分更新：只写 platform 不改 selectedPlatforms，反之亦然', async () => {
+    // 先设两个键的基线。
+    await sendJson(srv.base, 'PUT', '/api/settings', {
+      ui: { platform: 'omp', selectedPlatforms: ['omp', 'codex'] },
+    });
+    // 设置面板「默认平台」只写 platform → 多选保留。
+    const onlyPlatform = await sendJson(srv.base, 'PUT', '/api/settings', {
+      ui: { platform: 'claude-code' },
+    });
+    assert.equal(onlyPlatform.ui.platform, 'claude-code');
+    assert.deepEqual(onlyPlatform.ui.selectedPlatforms, ['omp', 'codex']);
+    // 侧栏 persistState 只写 selectedPlatforms → 默认平台保留，且不被清成 null。
+    const onlySelected = await sendJson(srv.base, 'PUT', '/api/settings', {
+      ui: { selectedPlatforms: ['codex'] },
+    });
+    assert.equal(onlySelected.ui.platform, 'claude-code');
+    assert.deepEqual(onlySelected.ui.selectedPlatforms, ['codex']);
+    // 未知平台依旧 400（部分更新下校验仍生效）。
+    const bad = await sendJson(srv.base, 'PUT', '/api/settings', { ui: { platform: 'nope' } }, 400);
+    assert.match(bad.error, /platform must be one of/);
+    // 非数组 selectedPlatforms 依旧 400。
+    const badSel = await sendJson(srv.base, 'PUT', '/api/settings', { ui: { selectedPlatforms: 'omp' } }, 400);
+    assert.match(badSel.error, /selectedPlatforms must be an array/);
+  });
+
   it('cliBins section 只存白名单 key，非字符串忽略', async () => {
     const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
       cliBins: { codex: 'codex', hermes: '/tmp/hermes', omp: 123 },
     });
-    assert.deepEqual(Object.keys(saved.cliBins).sort(), ['claude-code', 'codex', 'dsh', 'gemini', 'hermes', 'omp']);
+    assert.deepEqual(Object.keys(saved.cliBins).sort(), ['claude-code', 'codex', 'gemini', 'hermes', 'omp']);
     assert.equal(saved.cliBins.codex.bin, 'codex');
     assert.equal(saved.cliBins.hermes.bin, '/tmp/hermes');
     assert.equal(saved.cliBins.omp.bin, 'omp');
@@ -943,9 +966,9 @@ describe('GET /api/settings/cli-bins 兼容只读端点（legacy 复制恢复命
     await srv.stop();
   });
 
-  it('返回与 /api/settings.cliBins 相同的响应结构（内置六平台）', async () => {
+  it('返回与 /api/settings.cliBins 相同的响应结构（内置五平台）', async () => {
     const compat = await getJson(srv.base, '/api/settings/cli-bins');
-    assert.deepEqual(Object.keys(compat).sort(), ['claude-code', 'codex', 'dsh', 'gemini', 'hermes', 'omp']);
+    assert.deepEqual(Object.keys(compat).sort(), ['claude-code', 'codex', 'gemini', 'hermes', 'omp']);
     assert.equal(compat.codex.bin, 'codex');
     assert.equal(compat.codex.configured, false);
     assert.equal(compat.hermes.bin, 'hermes');

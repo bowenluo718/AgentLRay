@@ -459,24 +459,10 @@ test('sessions resume 默认只打印命令，含 cwd 前缀与消息转义', as
   assert.equal(ompDoc.note, null);
   assert.doesNotMatch(ompJson.stderr, /持有|派生/);
 
-  // dsh：pi-tui 交互式续跑（web 界面创建的会话；--resume <id> 在 TUI 重开会话）
+  // dsh：无 resume 契约（交互式 TUI 不可续跑）→ 明确报错
   const dsh = runCli(home, ['sessions', 'resume', '--platform', 'dsh', '--id', 'dsh-fixture-session-0001']);
-  assert.equal(dsh.status, 0);
-  assert.equal(
-    dsh.stdout.trim(),
-    "cd '/fixtures/project-delta' && dsh --profile pi-tui --preset standard --resume dsh-fixture-session-0001"
-  );
-
-  // dsh 带 --message：消息追加在 --resume 之后（pi-tui 忽略 unknown 参，行为统一）
-  const dshMsg = runCli(home, [
-    'sessions', 'resume', '--platform', 'dsh', '--id', 'dsh-fixture-session-0001',
-    '--message', 'run the extra check',
-  ]);
-  assert.equal(dshMsg.status, 0);
-  assert.equal(
-    dshMsg.stdout.trim(),
-    "cd '/fixtures/project-delta' && dsh --profile pi-tui --preset standard --resume dsh-fixture-session-0001 'run the extra check'"
-  );
+  assert.equal(dsh.status, 1);
+  assert.match(dsh.stderr, /no native resume/);
 
   const gemini = runCli(home, ['sessions', 'resume', '--platform', 'gemini', '--id', 'gemini-fixture-session-0001']);
   assert.equal(gemini.status, 0);
@@ -503,26 +489,23 @@ test('sessions resume 可用 AGENTLRAY_*_BIN 环境变量覆盖平台 CLI 命令
   const defDoc = JSON.parse(def.stdout);
   assert.equal(defDoc.bin, 'codex');
 
-  // 各平台分别用绝对路径覆盖（dsh/gemini 有会话夹具；hermes 无夹具不可达续跑，跳过）
+  // 各平台分别用绝对路径覆盖（gemini 有会话夹具；hermes 无夹具不可达续跑，跳过）
   const bins = {
     codex: '/home/u/.nvm/versions/node/v22.19.0/bin/codex',
     'claude-code': '/home/u/.nvm/versions/node/v22.19.0/bin/claude',
     omp: '/home/u/.nvm/versions/node/v22.19.0/bin/omp',
-    dsh: '/home/u/.local/bin/dsh',
     gemini: '/home/u/.local/bin/gemini',
   };
   const envVar = {
     codex: 'AGENTLRAY_CODEX_BIN',
     'claude-code': 'AGENTLRAY_CLAUDE_CODE_BIN',
     omp: 'AGENTLRAY_OMP_BIN',
-    dsh: 'AGENTLRAY_DSH_BIN',
     gemini: 'AGENTLRAY_GEMINI_BIN',
   };
   const cases = [
     ['codex', '01900000-0000-7000-8000-000000000001'],
     ['claude-code', 'aaaa1111-2222-4333-8444-555566667777'],
     ['omp', '019a0000-0000-7000-8000-00000000aaaa'],
-    ['dsh', 'dsh-fixture-session-0001'],
     ['gemini', 'gemini-fixture-session-0001'],
   ];
   for (const [platform, id] of cases) {
@@ -837,40 +820,6 @@ async function writeUiSettings(home, data) {
   settings.ui = data;
   await fsp.writeFile(file, JSON.stringify(settings, null, 2));
 }
-
-test('CLI 入口幂等迁移旧独立设置文件 → settings.json 后按新文件读取', async () => {
-  const home = await makeTmpHome();
-  // 模拟升级前的旧文件布局（ui-settings.json + cli-bins.json）。
-  await fsp.mkdir(path.join(home, '.agentlray'), { recursive: true });
-  await fsp.writeFile(
-    path.join(home, '.agentlray', 'ui-settings.json'),
-    JSON.stringify({ platform: 'omp', selectedPlatforms: ['omp', 'codex'] })
-  );
-  await fsp.writeFile(
-    path.join(home, '.agentlray', 'cli-bins.json'),
-    JSON.stringify({ codex: '/legacy/bin/codex' })
-  );
-
-  // 迁移后 list 缺省平台沿用旧 ui-settings；resume 读取迁移后的 cliBins。
-  const list = runCli(home, ['sessions', 'list', '--json']);
-  assert.equal(list.status, 0);
-  assert.deepEqual(JSON.parse(list.stdout).platformIds, ['omp', 'codex']);
-
-  const res = runCli(home, ['sessions', 'resume', '--platform', 'codex', '--id', '01900000-0000-7000-8000-000000000001', '--json']);
-  assert.equal(JSON.parse(res.stdout).bin, '/legacy/bin/codex');
-
-  // settings.json 已生成，旧文件已删除。
-  const settings = JSON.parse(await fsp.readFile(path.join(home, '.agentlray', 'settings.json'), 'utf8'));
-  assert.deepEqual(settings.ui, { platform: 'omp', selectedPlatforms: ['omp', 'codex'] });
-  assert.equal(settings.cliBins.codex, '/legacy/bin/codex');
-  await assert.rejects(fsp.access(path.join(home, '.agentlray', 'ui-settings.json')));
-  await assert.rejects(fsp.access(path.join(home, '.agentlray', 'cli-bins.json')));
-
-  // 再跑一次（此时 settings.json 已存在）→ 迁移幂等，不重建旧文件、不改 settings.json。
-  const again = runCli(home, ['sessions', 'list', '--json']);
-  assert.equal(again.status, 0);
-  assert.deepEqual(JSON.parse(again.stdout).platformIds, ['omp', 'codex']);
-});
 
 test('sessions list 缺省无持久化平台数据时 = all（全部平台）', async () => {
   const home = await makeTmpHome();

@@ -167,7 +167,6 @@ function resumeDemoCommand(platform: string, id: string, cwd: string): string | 
   if (platform === 'codex') cmd = `codex resume ${id} --yolo`;
   else if (platform === 'claude-code') cmd = `claude --dangerously-skip-permissions --resume ${id}`;
   else if (platform === 'omp') cmd = `omp --auto-approve --resume=${id}`;
-  else if (platform === 'dsh') cmd = `dsh --profile pi-tui --preset standard --resume ${id}`;
   else if (platform === 'gemini') cmd = `gemini -r ${id} --approval-mode=yolo`;
   else if (platform === 'hermes') cmd = `hermes --resume ${id} --yolo`;
   return cmd === null ? null : cwd ? `cd ${cwd} && ${cmd}` : cmd;
@@ -267,8 +266,9 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
     }
     if (seg(4) === 'resume-command') {
       // 与真实后端 /resume-command 同构（lib/resume.js buildResumeCommand）：演示
-      // 用固定命令串。内置六平台可演示；其余（openclaw 等无 resume 契约）返回
-      // supported:false，ResumeButton 据此不渲染按钮。
+      // 用固定命令串。内置五平台（codex/claude-code/omp/gemini/hermes）可演示；
+      // 其余（openclaw/dsh 等无 resume 契约）返回 supported:false，ResumeButton
+      // 据此不渲染按钮。
       const id = seg(3);
       const cwd = parsed.searchParams.get('cwd') || '';
       const cmd = resumeDemoCommand(platform, id, cwd);

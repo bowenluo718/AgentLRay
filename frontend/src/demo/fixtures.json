@@ -28,10 +28,27 @@
       "count": 1
      }
     ],
-    "firstUserMessage": "[Synthetic demo] Add a dark mode toggle to the settings page. Persist the choice in localStorage and respect prefers-col",
+    "firstUserMessage": "[Synthetic demo] Add a dark mode toggle to the settings page. Persist the choice in localStorage and respect prefers-color-scheme as the default.",
+    "title": "[Synthetic demo] Add a dark mode toggle to the settings page. Persist the choice in localStorage and respect prefers-color-scheme as the default.",
+    "lastMessage": {
+     "role": "assistant",
+     "text": "Dark mode is in:\n\n- `src/lib/theme.ts` — `currentTheme()` reads localStorage first, falls back to `prefers-color-scheme`; `setTheme()` persists and flips the `dark` class on `<html>`.\n- `src/pages/Settings.tsx` — checkbox toggle wired to `setTheme`.\n- Build passes and both theme tests are green."
+    },
     "cwd": "/demo/webapp",
     "slug": null,
-    "file": "synthetic-feature-dark-mode.jsonl"
+    "tail": {
+     "lastAssistantAt": "2026-08-14T16:31:33.000Z",
+     "lastPromptAt": "2026-08-14T16:30:00.000Z",
+     "endTurnAt": "2026-08-14T16:31:33.000Z",
+     "endedAt": null,
+     "pendingToolAt": null,
+     "pendingNewestAt": null,
+     "oldestPendingToolName": null
+    },
+    "mtimeMs": 1794295626243.029,
+    "file": "synthetic-feature-dark-mode.jsonl",
+    "childrenCount": 0,
+    "status": "stopped"
    },
    {
     "id": "synthetic-bugfix-cache-race",
@@ -60,10 +77,27 @@
       "count": 1
      }
     ],
-    "firstUserMessage": "[Synthetic demo] Our LRU cache sometimes evicts entries that are still pinned. `npm test -- cache` fails intermittently.",
+    "firstUserMessage": "[Synthetic demo] Our LRU cache sometimes evicts entries that are still pinned. `npm test -- cache` fails intermittently. Please find and fix the race in src/cache/evict.ts.",
+    "title": "[Synthetic demo] Our LRU cache sometimes evicts entries that are still pinned. `npm test -- cache` fails intermittently. Please find and fix the race in src/cache/evict.ts.",
+    "lastMessage": {
+     "role": "assistant",
+     "text": "Fixed. The race was a TOCTOU between the pin check and the delete across the `flushToDisk` await:\n\n- `evictBatch` now re-reads the **live** entry from the map after the await and skips it when `refCount > 0` (or when it was replaced).\n- Both cache tests pass.\n\nThe first attempt (re-checking the captured reference) wasn't enough because the test pins through a fresh lookup — a good reminder that after any suspension point you must re-validate against the source of truth, not a captured snapshot."
+    },
     "cwd": "/demo/acme-cache",
     "slug": null,
-    "file": "synthetic-bugfix-cache-race.jsonl"
+    "tail": {
+     "lastAssistantAt": "2026-08-12T09:16:31.000Z",
+     "lastPromptAt": "2026-08-12T09:14:02.000Z",
+     "endTurnAt": "2026-08-12T09:16:31.000Z",
+     "endedAt": null,
+     "pendingToolAt": null,
+     "pendingNewestAt": null,
+     "oldestPendingToolName": null
+    },
+    "mtimeMs": 1794295626243.029,
+    "file": "synthetic-bugfix-cache-race.jsonl",
+    "childrenCount": 0,
+    "status": "stopped"
    }
   ],
   "codex": [
@@ -91,8 +125,24 @@
      }
     ],
     "firstUserMessage": "[Synthetic demo] Background process evidence: startup, polling and exit. No real commands were executed.",
+    "title": "[Synthetic demo] Background process evidence: startup, polling and exit. No real commands were executed.",
+    "lastMessage": {
+     "role": "assistant",
+     "text": "Synthetic exercise: expand Codex process evidence to trace process 42 to its final poll. Process 43 remains last-recorded running, and the poll for process 99 has no launch. Process exit is not proof of task correctness; no live results are appended here."
+    },
     "cwd": "/demo/process-evidence",
-    "file": "rollout-2026-09-24T08-00-00-01990000-0000-7000-8000-000000000199.jsonl"
+    "tail": {
+     "lastAssistantAt": "2026-09-24T08:00:12.000Z",
+     "lastPromptAt": "2026-09-24T08:00:01.000Z",
+     "endTurnAt": null,
+     "endedAt": null,
+     "pendingToolAt": null,
+     "pendingNewestAt": null,
+     "oldestPendingToolName": null
+    },
+    "mtimeMs": 1794295626244.029,
+    "file": "rollout-2026-09-24T08-00-00-01990000-0000-7000-8000-000000000199.jsonl",
+    "status": "stopped"
    },
    {
     "id": "01991234-aaaa-7000-8000-syntheticdemo1",
@@ -113,9 +163,25 @@
       "count": 2
      }
     ],
-    "firstUserMessage": "[Synthetic demo] Add a `--format csv` flag to the `orders export` CLI command. It currently only writes JSON. Keep the J",
+    "firstUserMessage": "[Synthetic demo] Add a `--format csv` flag to the `orders export` CLI command. It currently only writes JSON. Keep the JSON path unchanged and add a test.",
+    "title": "[Synthetic demo] Add a `--format csv` flag to the `orders export` CLI command. It currently only writes JSON. Keep the JSON path unchanged and add a test.",
+    "lastMessage": {
+     "role": "assistant",
+     "text": "Done. `orders export --format csv` now writes CSV via a new `writeCsv` helper (with proper field escaping), the JSON path is untouched, and all three export tests pass — including a new one covering comma/quote escaping."
+    },
     "cwd": "/demo/orders-service",
-    "file": "rollout-2026-08-13T14-02-00-01991234-aaaa-7000-8000-syntheticdemo1.jsonl"
+    "tail": {
+     "lastAssistantAt": "2026-08-13T14:03:29.000Z",
+     "lastPromptAt": "2026-08-13T14:02:01.000Z",
+     "endTurnAt": null,
+     "endedAt": null,
+     "pendingToolAt": null,
+     "pendingNewestAt": null,
+     "oldestPendingToolName": null
+    },
+    "mtimeMs": 1794295626244.029,
+    "file": "rollout-2026-08-13T14-02-00-01991234-aaaa-7000-8000-syntheticdemo1.jsonl",
+    "status": "stopped"
    }
   ],
   "omp": [
@@ -142,10 +208,26 @@
       "count": 1
      }
     ],
-    "firstUserMessage": "[Synthetic demo] Review repeated edit failures and a search failure. Inspect the evidence before recording a human revie",
+    "firstUserMessage": "[Synthetic demo] Review repeated edit failures and a search failure. Inspect the evidence before recording a human review. These logs are fictional; no tool commands were executed.",
+    "lastMessage": {
+     "role": "assistant",
+     "text": "Synthetic review exercise: inspect the six edit results and the search error, then record a follow-up note with evidence. The earlier test success does not validate the edits; a running background job is not a success. This static sample does not append live results."
+    },
     "title": "[Synthetic] Failure review: 7 records → 2 events",
     "cwd": "/demo/diagnostics",
-    "file": "2026-09-23T08-00-00-000Z_0199demo-diagnostics.jsonl"
+    "tail": {
+     "lastAssistantAt": "2026-09-23T08:01:15.000Z",
+     "lastPromptAt": "2026-09-23T08:00:01.000Z",
+     "endTurnAt": null,
+     "endedAt": null,
+     "pendingToolAt": null,
+     "pendingNewestAt": null,
+     "oldestPendingToolName": null
+    },
+    "mtimeMs": 1794295626245.0293,
+    "file": "2026-09-23T08-00-00-000Z_0199demo-diagnostics.jsonl",
+    "childrenCount": 0,
+    "status": "stopped"
    },
    {
     "id": "0199demo-omp-spawn",
@@ -174,10 +256,26 @@
       "count": 1
      }
     ],
-    "firstUserMessage": "[Synthetic demo] Add rate limiting to the public /v1/search endpoint: 60 req/min per API key, 429 with Retry-After when ",
-    "title": "[Synthetic demo] Add rate limiting to the public /v1/search endpoint: 60 req/min per API key, 429 with Retry-After when ",
+    "firstUserMessage": "[Synthetic demo] Add rate limiting to the public /v1/search endpoint: 60 req/min per API key, 429 with Retry-After when exceeded. Spawn a subagent to survey how our other services do it before touching code.",
+    "lastMessage": {
+     "role": "assistant",
+     "text": "Done:\n\n- `src/middleware/rate-limit.ts` — Redis sliding-window limiter (60 req/min per API key), returns 429 + `Retry-After`.\n- `/v1/search` wired through the middleware.\n- DocsWriter's survey table is in the PR description; both rate-limit tests pass."
+    },
+    "title": "[Synthetic demo] Add rate limiting to the public /v1/search endpoint: 60 req/min per API key, 429 with Retry-After when exceeded. Spawn a subagent to survey how our other services do it before touching code.",
     "cwd": "/demo/api-service",
-    "file": "2026-08-15T10-00-00-000Z_0199demo-omp-spawn.jsonl"
+    "tail": {
+     "lastAssistantAt": "2026-08-15T10:03:30.000Z",
+     "lastPromptAt": "2026-08-15T10:00:02.000Z",
+     "endTurnAt": null,
+     "endedAt": null,
+     "pendingToolAt": null,
+     "pendingNewestAt": null,
+     "oldestPendingToolName": null
+    },
+    "mtimeMs": 1794295626245.0293,
+    "file": "2026-08-15T10-00-00-000Z_0199demo-omp-spawn.jsonl",
+    "childrenCount": 1,
+    "status": "stopped"
    }
   ]
  },
@@ -2292,7 +2390,7 @@
    {
     "name": "DocsWriter",
     "file": "DocsWriter.jsonl",
-    "title": "Survey how billing-service and auth-service implement per-key rate limiting: algorithm, storage, headers returned. Summa",
+    "title": "Survey how billing-service and auth-service implement per-key rate limiting: algorithm, storage, headers returned. Summarize in a table.",
     "timestamp": "2026-08-15T10:00:11.000Z",
     "lastActivity": "2026-08-15T10:01:40.000Z",
     "messageCount": 5,

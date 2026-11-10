@@ -120,7 +120,7 @@ function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const [copied, setCopied] = useState(false);
   // 统一走服务端 resume-command 生成命令串（单一真源在 lib/resume.js
   // buildResumeCommand，内部按 process.platform 出 POSIX/PowerShell 并解析同一份
-  // cli-bins 配置）。是否支持续跑由 GET /api/platforms 的 resume 标志决定（内置六平台
+  // cli-bins 配置）。是否支持续跑由 GET /api/platforms 的 resume 标志决定（内置五平台
   // 与自定义适配器 resume opt-in 都由后端置位）。
   const supported = platformInfoById(platforms, platform)?.resume === true;
 

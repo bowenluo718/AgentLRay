@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useAppStore } from '@/store';
@@ -70,6 +71,8 @@ interface PlatformDraft {
 }
 interface Draft {
   platforms: Record<string, PlatformDraft>;
+  /** 默认平台 id（ui.platform，单选）；null = 未设置（CLI show/resume 缺省需显式 --platform）。 */
+  defaultPlatform: string | null;
   llm: { baseUrl: string; model: string; apiKey: string; analysisTimeoutMs: string };
   status: Partial<Record<StatusKey, string>>;
   kanban: string;
@@ -78,6 +81,7 @@ interface Draft {
 function emptyDraft(): Draft {
   return {
     platforms: {},
+    defaultPlatform: null,
     llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
     status: {},
     kanban: '',
@@ -152,6 +156,8 @@ export function SettingsDialog({
     }
     setDraft({
       platforms: seed,
+      // 默认平台 = 服务端 ui.platform（设置面板独占管理，侧栏不再覆盖）。
+      defaultPlatform: typeof all.data?.ui?.platform === 'string' ? all.data.ui.platform : null,
       llm: {
         baseUrl: all.data?.llm.baseUrl ?? '',
         model: all.data?.llm.model ?? '',
@@ -218,6 +224,11 @@ export function SettingsDialog({
   function buildPatch(): SettingsPatch {
     const patch: SettingsPatch = {};
     if (touched.platforms) {
+      // 默认平台（ui.platform）变化 → 只写 platform，不动 selectedPlatforms
+      // （服务端部分更新，两者互不覆盖）。
+      if (draft.defaultPlatform !== (all.data?.ui?.platform ?? null)) {
+        patch.ui = { platform: draft.defaultPlatform ?? undefined };
+      }
       const setMount = Object.entries(draft.platforms).filter(([, pf]) => pf.mounted !== undefined);
       const disabled: string[] = [];
       const replaced: string[] = [];
@@ -308,6 +319,8 @@ export function SettingsDialog({
       }
       return {
         platforms,
+        // 默认平台重置回服务端当前值（须再点 Save 才落盘）。
+        defaultPlatform: typeof all.data?.ui?.platform === 'string' ? all.data.ui.platform : null,
         llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
         status: Object.fromEntries(STATUS_FIELDS.map((f) => [f.key, ''])),
         kanban: '',
@@ -327,15 +340,24 @@ export function SettingsDialog({
     );
 
   // ---- 各导航面板内容 ----
+  // 默认平台可选项：已挂载 + 非 broken（与 CLI resolveDefaultPlatform 的
+  // PLATFORMS[ui.platform] 判定口径一致，保证默认平台对 CLI 有效）。
+  const defaultPlatformOptions = platformInfos.filter(
+    (p): p is PlatformInfo & { id: string } => !p.broken && p.id != null && p.mounted
+  );
+
   const renderPlatforms = () => (
     <section className="space-y-3">
       <div>
         <h3 className="text-sm font-medium">平台</h3>
         <p className="text-xs text-muted-foreground">
-          各平台的启用、会话数据目录与 CLI 命令集中在此。目录留空 = 用默认目录（env
-          优先）；命令留空 = 默认命令名。随底部 Save 一次提交，目录/命令立即生效，启停与替代在重启后生效。
+          各平台的启用、会话数据目录与 CLI 命令集中在此。默认平台（勾选）供 CLI
+          （sessions list/show/resume）未指定 --platform 时使用，必且只能一个；关停
+          当前默认平台时自动转移到第一个已挂载平台。目录留空 = 用默认目录（env 优先）；
+          命令留空 = 默认命令名。随底部 Save 一次提交，目录/命令立即生效，启停与替代在重启后生效。
         </p>
       </div>
+
       <div className="space-y-2">
         {platformInfos.map((p) => {
           if (!p || p.id == null) return null;
@@ -391,22 +413,50 @@ export function SettingsDialog({
                     </Button>
                   ) : null}
                   {canMount ? (
-                    <div
-                      className="flex items-center gap-1.5"
-                      title={`切换启用状态（${pf.mounted ? '停用' : '启用'}，重启后生效）`}
-                    >
-                      <span className="text-xs text-muted-foreground">{pf.mounted ? '已启用' : '已停用'}</span>
-                      <Switch
-                        checked={pf.mounted}
-                        disabled={broken}
-                        onClick={() => {
-                          setDraft((d) => ({
-                            ...d,
-                            platforms: { ...d.platforms, [id]: { ...pf, mounted: !pf.mounted } },
-                          }));
-                          touch('platforms');
-                        }}
-                      />
+                    <div className="flex items-center gap-2">
+                      {/* 默认平台勾选（互斥单选）：已挂载 + 非 broken 平台可设；关闭停用
+                          时随下方 Switch 联动转移。 */}
+                      <label
+                        className="flex cursor-pointer items-center gap-1"
+                        title={broken ? '平台不可用，无法设为默认' : '设为默认平台（CLI 缺省使用，必且只能一个）'}
+                      >
+                        <Checkbox
+                          checked={draft.defaultPlatform === id}
+                          disabled={broken}
+                          onCheckedChange={() => {
+                            setDraft((d) => ({ ...d, defaultPlatform: d.defaultPlatform === id ? null : id }));
+                            touch('platforms');
+                          }}
+                          className="h-3.5 w-3.5"
+                        />
+                        <span className="text-xs text-muted-foreground">默认</span>
+                      </label>
+                      <div
+                        className="flex items-center gap-1.5"
+                        title={`切换启用状态（${pf.mounted ? '停用' : '启用'}，重启后生效）`}
+                      >
+                        <span className="text-xs text-muted-foreground">{pf.mounted ? '已启用' : '已停用'}</span>
+                        <Switch
+                          checked={pf.mounted}
+                          disabled={broken}
+                          onClick={() => {
+                            const nextMounted = !pf.mounted;
+                            // 停用当前默认平台 → 自动转移默认到第一个已挂载非 broken 平台
+                            // （与后端 defaultPlatformId 的 catalog 序语义一致）。
+                            let defaultPlatform = draft.defaultPlatform;
+                            if (nextMounted === false && draft.defaultPlatform === id) {
+                              const next = defaultPlatformOptions.find((x) => x.id !== id);
+                              defaultPlatform = next?.id ?? null;
+                            }
+                            setDraft((d) => ({
+                              ...d,
+                              platforms: { ...d.platforms, [id]: { ...pf, mounted: nextMounted } },
+                              defaultPlatform,
+                            }));
+                            touch('platforms');
+                          }}
+                        />
+                      </div>
                     </div>
                   ) : (
                     <span className="shrink-0 text-[10px] text-muted-foreground">不可配置</span>
@@ -418,8 +468,8 @@ export function SettingsDialog({
                 <p className="mt-1 break-all text-[11px] text-destructive">{p.error}</p>
               ) : null}
 
-              {/* 数据目录行 */}
-              {dirKey ? (
+              {/* 数据目录行：停用（mounted=false）时隐藏，启用后显示 */}
+              {dirKey && pf.mounted ? (
                 <div className="mt-2 space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`setting-dir-${id}`}>
                     {p.dirSettingLabel ?? `${p.label ?? id} 会话目录`}
@@ -454,8 +504,8 @@ export function SettingsDialog({
                 </div>
               ) : null}
 
-              {/* CLI 命令行：平台不支持配置命令（bin 为 null 且无 resume）→ 整行隐藏 */}
-              {binConfigurable ? (
+              {/* CLI 命令行：平台不支持配置命令（bin 为 null 且无 resume）或已停用 → 整行隐藏 */}
+              {binConfigurable && pf.mounted ? (
                 <div className="mt-2 space-y-1">
                   <label className="text-xs text-muted-foreground" htmlFor={`setting-bin-${id}`}>
                     CLI 命令

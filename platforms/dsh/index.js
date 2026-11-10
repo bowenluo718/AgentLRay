@@ -19,15 +19,8 @@ module.exports = {
   dirParam: 'dirDsh',
   dirEnv: DSH_DIR_ENV,
   color: '#4d6bfe',
-  // resume 声明（与旧 RESUME_BINS 逐字对齐）；dsh 无 create（交互式 TUI 不可新建）。
-  // dsh pi-tui 交互式续跑（web 界面创建的会话，headless --session-id 不认这类会话）：
-  // `dsh --profile pi-tui --resume <id>` 在 TUI 中重开持久化会话。--preset standard
-  // 在 resume 路径上不生效（dsh-pi-tui 后端用会话自身记录的 preset），随用户实测定格。
-  resume: {
-    bin: 'dsh',
-    args: (id) => ['--profile', 'pi-tui', '--preset', 'standard', '--resume', id],
-  },
-  bin: 'dsh',
+  // dsh 无 resume 也无 create（交互式 TUI，无法 headless 传提示词 → 不可续跑/新建），
+  // 故不声明 bin（cliBinDefaults 据此不把 dsh 列入可配置 CLI 命令）。
   defaultDir: () => DSH_DIR,
   list: listDshSessions,
   find: findDshSessionFile,

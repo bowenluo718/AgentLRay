@@ -36,7 +36,7 @@ export const FALLBACK_PLATFORM_INFOS: PlatformInfo[] = [
   { id: 'claude-code', label: 'Claude Code', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'claude', dirSettingKey: 'claudeCodeDir', dirSettingLabel: 'Claude Code 会话目录', dirSettingHint: 'Claude Code 项目会话目录', dirParam: 'dirClaude', defaultDir: '~/.claude/projects', color: '#d2a8ff' },
   { id: 'hermes', label: 'Hermes', origin: 'package', builtin: true, capabilities: { ...BASE_CAPS, list: true, getSession: true, watch: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'hermes', dirSettingKey: 'hermesDir', dirSettingLabel: 'Hermes 数据目录', dirSettingHint: 'Hermes 数据目录', dirParam: 'dirHermes', defaultDir: '~/.hermes', color: '#f78166' },
   { id: 'omp', label: 'OMP', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'omp', dirSettingKey: 'ompDir', dirSettingLabel: 'OMP 会话目录', dirSettingHint: 'OMP（oh-my-pi）会话目录', dirParam: 'dirOmp', defaultDir: '~/.omp/agent/sessions', color: '#ffd33d' },
-  { id: 'dsh', label: 'DeepSeek Harness', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'dsh', dirSettingKey: 'dshDir', dirSettingLabel: 'DeepSeek Harness 会话目录', dirSettingHint: 'DeepSeek Harness 会话目录（同时识别 DSH_HOME）', dirParam: 'dirDsh', defaultDir: '~/.dsh/sessions', color: '#4d6bfe' },
+  { id: 'dsh', label: 'DeepSeek Harness', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: null, dirSettingKey: 'dshDir', dirSettingLabel: 'DeepSeek Harness 会话目录', dirSettingHint: 'DeepSeek Harness 会话目录（同时识别 DSH_HOME）', dirParam: 'dirDsh', defaultDir: '~/.dsh/sessions', color: '#4d6bfe' },
   { id: 'gemini', label: 'Gemini CLI', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'gemini', dirSettingKey: 'geminiDir', dirSettingLabel: 'Gemini CLI 临时目录', dirSettingHint: 'Gemini CLI 项目临时目录', dirParam: 'dirGemini', defaultDir: '~/.gemini/tmp', color: '#4285f4' },
 ];
 
@@ -139,60 +139,6 @@ export function saveStoredFlag(key: string, value: boolean): void {
     localStorage.setItem(key, value ? '1' : '0');
   } catch {
     /* private mode etc. — non-fatal */
-  }
-}
-
-// Legacy 扁平目录键（旧版 localStorage 的 openclawDir/codexDir/…），Q13 一次性迁移用。
-const LEGACY_DIR_KEYS = [
-  'openclawDir',
-  'codexDir',
-  'claudeCodeDir',
-  'hermesDir',
-  'ompDir',
-  'dshDir',
-  'geminiDir',
-];
-
-/** 一次性迁移用：从旧 localStorage（agent-xray-settings）读取旧版扁平目录键值
- *  （openclawDir/codexDir/…），供 Q13 迁移到服务端 settings.json dirs section。
- *  无旧值（或仓库损坏）返回空对象。 */
-export function readLegacyDirsFromLocalStorage(): Record<string, string> {
-  const out: Record<string, string> = {};
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as Record<string, unknown>;
-      for (const key of LEGACY_DIR_KEYS) {
-        if (typeof parsed[key] === 'string' && parsed[key] !== '') out[key] = parsed[key] as string;
-      }
-    }
-  } catch {
-    /* corrupted storage — nothing to migrate */
-  }
-  return out;
-}
-
-/** Q13 迁移成功后清除旧目录键（只删 LEGACY_DIR_KEYS，保留同对象内的
- *  platform/selectedPlatforms 等 store 仍要用的键；全空则移除该键）。 */
-export function clearLegacyDirsFromLocalStorage(): void {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (!raw) return;
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    let changed = false;
-    for (const key of LEGACY_DIR_KEYS) {
-      if (key in parsed) {
-        delete parsed[key];
-        changed = true;
-      }
-    }
-    const rest = Object.keys(parsed);
-    if (changed) {
-      if (rest.length === 0) localStorage.removeItem(SETTINGS_KEY);
-      else localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
-    }
-  } catch {
-    /* ignore — no-op */
   }
 }
 
@@ -397,10 +343,11 @@ function persistState(): void {
   } catch {
     /* non-fatal */
   }
-  // 把平台选择同步到服务端 ~/.agentlray/ui-settings.json（CLI 未传 --platform 时
-  // 读取为默认，保证终端命令与页面视角一致）。DEMO 无真实后端，跳过。
+  // 把侧栏多选集合同步到服务端 ui section 的 selectedPlatforms（CLI list 未传
+  // --platform 时读取为缺省，保证终端命令与页面视角一致）。只写 selectedPlatforms：
+  // ui.platform（默认平台）由设置面板独占管理，侧栏不再覆盖。DEMO 无真实后端，跳过。
   if (!DEMO) {
-    saveUiSettings({ platform: st.platform, selectedPlatforms: st.selectedPlatforms }).catch(() => {
+    saveUiSettings({ selectedPlatforms: st.selectedPlatforms }).catch(() => {
       /* non-fatal */
     });
   }

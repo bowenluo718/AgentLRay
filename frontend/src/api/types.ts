@@ -62,7 +62,7 @@ export interface PlatformInfo {
   /** 启停/替代需要在进程重启后生效。 */
   restartRequired: boolean;
   capabilities: PlatformCapabilities;
-  /** 是否声明原生续跑契约（内置六平台，或自定义适配器 resume: { bin, args }）。 */
+  /** 是否声明原生续跑契约（内置五平台，或自定义适配器 resume: { bin, args }）。 */
   resume: boolean;
   /** 是否支持新建会话（与后端 hasCreateContract 一致：codex / claude-code / omp / gemini / hermes，或自定义适配器 create 契约）。 */
   create: boolean;
