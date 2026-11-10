@@ -114,7 +114,6 @@ export async function runExport(
   detail: SessionDetail,
   platform: Platform,
   selectedSessionId: string,
-  dir: string | undefined,
   agent?: string
 ): Promise<'copied' | void> {
   if (format === 'markdown' || format === 'html') {
@@ -130,7 +129,7 @@ export async function runExport(
     // Server-rendered export: shareable Markdown / self-contained HTML with
     // best-effort secret redaction. Content-Disposition drives the filename.
     const a = document.createElement('a');
-    a.href = exportUrl(platform, selectedSessionId, format === 'html' ? 'html' : 'md', { agent, dir });
+    a.href = exportUrl(platform, selectedSessionId, format === 'html' ? 'html' : 'md', { agent });
     a.download = '';
     a.click();
   } else if (format === 'json') {
@@ -145,7 +144,7 @@ export async function runExport(
     return 'copied';
   } else if (format === 'otlp') {
     try {
-      const data = await getOtlp(platform, selectedSessionId, dir);
+      const data = await getOtlp(platform, selectedSessionId);
       downloadFile(JSON.stringify(data, null, 2), `${selectedSessionId}-otlp.json`, 'application/json;charset=utf-8');
     } catch (error) {
       toast.error('OTLP 导出失败: ' + (error as Error).message);

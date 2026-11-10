@@ -241,6 +241,12 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
       },
       kanban: { maxPerStatus: { value: 20, configured: false, default: 20 } },
       llm: { baseUrl: '', model: '', hasApiKey: false, analysisTimeoutMs: 900000, backend: null },
+      dirs: {
+        codex: { key: 'codexDir', value: '', configured: false, envActive: false, default: '/root/.codex/sessions' },
+        'claude-code': { key: 'claudeCodeDir', value: '', configured: false, envActive: false, default: '/root/.claude/projects' },
+        omp: { key: 'ompDir', value: '', configured: false, envActive: false, default: '/root/.omp/agent/sessions' },
+      },
+      platforms: { default: null, ids: ['codex', 'claude-code', 'omp'], disabled: [], replaced: [] },
     });
   }
 

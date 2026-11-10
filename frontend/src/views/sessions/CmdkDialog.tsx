@@ -11,7 +11,7 @@ import type { Platform, SearchMatch, SearchResult, SessionMessage } from '@/api/
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { getTextContent, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
-import { dirsByParam, platformInfoById, useAppStore } from '@/store';
+import { platformInfoById, useAppStore } from '@/store';
 import { sessionDetailOptions, sessionsListOptions } from './queries';
 import { isDisplayableMessage, messageAnchorId } from './lib';
 
@@ -92,11 +92,7 @@ export function CmdkDialog({
     }
     setSearching(true);
     try {
-      const settings = useAppStore.getState().settings;
-      const results = await searchSessions(
-        q,
-        dirsByParam(settings, useAppStore.getState().platforms)
-      );
+      const results = await searchSessions(q);
       if (seq !== seqRef.current) return; // stale response
       setHitCount(results.length);
       setRows(
@@ -148,7 +144,7 @@ export function CmdkDialog({
     store.setDetailContext(plat, agent);
     store.setView('sessions');
     try {
-      const scope = { platform: plat, agent, settings: store.settings };
+      const scope = { platform: plat, agent };
       const list = await queryClient.fetchQuery(sessionsListOptions(scope));
       const found = list.find((s) => s.id === row.result.sessionId);
       if (!found) {
@@ -157,7 +153,7 @@ export function CmdkDialog({
       }
       store.setSelectedSessionId(found.id);
       const detail = await queryClient.fetchQuery(
-        sessionDetailOptions({ platform: plat, sessionId: found.id, agent, settings: store.settings })
+        sessionDetailOptions({ platform: plat, sessionId: found.id, agent })
       );
       const target = locateTargetMessage(detail.messages, query, row.match);
       if (target) store.requestScrollToMessage(target);

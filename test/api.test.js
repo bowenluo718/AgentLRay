@@ -824,6 +824,116 @@ describe('status 时间配置保存后 GET 读回生效窗口', () => {
   });
 });
 
+describe('dirs / platforms section（平台目录与启停随统一设置端点半提交）', () => {
+  let srv;
+  before(async () => {
+    srv = await startServer();
+  });
+  after(async () => {
+    await srv.stop();
+  });
+
+  it('GET 返回 dirs 各平台形态（key/value/default/envActive）与 platforms 镜像', async () => {
+    const all = await getJson(srv.base, '/api/settings');
+    // 测试 serverEnv 为全部平台注入了目录 env（OPENCLAW_DIR/CODEX_DIR/…）→ envActive=true。
+    for (const pid of ['openclaw', 'codex', 'claude-code', 'omp']) {
+      const d = all.dirs[pid];
+      assert.ok(d, `dirs 应含 ${pid}`);
+      assert.equal(typeof d.key, 'string');
+      assert.equal(d.value, '');
+      assert.equal(d.configured, false);
+      assert.equal(d.envActive, true, `${pid} 因 serverEnv 注入目录 env 而 envActive`);
+      assert.ok(typeof d.default === 'string' && d.default.length > 0);
+    }
+    // platforms 镜像：default 为第一个可查询平台，ids 含全部 catalog
+    assert.ok(Array.isArray(all.platforms.ids) && all.platforms.ids.includes('codex'));
+    assert.deepEqual(all.platforms.disabled, []);
+    assert.deepEqual(all.platforms.replaced, []);
+  });
+
+  it('PUT dirs：env 生效平台配置被忽略（env > 配置，Q11-B），非法值清除', async () => {
+    // 全部平台 env 生效 → 写目录不落盘（dirEnvActive 丢弃），验证 env 优先于配置目录。
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
+      dirs: { codexDir: '/data/codex', ompDir: '/data/omp' },
+    });
+    assert.equal(saved.dirs.codex.value, '');
+    assert.equal(saved.dirs.codex.configured, false);
+    assert.equal(saved.dirs.omp.value, '');
+    assert.equal(saved.dirs.omp.configured, false);
+
+    const onDisk = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
+    );
+    assert.equal(onDisk.dirs, undefined, 'env 生效时 dirs section 不应落盘');
+  });
+
+  it('PUT platforms 提交启停 disabled 与撤销替代 replaced，复用 platform-config 守卫', async () => {
+    // 停用 hermes + 声明 codex replaced
+    const saved = await sendJson(srv.base, 'PUT', '/api/settings', {
+      platforms: { disabled: ['hermes'], replaced: ['codex'] },
+    });
+    assert.deepEqual(saved.platforms.disabled, ['hermes']);
+    assert.deepEqual(saved.platforms.replaced, ['codex']);
+
+    // 落盘 settings.json platforms section
+    const onDisk = JSON.parse(
+      await fsp.readFile(path.join(srv.home, '.agentlray', 'settings.json'), 'utf8')
+    );
+    assert.deepEqual(onDisk.platforms, { disabled: ['hermes'], replaced: ['codex'] });
+
+    // GET 镜像反映
+    const all = await getJson(srv.base, '/api/settings');
+    assert.deepEqual(all.platforms.disabled, ['hermes']);
+    assert.deepEqual(all.platforms.replaced, ['codex']);
+  });
+
+  it('PUT platforms 停用全部可查询平台 → 422（复用 platform-config 守卫）', async () => {
+    const srv2 = await startServer();
+    try {
+      const all0 = await getJson(srv2.base, '/api/settings');
+      const ids = all0.platforms.ids;
+      const bad = await sendJson(
+        srv2.base,
+        'PUT',
+        '/api/settings',
+        { platforms: { disabled: ids } },
+        422
+      );
+      assert.match(bad.error, /last/i);
+    } finally {
+      await srv2.stop();
+    }
+  });
+
+  it('PUT platforms 批量停用触发守卫 → 原子：整体 422 且零落盘（无半提交）', async () => {
+    const srv2 = await startServer();
+    try {
+      const all0 = await getJson(srv2.base, '/api/settings');
+      const ids = all0.platforms.ids;
+      // 已有 1 个平台被停用（hermes）→ 再批量停用其余全部 = 停光全部可查询平台 → 422
+      await sendJson(srv2.base, 'PUT', '/api/settings', { platforms: { disabled: ['hermes'] } });
+      const bad = await sendJson(
+        srv2.base,
+        'PUT',
+        '/api/settings',
+        { platforms: { disabled: ids } },
+        422
+      );
+      assert.match(bad.error, /last/i);
+      // 原子性：磁盘 platforms section 保持「只有 hermes 被停用」，其它平台未半写
+      const onDisk = JSON.parse(
+        await fsp.readFile(path.join(srv2.home, '.agentlray', 'settings.json'), 'utf8')
+      );
+      assert.deepEqual(onDisk.platforms, { disabled: ['hermes'], replaced: [] });
+      // GET 镜像同样只反映 hermes
+      const all1 = await getJson(srv2.base, '/api/settings');
+      assert.deepEqual(all1.platforms.disabled, ['hermes']);
+    } finally {
+      await srv2.stop();
+    }
+  });
+});
+
 describe('GET /api/settings/cli-bins 兼容只读端点（legacy 复制恢复命令）', () => {
   let srv;
   before(async () => {

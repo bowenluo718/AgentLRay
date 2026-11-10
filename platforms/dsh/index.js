@@ -3,7 +3,7 @@
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
 const fsp = require('fs/promises');
 const path = require('path');
-const { session: DSH_DIR } = require('./dirs');
+const { session: DSH_DIR, env: DSH_DIR_ENV } = require('./dirs');
 const { findDshSessionFile, chooseDshLogFile, listDshSessions, listDshChildren, getDshChild, normalizeDshEvents, parseDshSessionFile } = require('./parse');
 const { searchDshFile } = require('./search');
 const { extractDshPrompts } = require('./prompts');
@@ -17,6 +17,7 @@ module.exports = {
   dirSettingLabel: 'DeepSeek Harness 会话目录',
   dirSettingHint: 'DeepSeek Harness 会话目录（同时识别 DSH_HOME）',
   dirParam: 'dirDsh',
+  dirEnv: DSH_DIR_ENV,
   color: '#4d6bfe',
   // resume 声明（与旧 RESUME_BINS 逐字对齐）；dsh 无 create（交互式 TUI 不可新建）。
   // dsh pi-tui 交互式续跑（web 界面创建的会话，headless --session-id 不认这类会话）：

@@ -1,7 +1,7 @@
 'use strict';
 // 内置平台 hermes 适配器（P1 从 lib/platforms/index.js 逐字搬迁 + 声明字段）。
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
-const { session: HERMES_DIR } = require('./dirs');
+const { session: HERMES_DIR, env: HERMES_DIR_ENV } = require('./dirs');
 const { listHermesSessions, getHermesSession, listHermesChildren, getHermesChild, searchHermesSessions } = require('./parse');
 const { computeHermesInsights } = require('./insights');
 const { extractHermesPromptGroups } = require('./prompts');
@@ -15,6 +15,7 @@ module.exports = {
   dirSettingLabel: 'Hermes 数据目录',
   dirSettingHint: 'Hermes 数据目录',
   dirParam: 'dirHermes',
+  dirEnv: HERMES_DIR_ENV,
   color: '#f78166',
   // resume / create / bin 声明（与旧 RESUME_BINS / NEW_BINS / CLI_BIN_DEFAULTS 逐字对齐）。
   resume: { bin: 'hermes', args: (id) => ['--resume', id, '--yolo'] },

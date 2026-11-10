@@ -9,7 +9,6 @@ import { getToolsAudit } from '@/api/client';
 import type { ToolsAudit } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { dirsByParam, useAppStore } from '@/store';
 import { InsightSection, ScopeChip, UsageBar } from './bits';
 
 function fmtAuditMs(ms: number | null | undefined): string {
@@ -26,12 +25,8 @@ function fmtAuditDate(iso: string | null | undefined): string {
 }
 
 export function ToolsAuditSection() {
-  const settings = useAppStore((s) => s.settings);
-  const platforms = useAppStore((s) => s.platforms);
   const queryClient = useQueryClient();
   const [showAll, setShowAll] = useState(false);
-  // 目录覆盖以 dirParam 键透传（驱动于运行时平台列表，等价于 multi-platform 聚合口径）。
-  const dirs = dirsByParam(settings, platforms);
 
   // Cached probe — runs once (staleTime ∞ mirrors legacy toolsAuditChecked).
   const probe = useQuery({
@@ -39,11 +34,11 @@ export function ToolsAuditSection() {
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnWindowFocus: false,
     retry: false,
-    queryFn: () => getToolsAudit({ dirs }),
+    queryFn: () => getToolsAudit({}),
   });
 
   const refresh = useMutation({
-    mutationFn: () => getToolsAudit({ dirs, refresh: true }),
+    mutationFn: () => getToolsAudit({ refresh: true }),
     onSuccess: (data) => queryClient.setQueryData(['tools-audit'], data),
   });
 

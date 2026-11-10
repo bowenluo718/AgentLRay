@@ -27,6 +27,7 @@ const {
   isQueryable,
   setPlatformMounted,
   setPlatformReplaced,
+  applyPlatformSection,
   catalogGet,
   catalogHas,
   catalogValues,
@@ -157,4 +158,40 @@ test('setPlatformReplaced：写 replaced，disabled 保留', async () => {
   const r2 = await setPlatformReplaced('codex', false, catalog);
   assert.equal(r2.replaced, false);
   assert.deepEqual(await loadPlatformSection(), { disabled: ['omp'], replaced: [] });
+});
+
+test('applyPlatformSection：一次批量应用 disabled/replaced，单次写盘', async () => {
+  const catalog = makeCatalog([mklistable('codex'), mklistable('omp'), mklistable('hermes')]);
+  const r = await applyPlatformSection({ disabled: ['codex', 'hermes'], replaced: ['omp'] }, catalog);
+  assert.equal(r.restart, true);
+  assert.deepEqual(await loadPlatformSection(), { disabled: ['codex', 'hermes'], replaced: ['omp'] });
+});
+
+test('applyPlatformSection：null 列表保持不变，只应用非 null 一侧', async () => {
+  const catalog = makeCatalog([mklistable('codex'), mklistable('omp')]);
+  await savePlatformSection({ disabled: ['omp'], replaced: [] });
+  const r = await applyPlatformSection({ disabled: null, replaced: ['codex'] }, catalog);
+  assert.deepEqual(await loadPlatformSection(), { disabled: ['omp'], replaced: ['codex'] });
+  assert.deepEqual(r.disabled, ['omp']);
+});
+
+test('applyPlatformSection：unknown id → code unknown-platform 且零写盘', async () => {
+  const catalog = makeCatalog([mklistable('codex'), mklistable('omp')]);
+  await assert.rejects(applyPlatformSection({ disabled: ['nope'] }, catalog), (e) => {
+    assert.equal(e.code, 'unknown-platform');
+    return true;
+  });
+  assert.deepEqual(await loadPlatformSection(), { disabled: [], replaced: [] });
+});
+
+test('applyPlatformSection：批量停用全部可查询平台 → last-platform 且零写盘（原子）', async () => {
+  const catalog = makeCatalog([mklistable('codex'), mklistable('omp'), mklistable('hermes')]);
+  // 先已有 codex 被禁用 → 再批量停用 omp+hermes 会把全部可查询平台停光 → 整体拒绝
+  await savePlatformSection({ disabled: ['codex'], replaced: [] });
+  await assert.rejects(applyPlatformSection({ disabled: ['codex', 'omp', 'hermes'] }, catalog), (e) => {
+    assert.equal(e.code, 'last-platform');
+    return true;
+  });
+  // 零写盘：磁盘保持 codex 已禁用，omp/hermes 未被半写
+  assert.deepEqual(await loadPlatformSection(), { disabled: ['codex'], replaced: [] });
 });

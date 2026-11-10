@@ -3,7 +3,7 @@
 // 不 require resume.js / new.js / cli-bins.js / index.js —— 声明内联。
 const fsp = require('fs/promises');
 const path = require('path');
-const { session: GEMINI_DIR } = require('./dirs');
+const { session: GEMINI_DIR, env: GEMINI_DIR_ENV } = require('./dirs');
 const {
   findGeminiSessionFile,
   readGeminiMetadataLine,
@@ -25,6 +25,7 @@ module.exports = {
   dirSettingLabel: 'Gemini CLI 临时目录',
   dirSettingHint: 'Gemini CLI 项目临时目录',
   dirParam: 'dirGemini',
+  dirEnv: GEMINI_DIR_ENV,
   color: '#4285f4',
   // resume / create / bin 声明（与旧 RESUME_BINS / NEW_BINS / CLI_BIN_DEFAULTS 逐字对齐）。
   resume: { bin: 'gemini', args: (id) => ['-r', id, '--approval-mode=yolo'] },

@@ -4,5 +4,6 @@
 const { resolveDirs } = require('@agentlray/shared/config');
 
 module.exports = {
+  env: 'HERMES_DIR',
   session: resolveDirs({ env: 'HERMES_DIR', segments: ['.hermes'] }),
 };

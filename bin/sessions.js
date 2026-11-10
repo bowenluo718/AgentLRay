@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { PLATFORMS, ALL_PLATFORMS } = require('../lib/platforms');
-const { resolveDir } = require('../lib/config');
+const { dirFor, loadDirsConfigSync } = require('../lib/dirs-config');
 const { hasResumeContract, buildResumeCommand } = require('../lib/resume');
 const { hasCreateContract, buildNewCommand, spawnNewSession } = require('../lib/new');
 const { setStatusConfig } = require('../lib/status');
@@ -254,7 +254,7 @@ async function listSinglePlatform(opts, json, id) {
   if (allAgents) {
     // 走平台适配器 listAllAgents hook：扁平合并全部 agents（同 lib/session-list.js
     // listOpenclawSessionsFlat 的委托实现），过滤/分页在合并集上全局生效。
-    const all = await platform.listAllAgents(resolveDir(opts.dir, platform.defaultDir()), {
+    const all = await platform.listAllAgents(dirFor(platform, opts.dir), {
       includeArchived: false,
     });
     const paged = filterAndPage(all, opts);
@@ -382,7 +382,7 @@ function messageBlock(m, maxText) {
 async function showSession(opts, json) {
   const platform = resolvePlatform(opts.platform);
   if (opts.id == null || opts.id === '') throw new Error('--id <SESSION_ID> 是必填项。');
-  const dir = resolveDir(opts.dir, platform.defaultDir());
+  const dir = dirFor(platform, opts.dir);
   let payload;
   let foundAgent = null;
   if (platform.needsAgent) {
@@ -519,7 +519,7 @@ async function resumeSession(opts, json) {
     );
   }
 
-  const dir = resolveDir(opts.dir, platform.defaultDir());
+  const dir = dirFor(platform, opts.dir);
   const payload = await platform.getSession(dir, opts.id);
   if (!payload) throw new Error(`Session '${opts.id}' not found on platform '${platform.id}'.`);
   const cwd = opts.cwd != null ? opts.cwd : payload.session?.cwd || null;
@@ -621,7 +621,7 @@ async function newSession(opts, json) {
   // message = new 后剩余位置参数 join(' ')，可空（空 = 无提示词裸启/开交互式）。
   const message = opts.message != null ? opts.message : null;
   // cwd = --dir 覆盖，否则平台默认目录（lib/config.js resolveDir：非绝对/含 .. 回退默认）。
-  const cwd = resolveDir(opts.dir, platform.defaultDir());
+  const cwd = dirFor(platform, opts.dir);
 
   if (!opts.run) {
     const { bin, args, command } = await buildNewCommand(platform, { cwd, message });
@@ -732,6 +732,7 @@ async function main(args, _mode = 'sessions') {
     // 入口幂等迁移旧独立设置文件 → ~/.agentlray/settings.json（Q-B：CLI 单独运行时
     // 升级也能读到页面/旧文件落的配置；settings.json 已存在则无操作）。
     await migrateLegacySettings();
+    loadDirsConfigSync();
     // new 的提示词 = 位置参数 join(' ')，可空；先拆分再解析选项。
     const newSplit = command === 'new' ? splitNewArgs(rest) : { filtered: rest, positionals: [] };
     const opts = parseOptions(newSplit.filtered, OPTION_DEFS);

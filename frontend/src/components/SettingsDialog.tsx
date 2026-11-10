@@ -1,13 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  fetchPlatforms,
-  getSettings,
-  saveSettings as apiSaveSettings,
-  setPlatformMounted,
-  setPlatformReplaced,
-} from '@/api/client';
-import type { DirSettings, SettingsPatch } from '@/api/client';
+import { useEffect, useRef, useState } from 'react';
+import { fetchPlatforms, getSettings, saveSettings as apiSaveSettings } from '@/api/client';
+import type { SettingsPatch } from '@/api/client';
 import type { PlatformInfo } from '@/api/types';
 import { Button } from '@/components/ui/button';
 import {
@@ -18,14 +12,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { toast } from 'sonner';
-import { EMPTY_SETTINGS, selectablePlatforms, useAppStore } from '@/store';
+import { useAppStore } from '@/store';
 
-// 统一字段范式：每个配置项一行 label（htmlFor 关联）+ 输入框 + 小字 hint。
-// 避免 label 与 hint 同排拥挤、placeholder 承担说明导致的对应关系混淆。
-// 数据目录 tab 遍历运行时平台列表：只渲染「已挂载且 dirSettingKey 非空」的平台
-// （dirSettingLabel/Hint 由服务端 PlatformInfo 下发，自定义平台若声明 dirSettingKey
-// 同样可配；未声明的平台目录由适配器 defaultDir 决定，不展示输入行）。
+// 平台设置全部内聚到「平台」tab：每个平台一张卡片，聚合启停 toggle、数据目录、
+// CLI 命令。目录真源在服务端 settings.json `dirs` section（env > dirs > 默认）、
+// CLI 命令在 `cliBins` section、启停/替代在 `platforms` section——三者都随底部
+// Save 一次 `PUT /api/settings` 提交（Q4-B）。设置面板目录回显自 GET /api/settings
+// 的 `dirs` section，前端不再维护 localStorage 目录，也不再传 dir query（Q12-A）。
 
 // 会话状态时间配置：存服务端 ~/.agentlray/settings.json 的 status section，
 // 保存即注入 lib/status.js setStatusConfig，使各平台状态判定立即使用新窗口。
@@ -63,147 +56,32 @@ const STATUS_FIELDS: {
 const UNIT_MS = { min: 60_000, hour: 3_600_000 };
 
 type StatusKey = 'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs';
-type SectionKey = 'llm' | 'cliBins' | 'status' | 'kanban';
+type SectionKey = 'platforms' | 'llm' | 'status' | 'kanban';
 
 // 全对话框单一 draft：所有 tab 的待保存输入。服务器 section 的「空串 = 回默认」。
+// 平台按 id 聚合 { mounted, replaced, dir, bin }（Q15）：mounted/replaced 初始 =
+// 服务端 platforms 镜像（configuredMounted / replaced），dir 初始 = 服务端 dirs 值，
+// bin 初始 = 服务端 cliBins 生效值。
+interface PlatformDraft {
+  mounted: boolean;
+  replaced: boolean;
+  dir: string;
+  bin: string;
+}
 interface Draft {
-  dirs: DirSettings;
+  platforms: Record<string, PlatformDraft>;
   llm: { baseUrl: string; model: string; apiKey: string; analysisTimeoutMs: string };
-  cliBins: Partial<Record<string, string>>;
   status: Partial<Record<StatusKey, string>>;
   kanban: string;
 }
 
 function emptyDraft(): Draft {
   return {
-    dirs: { ...EMPTY_SETTINGS },
+    platforms: {},
     llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
-    cliBins: {},
     status: {},
     kanban: '',
   };
-}
-
-
-/** 平台管理 tab：遍历 /api/platforms（含未挂载/broken），展示来源、挂载态与启停 toggle。
- *  启停/撤销替代写服务端 platforms 配置（重启生效），结果写回 store（store.platforms 是
- *  全局唯一平台列表，App 的 usePlatforms 不再刷新，直接 invalidate 收不到新数据）。
- *  不参与统一 draft。 */
-function PlatformSection() {
-  const platforms = useAppStore((s) => s.platforms);
-  const setPlatforms = useAppStore((s) => s.setPlatforms);
-  // 平台管理必须看到含未挂载条目的完整 catalog（含 broken），否则「启用」按钮无从出现：
-  // 挂载成功时全局查询缓存的 ['platforms'] 即全量列表；挂载/替代之后（本组件的独立 key）
-  // 由写操作响应刷新，不依赖全局 key 的失效。
-  const full = useQuery({ queryKey: ['platforms-catalog'], queryFn: fetchPlatforms });
-  const listed = full.data ?? platforms;
-  const queryClient = useQueryClient();
-  const applyPlatformMutation = useMutation({
-    mutationFn: async (fn: () => Promise<PlatformInfo[]>) => fn(),
-    onSuccess: (data) => {
-      if (Array.isArray(data)) {
-        queryClient.setQueryData(['platforms-catalog'], data);
-        setPlatforms(data);
-      }
-      // 配置文件已变（待重启生效）：刷新会话列表，让「停用」立即从查询面消失之外的状态可见。
-      queryClient.invalidateQueries({ queryKey: ['sessions'] });
-    },
-    onError: (e: Error) => toast.error(`平台配置失败: ${e.message}`),
-  });
-
-  const toggleMounted = (id: string, target: boolean) =>
-    applyPlatformMutation.mutate(() => setPlatformMounted(id, target));
-  const toggleReplaced = (id: string, target: boolean) =>
-    applyPlatformMutation.mutate(() => setPlatformReplaced(id, target));
-
-  // 替代声明（settings.platforms.replaced）由服务端 PlatformInfo.replaced 下发：
-  // 启用替代 = 先 `platform replace <id>` 声明再放入同 id 薄适配器；本面板只提供撤销。
-  const replacedDeclared = (p: PlatformInfo) => p.replaced === true;
-
-  const mountStatus = (p: PlatformInfo) => {
-    if (p.replacementPending)
-      return <span className="ml-1 text-[10px] text-amber-500">替代待生效</span>;
-    if (p.restartRequired)
-      return <span className="ml-1 text-[10px] text-amber-500">重启生效</span>;
-    return null;
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <p className="text-xs text-muted-foreground">
-        平台注册表（服务端 GET /api/platforms 单一真源）。停用/启用与撤销替代均在重启后生效；
-        broken 平台需修复适配器或移除声明；声明替代（platform replace &lt;id&gt;）并放入同 id 适配器后覆盖内置。
-      </p>
-      {listed.map((p) => {
-        const originLabel = p.origin === 'project' ? '项目' : p.origin === 'user' ? '用户' : '内置';
-        const canMount = p.id != null && !p.broken;
-        return (
-          <div
-            key={p.id ?? 'unknown'}
-            className="flex items-center justify-between gap-2 rounded border border-border px-3 py-2"
-          >
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm">{p.label ?? p.id}</span>
-                {p.id != null ? (
-                  <span
-                    className="rounded px-1 text-[10px]"
-                    style={{
-                      color: p.color ?? 'var(--muted-foreground)',
-                      border: `1px solid ${p.color ?? 'var(--border)'}55`,
-                    }}
-                  >
-                    {p.id}
-                  </span>
-                ) : null}
-                <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{originLabel}</span>
-                {p.builtin ? (
-                  <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">包内置</span>
-                ) : null}
-                {mountStatus(p)}
-              </div>
-              {p.broken && p.error ? (
-                <p className="mt-0.5 break-all text-[11px] text-destructive">{p.error}</p>
-              ) : null}
-              {!p.broken ? (
-                <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                  {p.dirSettingHint ??
-                    `已挂载${p.capabilities.spawn ? ' · 支持 spawn' : ''}`}
-                </p>
-              ) : null}
-            </div>
-            {canMount ? (
-              <div className="flex shrink-0 items-center gap-2">
-                {replacedDeclared(p) ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={applyPlatformMutation.isPending}
-                    title="撤销对包内置平台的替代声明（settings.platforms.replaced）"
-                    onClick={() => toggleReplaced(p.id as string, false)}
-                  >
-                    撤销替代
-                  </Button>
-                ) : null}
-                {/* 切换的是「配置态」（重启后生效）：挂载中的停用 → PUT mounted=false；
-                    已停用的启用 → PUT mounted=true；仅在重启生效窗口内两者一致时按当前配置发。 */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={applyPlatformMutation.isPending}
-                  onClick={() => toggleMounted(p.id as string, !p.configuredMounted)}
-                >
-                  {p.configuredMounted ? (p.mounted ? '停用' : '重启后停用') : p.mounted ? '重启后启用' : '启用'}
-                </Button>
-              </div>
-            ) : (
-              <span className="shrink-0 text-[10px] text-muted-foreground">不可配置</span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
 }
 
 export function SettingsDialog({
@@ -213,41 +91,27 @@ export function SettingsDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const saveDirSettings = useAppStore((s) => s.saveSettings);
   const platforms = useAppStore((s) => s.platforms);
   const queryClient = useQueryClient();
-  // 单一 GET /api/settings：一次读齐 cliBins / status / kanban / llm。
+  // 单一 GET /api/settings：一次读齐 dirs / cliBins / platforms / status / kanban / llm。
   const all = useQuery({ queryKey: ['settings'], queryFn: getSettings });
+  // 平台卡片必须看到含未挂载条目的完整 catalog（含 broken），否则「启用」无从出现。
+  const full = useQuery({ queryKey: ['platforms-catalog'], queryFn: fetchPlatforms });
 
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   // 服务器 section 的脏标记：保存时只提交已编辑的 section，未触碰的保持服务器原值。
   const [touched, setTouched] = useState<Record<SectionKey, boolean>>({
+    platforms: false,
     llm: false,
-    cliBins: false,
     status: false,
     kanban: false,
   });
   // 打开后仅在 settings 数据首次就绪时种 draft（此后编辑不被打断）。
   const seeded = useRef(false);
 
-  // 数据目录 tab 行：遍历已挂载且声明了目录键（dirSettingKey）的可查询平台。
-  const dirRows = useMemo(
-    () =>
-      selectablePlatforms(platforms)
-        .filter((p) => p.dirSettingKey)
-        .map((p) => ({ key: p.dirSettingKey as string, label: p.dirSettingLabel ?? p.label ?? p.id, hint: p.dirSettingHint })),
-    [platforms]
-  );
-  // resume 续跑配套行：已挂载、声明了默认命令名（bin ≠ null）或置位了 resume 的平台。
-  // 不能只按 resume 置位过滤：适配器缺少 resume 契约但仍声明 bin 时（自定义平台常见），
-  // bin 仍在 resolveCliBin 中作为默认命令名生效，设置面板必须能查看/编辑。
-  const binsRows = useMemo(
-    () =>
-      selectablePlatforms(platforms)
-        .filter((p) => p.bin != null || p.resume)
-        .map((p) => ({ id: p.id, label: p.label ?? p.id, custom: !p.builtin })),
-    [platforms]
-  );
+  // 平台列表：优先完整 catalog（含未挂载/broken），否则回退 store 运行时列表。
+  // 平台卡片必须看到未挂载条目（否则「启用」无从出现）。
+  const platformInfos: PlatformInfo[] = full.data ?? platforms;
 
   const llmBackendText = () => {
     const llm = all.data?.llm;
@@ -259,9 +123,28 @@ export function SettingsDialog({
   };
 
   function seedDraft() {
-    const settings = useAppStore.getState().settings;
+    const dirs = all.data?.dirs ?? {};
+    const cliBins = all.data?.cliBins ?? {};
+    const ps = all.data?.platforms;
+    const repl: Record<string, true> = Object.fromEntries((ps?.replaced ?? []).map((x) => [x, true]));
+    const disabled: Record<string, true> = Object.fromEntries((ps?.disabled ?? []).map((x) => [x, true]));
+    const seed: Record<string, PlatformDraft> = {};
+    for (const p of platformInfos) {
+      if (!p || p.id == null) continue;
+      const id = p.id;
+      const dirInfo = dirs[id];
+      const binInfo = cliBins[id];
+      seed[id] = {
+        // mounted 初始 = 服务端配置态（未挂载 = !configuredMounted）。注意：catalog 里
+        // 未挂载平台的 mounted=false 但 configuredMounted=配置态，故用 configuredMounted。
+        mounted: !disabled[id],
+        replaced: repl[id] === true,
+        dir: dirInfo?.value ?? '',
+        bin: binInfo?.bin ?? '',
+      };
+    }
     setDraft({
-      dirs: { ...settings },
+      platforms: seed,
       llm: {
         baseUrl: all.data?.llm.baseUrl ?? '',
         model: all.data?.llm.model ?? '',
@@ -270,11 +153,10 @@ export function SettingsDialog({
           ? String(Math.round(all.data.llm.analysisTimeoutMs / 60_000))
           : '',
       },
-      cliBins: {},
       status: {},
       kanban: '',
     });
-    setTouched({ llm: false, cliBins: false, status: false, kanban: false });
+    setTouched({ platforms: false, llm: false, status: false, kanban: false });
   }
 
   function handleOpenChange(next: boolean) {
@@ -286,18 +168,28 @@ export function SettingsDialog({
   }
 
   // 对话框打开但 settings 数据未就绪时，数据到达后补种一次（防表单闪现空值）。
+  // 依赖 platformInfos：目录/CLI 初始值以服务端 settings 为准，平台 id 全集来自 catalog。
   useEffect(() => {
     if (open && all.data && !seeded.current) {
       seeded.current = true;
       seedDraft();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, all.data]);
 
   const touch = (section: SectionKey) => setTouched((t) => ({ ...t, [section]: true }));
 
   // ---- 展示值：draft 优先，否则回退服务端当前值 ----
-  const cliBinValue = (id: string) =>
-    draft.cliBins[id] !== undefined ? draft.cliBins[id]! : (all.data?.cliBins?.[id]?.bin ?? '');
+  const platformDraft = (id: string): PlatformDraft =>
+    draft.platforms[id] ?? { mounted: false, replaced: false, dir: '', bin: '' };
+  const dirValue = (id: string) => {
+    if (draft.platforms[id]?.dir !== undefined) return draft.platforms[id]!.dir;
+    return all.data?.dirs?.[id]?.value ?? '';
+  };
+  const cliBinValue = (id: string) => {
+    if (draft.platforms[id]?.bin !== undefined) return draft.platforms[id]!.bin;
+    return all.data?.cliBins?.[id]?.bin ?? '';
+  };
 
   const statusDisplay = (key: StatusKey, unit: 'min' | 'hour') => {
     if (draft.status[key] !== undefined) return draft.status[key]!;
@@ -308,19 +200,62 @@ export function SettingsDialog({
   const kanbanDisplay = () =>
     draft.kanban !== '' ? draft.kanban : String(all.data?.kanban?.maxPerStatus?.value ?? 20);
 
-  // ---- 保存：数据目录始终写 localStorage；服务器 section 只提交已编辑项 ----
+  // ---- 保存：只提交已触碰的 section（dirs/platforms/cliBins 随 platforms 一并提交）----
   const saveMutation = useMutation({
     mutationFn: apiSaveSettings,
     onSuccess: () => {
       onOpenChange(false);
-      // 与旧行为一致：目录依赖 + 设置相关查询全部失效重拉。
       queryClient.invalidateQueries();
     },
   });
 
   function buildPatch(): SettingsPatch {
     const patch: SettingsPatch = {};
-    if (touched.cliBins) patch.cliBins = { ...draft.cliBins };
+    // platforms section：仅提交「启停 或 替代」被编辑的平台（draft 未触碰则不发）。
+    // 提交 disabled/replaced 全集（服务端逐 id diff 当前配置，只对变更调用守卫）。
+    if (touched.platforms) {
+      const setMount = Object.entries(draft.platforms).filter(([, pf]) => pf.mounted !== undefined);
+      // 无法精确知道哪些平台未被编辑 vs 服务端基线 → 全集提交 disabled/replaced，
+      // 服务端 setPlatformMounted 内部 diff 控制实际写盘，安全幂等（Q14-A）。
+      const disabled: string[] = [];
+      const replaced: string[] = [];
+      for (const [id, pf] of setMount) {
+        if (!pf.mounted) disabled.push(id);
+        if (pf.replaced) replaced.push(id);
+      }
+      patch.platforms = { disabled, replaced };
+    }
+    // dirs section：只提交目录被编辑的平台（key = dirSettingKey，空串 = 清除）。
+    if (touched.platforms && draft.platforms) {
+      const dirsPatch: NonNullable<SettingsPatch['dirs']> = {};
+      let any = false;
+      for (const [id, pf] of Object.entries(draft.platforms)) {
+        const info = platformInfos.find((p) => p.id === id);
+        const key = info?.dirSettingKey;
+        if (!key) continue;
+        const val = pf.dir.trim();
+        const server = all.data?.dirs?.[id]?.value ?? '';
+        if (val !== server) {
+          dirsPatch[key] = val;
+          any = true;
+        }
+      }
+      if (any) patch.dirs = dirsPatch;
+    }
+    // cliBins section：只提交命令被编辑的平台（空串 = 回默认命令名）。
+    if (touched.platforms && draft.platforms) {
+      const binsPatch: NonNullable<SettingsPatch['cliBins']> = {};
+      let any = false;
+      for (const [id, pf] of Object.entries(draft.platforms)) {
+        const val = pf.bin.trim();
+        const server = all.data?.cliBins?.[id]?.bin ?? '';
+        if (val !== server) {
+          binsPatch[id] = val;
+          any = true;
+        }
+      }
+      if (any) patch.cliBins = binsPatch;
+    }
     if (touched.status) {
       const status: NonNullable<SettingsPatch['status']> = {};
       for (const field of STATUS_FIELDS) {
@@ -364,25 +299,25 @@ export function SettingsDialog({
   }
 
   const save = () => {
-    // 目录设置宽度为 Record<string, string>：把草稿里非空值全量写入（trim）。
-    const d: DirSettings = {};
-    for (const [key, value] of Object.entries(draft.dirs)) {
-      if (typeof value === 'string' && value.trim() !== '') d[key] = value.trim();
-    }
-    saveDirSettings(d);
     saveMutation.mutate(buildPatch());
   };
 
-  // 恢复默认到表单（须再点 Save 才落盘）：数据目录清空、服务器字段留空 = 回默认。
+  // 恢复默认到表单（须再点 Save 才落盘）：目录/CLI 留空 = 回默认；
+  // 启停/替代不重置（Q9-A，防误伤——平台挂载态改动需重启才能生效，不应被 Reset 顺带清掉）。
   const reset = () => {
-    setDraft({
-      dirs: { ...EMPTY_SETTINGS },
-      llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
-      cliBins: Object.fromEntries(binsRows.map((r) => [r.id, ''])),
-      status: Object.fromEntries(STATUS_FIELDS.map((f) => [f.key, ''])),
-      kanban: '',
+    setDraft((d) => {
+      const platforms: Record<string, PlatformDraft> = {};
+      for (const [id, pf] of Object.entries(d.platforms)) {
+        platforms[id] = { ...pf, dir: '', bin: '' };
+      }
+      return {
+        platforms,
+        llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
+        status: Object.fromEntries(STATUS_FIELDS.map((f) => [f.key, ''])),
+        kanban: '',
+      };
     });
-    setTouched({ llm: true, cliBins: true, status: true, kanban: true });
+    setTouched({ platforms: true, llm: true, status: true, kanban: true });
   };
 
   const statusFieldBadge = (field: (typeof STATUS_FIELDS)[number]) =>
@@ -401,39 +336,172 @@ export function SettingsDialog({
         <DialogHeader>
           <DialogTitle>Settings</DialogTitle>
         </DialogHeader>
-        <Tabs defaultValue="dirs">
+        <Tabs defaultValue="platforms">
           <TabsList className="w-full min-w-0 justify-start overflow-x-auto">
-            <TabsTrigger className="shrink-0" value="dirs">数据目录</TabsTrigger>
             <TabsTrigger className="shrink-0" value="platforms">平台</TabsTrigger>
             <TabsTrigger className="shrink-0" value="llm">LLM 接口</TabsTrigger>
-            <TabsTrigger className="shrink-0" value="clibins">平台 CLI 命令</TabsTrigger>
             <TabsTrigger className="shrink-0" value="status">状态时间配置</TabsTrigger>
             <TabsTrigger className="shrink-0" value="kanban">任务看板</TabsTrigger>
           </TabsList>
 
           <TabsContent value="platforms" className="space-y-3">
-            <PlatformSection />
-          </TabsContent>
-
-          <TabsContent value="dirs" className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              各平台会话日志的存储位置；留空使用默认目录。保存到 localStorage，无需重启。未在此展示
-              （未声明目录键）的平台目录由适配器 defaultDir() 决定，查询参数 ?dir= 可覆盖。
+              各平台的启用、会话数据目录与 CLI 命令集中在此。目录留空 = 用默认目录（env
+              优先）；命令留空 = 默认命令名。随底部 Save 一次提交，目录/命令立即生效，启停与替代在重启后生效。
             </p>
-            {dirRows.map((row) => (
-              <div key={row.key} className="space-y-1">
-                <label className="text-xs font-medium" htmlFor={`setting-${row.key}`}>
-                  {row.label}
-                </label>
-                <Input
-                  id={`setting-${row.key}`}
-                  value={draft.dirs[row.key] ?? ''}
-                  placeholder={row.label}
-                  onChange={(e) => setDraft((d) => ({ ...d, dirs: { ...d.dirs, [row.key]: e.target.value } }))}
-                />
-                {row.hint ? <p className="text-[11px] text-muted-foreground">{row.hint}</p> : null}
-              </div>
-            ))}
+            <div className="space-y-2">
+              {platformInfos.map((p) => {
+                if (!p || p.id == null) return null;
+                const id = p.id;
+                const pf = platformDraft(id);
+                const originLabel = p.origin === 'project' ? '项目' : p.origin === 'user' ? '用户' : '内置';
+                const canMount = !p.broken;
+                // 目录可配 / 命令可配（dirSettingKey / bin 非 null 或置位 resume）
+                const dirKey = p.dirSettingKey;
+                const binConfigurable = p.bin != null || p.resume;
+                const envActive = all.data?.dirs?.[id]?.envActive === true;
+                const broken = p.broken === true;
+                // 未挂载（配置态）→ 目录/CLI 输入灰化，启停仍可点（Q5-A）
+                const disabled = broken || !pf.mounted;
+                return (
+                  <div
+                    key={id}
+                    className="rounded border border-border px-3 py-2"
+                  >
+                    {/* 头部: label/来源/挂载态/启停 toggle/撤销替代 */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="text-sm">{p.label ?? id}</span>
+                        <span
+                          className="rounded px-1 text-[10px]"
+                          style={{
+                            color: p.color ?? 'var(--muted-foreground)',
+                            border: `1px solid ${p.color ?? 'var(--border)'}55`,
+                          }}
+                        >
+                          {id}
+                        </span>
+                        <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">{originLabel}</span>
+                        {p.builtin ? (
+                          <span className="rounded bg-muted px-1.5 text-[10px] text-muted-foreground">包内置</span>
+                        ) : null}
+                        {p.replacementPending ? (
+                          <span className="text-[10px] text-amber-500">替代待生效</span>
+                        ) : p.restartRequired ? (
+                          <span className="text-[10px] text-amber-500">重启生效</span>
+                        ) : null}
+                      </div>
+                      {canMount ? (
+                        <div className="flex shrink-0 items-center gap-2">
+                          {pf.replaced ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              title="撤销对包内置平台的替代声明"
+                              onClick={() => {
+                                setDraft((d) => ({
+                                  ...d,
+                                  platforms: { ...d.platforms, [id]: { ...pf, replaced: false } },
+                                }));
+                                touch('platforms');
+                              }}
+                            >
+                              撤销替代
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            title="切换启用状态（重启后生效）"
+                            onClick={() => {
+                              setDraft((d) => ({
+                                ...d,
+                                platforms: { ...d.platforms, [id]: { ...pf, mounted: !pf.mounted } },
+                              }));
+                              touch('platforms');
+                            }}
+                          >
+                            {pf.mounted ? '停用' : '启用'}
+                          </Button>
+                        </div>
+                      ) : (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">不可配置</span>
+                      )}
+                    </div>
+
+                    {broken && p.error ? (
+                      <p className="mt-1 break-all text-[11px] text-destructive">{p.error}</p>
+                    ) : null}
+
+                    {/* 数据目录行 */}
+                    {dirKey ? (
+                      <div className="mt-2 space-y-1">
+                        <label className="text-xs text-muted-foreground" htmlFor={`setting-dir-${id}`}>
+                          {p.dirSettingLabel ?? `${p.label ?? id} 会话目录`}
+                          {envActive ? (
+                            <span className="ml-1 text-[10px] text-amber-500">
+                              由 {all.data?.dirs?.[id]?.envActive ? '环境变量' : '环境'} 决定，此配置不生效
+                            </span>
+                          ) : all.data?.dirs?.[id]?.configured ? (
+                            <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
+                          ) : (
+                            <span className="ml-1 text-[10px] text-muted-foreground">
+                              默认：{all.data?.dirs?.[id]?.default ?? p.defaultDir}
+                            </span>
+                          )}
+                        </label>
+                        <Input
+                          id={`setting-dir-${id}`}
+                          value={dirValue(id)}
+                          placeholder={all.data?.dirs?.[id]?.default ?? p.defaultDir ?? ''}
+                          disabled={disabled || envActive}
+                          onChange={(e) => {
+                            setDraft((d) => ({
+                              ...d,
+                              platforms: { ...d.platforms, [id]: { ...pf, dir: e.target.value } },
+                            }));
+                            touch('platforms');
+                          }}
+                        />
+                        {p.dirSettingHint ? (
+                          <p className="text-[11px] text-muted-foreground">{p.dirSettingHint}</p>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    {/* CLI 命令行：平台不支持配置命令（bin 为 null 且无 resume，
+                        如 OpenClaw）→ 整行隐藏，而非灰化占位 */}
+                    {binConfigurable ? (
+                      <div className="mt-2 space-y-1">
+                        <label className="text-xs text-muted-foreground" htmlFor={`setting-bin-${id}`}>
+                          CLI 命令
+                          {all.data?.cliBins?.[id]?.configured ? (
+                            <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
+                          ) : (
+                            <span className="ml-1 text-[10px] text-muted-foreground">
+                              默认：{all.data?.cliBins?.[id]?.default ?? p.bin ?? ''}
+                            </span>
+                          )}
+                        </label>
+                        <Input
+                          id={`setting-bin-${id}`}
+                          value={cliBinValue(id)}
+                          placeholder={all.data?.cliBins?.[id]?.default ?? p.bin ?? ''}
+                          disabled={disabled}
+                          onChange={(e) => {
+                            setDraft((d) => ({
+                              ...d,
+                              platforms: { ...d.platforms, [id]: { ...pf, bin: e.target.value } },
+                            }));
+                            touch('platforms');
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
           </TabsContent>
 
           <TabsContent value="llm" className="space-y-3">
@@ -507,42 +575,6 @@ export function SettingsDialog({
                   「提示词画像」分析的单次 LLM 请求上限，默认 15 分钟；留空 = 默认。超过时限自动中止并提示，遇慢端点可调大
                 </p>
               </div>
-            </div>
-          </TabsContent>
-
-          <TabsContent value="clibins" className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              resume 续跑 spawn 的可执行命令；留空 = 默认命令名。解析优先级：环境变量 &gt; 此处 &gt; 默认名。
-            </p>
-            <div className="space-y-1.5">
-              <label className="text-xs text-muted-foreground">
-                空 = 默认命令名；存服务端 ~/.agentlray/settings.json，终端与「复制恢复命令」按钮立即生效。
-              </label>
-              {binsRows.map((row) => (
-                <div key={row.id} className="space-y-1">
-                  <label className="text-xs text-muted-foreground" htmlFor={`setting-clibin-${row.id}`}>
-                    {row.label}
-                    {row.custom ? (
-                      <span className="ml-1 text-[10px] text-sky-500">自定义（适配器 resume.bin 声明）</span>
-                    ) : all.data?.cliBins?.[row.id]?.configured ? (
-                      <span className="ml-1 text-[10px] text-emerald-600">已配置</span>
-                    ) : (
-                      <span className="ml-1 text-[10px] text-muted-foreground">
-                        默认：{all.data?.cliBins?.[row.id]?.default ?? ''}
-                      </span>
-                    )}
-                  </label>
-                  <Input
-                    id={`setting-clibin-${row.id}`}
-                    value={cliBinValue(row.id)}
-                    placeholder={row.label}
-                    onChange={(e) => {
-                      setDraft((d) => ({ ...d, cliBins: { ...d.cliBins, [row.id]: e.target.value } }));
-                      touch('cliBins');
-                    }}
-                  />
-                </div>
-              ))}
             </div>
           </TabsContent>
 

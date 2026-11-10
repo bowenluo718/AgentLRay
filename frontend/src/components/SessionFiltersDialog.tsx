@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { brokenPlatforms, dirBySettingKey, platformInfoById, selectablePlatforms, useAppStore } from '@/store';
+import { brokenPlatforms, platformInfoById, selectablePlatforms, useAppStore } from '@/store';
 import type { GroupBy } from '@/store';
 import { buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
 import { useSessionsList } from '@/views/sessions/queries';
@@ -222,13 +222,12 @@ function ProjectFilterNav() {
 function AgentNav() {
   const platform = useAppStore((s) => s.platform);
   const platforms = useAppStore((s) => s.platforms);
-  const settings = useAppStore((s) => s.settings);
+  const info = platformInfoById(platforms, platform);
   const selectedAgent = useAppStore((s) => s.selectedAgent);
   const setSelectedAgent = useAppStore((s) => s.setSelectedAgent);
-  const info = platformInfoById(platforms, platform);
   const { data: agents } = useQuery({
-    queryKey: ['agents', platform, dirBySettingKey(settings, info)],
-    queryFn: () => getAgents(platform, dirBySettingKey(settings, info) || undefined),
+    queryKey: ['agents', platform],
+    queryFn: () => getAgents(platform),
   });
 
   // 空 selectedAgent = 全部 agent 的合并会话（默认）。Radix SelectItem 不接受空串，

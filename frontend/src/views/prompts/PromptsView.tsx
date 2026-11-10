@@ -14,7 +14,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
   HIDE_TRIVIAL_KEY,
-  dirBySettingKey,
   loadStoredFlag,
   platformInfoById,
   platformLabel,
@@ -38,7 +37,6 @@ export function PromptsView() {
   // 跟随当前会话所属平台（聚合视图点击会话后自动切到该平台）；无选中会话回退侧栏平台。
   const platform = useActivePlatform();
   const selectedAgent = useAppStore((s) => s.selectedAgent);
-  const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);
   const setView = useAppStore((s) => s.setView);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
@@ -46,7 +44,6 @@ export function PromptsView() {
 
   const info = platformInfoById(platforms, platform);
   const agent = info?.capabilities.needsAgent && selectedAgent ? selectedAgent : undefined;
-  const dir = dirBySettingKey(settings, info) || undefined;
 
   // Search — debounced 250ms like legacy; searching disables the trivial filter.
   const [searchInput, setSearchInput] = useState('');
@@ -62,18 +59,18 @@ export function PromptsView() {
   const [manageOpen, setManageOpen] = useState(false);
 
   const promptsQuery = useQuery({
-    queryKey: ['prompts', platform, agent ?? '', dir ?? ''],
-    queryFn: () => getPrompts({ platform, agent, dir }),
+    queryKey: ['prompts', platform, agent ?? ''],
+    queryFn: () => getPrompts({ platform, agent }),
   });
   const hiddenQuery = useQuery({ queryKey: ['prompts-hidden'], queryFn: getHiddenPrompts });
   const hidden = hiddenQuery.data?.hidden ?? [];
 
   // Persisted 画像 restore (cached=1 probe; 204 → null). staleTime/gcTime Infinity:
   // probe once per scope, then the entry doubles as the store for fresh runs.
-  const analysisKey = ['prompt-analysis', platform, agent ?? '', dir ?? ''];
+  const analysisKey = ['prompt-analysis', platform, agent ?? ''];
   const cachedAnalysisQuery = useQuery({
     queryKey: analysisKey,
-    queryFn: () => getPromptAnalysis({ platform, agent, dir, cached: true }),
+    queryFn: () => getPromptAnalysis({ platform, agent, cached: true }),
     staleTime: Infinity,
     gcTime: Infinity,
   });
@@ -81,7 +78,7 @@ export function PromptsView() {
 
   const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const analyzeMutation = useMutation({
-    mutationFn: (refresh: boolean) => getPromptAnalysis({ platform, agent, dir, refresh }),
+    mutationFn: (refresh: boolean) => getPromptAnalysis({ platform, agent, refresh }),
     onMutate: () => setAnalysisStartedAt(Date.now()),
     onSuccess: (data) => queryClient.setQueryData(analysisKey, data),
     onError: (error) => {

@@ -6,7 +6,7 @@ import { useQuery } from '@tanstack/react-query';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { getSessionChild, getSessionChildren, getSessionDetail } from '@/api/client';
 import type { ChildAgentSummary, Platform, SessionDetail } from '@/api/types';
-import { dirBySettingKey, platformInfoById, useAppStore } from '@/store';
+import { platformInfoById, useAppStore } from '@/store';
 
 /** 该平台是否可派生子 agent（能力位 capabilities.children）。 */
 export function hasChildAgents(platform: Platform, platforms: Parameters<typeof platformInfoById>[0]): boolean {
@@ -22,14 +22,12 @@ export function childAgentLabel(c: ChildAgentSummary): string {
 export function useChildrenQuery(): UseQueryResult<ChildAgentSummary[]> {
   const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
-  const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);
-  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined;
   return useQuery({
     queryKey: ['session-children', platform, sessionId],
     enabled: hasChildAgents(platform, platforms) && !!sessionId,
     queryFn: () =>
-      getSessionChildren(platform, sessionId, dir).catch(() => [] as ChildAgentSummary[]),
+      getSessionChildren(platform, sessionId).catch(() => [] as ChildAgentSummary[]),
   });
 }
 
@@ -38,14 +36,12 @@ export function useSessionDetailQuery(): UseQueryResult<SessionDetail> {
   const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const agent = useAppStore((s) => s.detailAgent);
-  const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);
   const needsAgent = platformInfoById(platforms, platform)?.capabilities.needsAgent === true;
-  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined;
   return useQuery({
     queryKey: ['session', platform, sessionId],
     enabled: !!sessionId && (!needsAgent || !!agent),
-    queryFn: () => getSessionDetail(platform, sessionId, { agent: agent || undefined, dir }),
+    queryFn: () => getSessionDetail(platform, sessionId, { agent: agent || undefined }),
   });
 }
 
@@ -54,13 +50,11 @@ export function useChildSessionQuery(): UseQueryResult<SessionDetail> {
   const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const child = useAppStore((s) => s.viewingChildAgent);
-  const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);
-  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined;
   return useQuery({
     queryKey: ['session-child', platform, sessionId, child],
     enabled: hasChildAgents(platform, platforms) && !!sessionId && !!child,
-    queryFn: () => getSessionChild(platform, sessionId, child as string, dir),
+    queryFn: () => getSessionChild(platform, sessionId, child as string),
   });
 }
 

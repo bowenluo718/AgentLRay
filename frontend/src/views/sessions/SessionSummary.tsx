@@ -10,7 +10,7 @@ import { getResumeCommand } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
-import { dirBySettingKey, platformInfoById, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore } from '@/store';
+import { platformInfoById, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore } from '@/store';
 import { ChildAgentsSection } from '@/views/trace/ChildAgentsSection';
 import { TurnLedger } from './TurnLedger';
 import type { ExportFormat } from './exports';
@@ -57,7 +57,6 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
   const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const selectedAgent = useAppStore((s) => s.detailAgent);
-  const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -70,7 +69,6 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
       detail,
       platform,
       selectedSessionId,
-      dirBySettingKey(settings, platformInfoById(platforms, platform)) || undefined,
       platformInfoById(platforms, platform)?.capabilities.needsAgent ? selectedAgent : undefined
     );
     if (result === 'copied') {

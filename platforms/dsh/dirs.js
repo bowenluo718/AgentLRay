@@ -6,5 +6,6 @@
 const { resolveDirs } = require('@agentlray/shared/config');
 
 module.exports = {
+  env: ['DSH_DIR', 'DSH_HOME'],
   session: resolveDirs({ env: 'DSH_DIR', altEnv: 'DSH_HOME', segments: ['.dsh', 'sessions'], altSegments: ['sessions'] }),
 };

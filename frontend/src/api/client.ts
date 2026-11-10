@@ -82,8 +82,8 @@ export function setPlatformReplaced(id: string, replaced: boolean): Promise<Plat
 // ---------- Sessions ----------
 
 /** GET /api/:platform/agents — 枚举平台 agent（needsAgent 平台，如 openclaw）。 */
-export function getAgents(platform: Platform, dir?: string): Promise<string[]> {
-  return fetchJson(withParams(`/api/${encodeURIComponent(platform)}/agents`, { dir }));
+export function getAgents(platform: Platform): Promise<string[]> {
+  return fetchJson(`/api/${encodeURIComponent(platform)}/agents`);
 }
 
 /**
@@ -93,24 +93,20 @@ export function getAgents(platform: Platform, dir?: string): Promise<string[]> {
  */
 export function getSessions(
   platform: Platform,
-  opts: { agent?: string; dir?: string } = {}
+  opts: { agent?: string } = {}
 ): Promise<SessionSummary[]> {
-  return fetchJson(withParams(`/api/${encodeURIComponent(platform)}/sessions`, { dir: opts.dir, agent: opts.agent }));
+  return fetchJson(withParams(`/api/${encodeURIComponent(platform)}/sessions`, { agent: opts.agent }));
 }
 
 /**
  * Multi-platform session list (GET /api/sessions?platform=a,b|all…). Returns one
  * block per platform (needsAgent platform without `agent` → one block per agent).
  * `platforms` 缺省 = all（全部平台）。
- * 目录覆盖用 per-platform `dirParam`（PlatformInfo.dirParam，如 dirOpenclaw），
- * 由调用方把各可查询平台的目录值按 dirParam 组装成 dirsByPlatform 传入。
  */
 export function getSessionsAll(
   opts: {
     platforms?: Platform[];
     agent?: string;
-    /** 各平台的目录覆盖：[dirParam] → 目录值（如 { dirCodex: '…' }）。 */
-    dirsByPlatform?: Record<string, string>;
     status?: string;
     match?: string;
     limit?: number;
@@ -127,22 +123,18 @@ export function getSessionsAll(
     limit: opts.limit,
     offset: opts.offset,
   };
-  for (const [param, dir] of Object.entries(opts.dirsByPlatform ?? {})) {
-    if (dir) params[param] = dir;
-  }
   return fetchJson<SessionsListResponse>(withParams('/api/sessions', params));
 }
 
 export function getSessionDetail(
   platform: Platform,
   sessionId: string,
-  opts: { agent?: string; dir?: string } = {}
+  opts: { agent?: string } = {}
 ): Promise<SessionDetail> {
   // 统一走通用路由 `/api/:platform/sessions/:id`；needsAgent 平台（openclaw）
   // 传 agent 时后端按 agent 定位，缺省跨全部 agents 查找。
   return fetchJson(
     withParams(`/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}`, {
-      dir: opts.dir,
       agent: opts.agent,
     })
   );
@@ -194,58 +186,40 @@ export function createSession(
 }
 
 /** Spawned sub-agents of a session (capabilities.children 平台，如 omp / claude-code）。 */
-export function getSessionChildren(
-  platform: Platform,
-  sessionId: string,
-  dir?: string
-): Promise<ChildAgentSummary[]> {
-  return fetchJson(
-    withParams(`/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/children`, { dir })
-  );
+export function getSessionChildren(platform: Platform, sessionId: string): Promise<ChildAgentSummary[]> {
+  return fetchJson(`/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/children`);
 }
 
 export function getSessionChild(
   platform: Platform,
   sessionId: string,
-  childName: string,
-  dir?: string
+  childName: string
 ): Promise<SessionDetail> {
   return fetchJson(
-    withParams(
-      `/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/children/${encodeURIComponent(childName)}`,
-      { dir }
-    )
+    `/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/children/${encodeURIComponent(childName)}`
   );
 }
 
 // ---------- Spawn map / tree ----------
 
-export function getSpawnMap(platform: Platform, dir?: string): Promise<SpawnLink[]> {
-  return fetchJson(withParams(`/api/${encodeURIComponent(platform)}/spawn-map`, { dir }));
+export function getSpawnMap(platform: Platform): Promise<SpawnLink[]> {
+  return fetchJson(`/api/${encodeURIComponent(platform)}/spawn-map`);
 }
 
-export function getSpawnTree(platform: Platform, sessionId: string, dir?: string): Promise<SpawnTreeResult> {
-  return fetchJson(
-    withParams(`/api/${encodeURIComponent(platform)}/spawn-tree/${encodeURIComponent(sessionId)}`, { dir })
-  );
+export function getSpawnTree(platform: Platform, sessionId: string): Promise<SpawnTreeResult> {
+  return fetchJson(`/api/${encodeURIComponent(platform)}/spawn-tree/${encodeURIComponent(sessionId)}`);
 }
 
 // ---------- Insights ----------
 
-export function getInsights(opts: { platform: Platform; agent?: string; dir?: string }): Promise<Insights> {
-  // Note: legacy app.js passes dirParam() ("?dir=…") as the dir value here — a bug.
-  // We pass the raw directory.
-  return fetchJson(
-    withParams('/api/insights', { platform: opts.platform, agent: opts.agent, dir: opts.dir })
-  );
+export function getInsights(opts: { platform: Platform; agent?: string }): Promise<Insights> {
+  return fetchJson(withParams('/api/insights', { platform: opts.platform, agent: opts.agent }));
 }
 
 // ---------- Prompts ----------
 
-export function getPrompts(opts: { platform: Platform; agent?: string; dir?: string }): Promise<PromptsData> {
-  return fetchJson(
-    withParams('/api/prompts', { platform: opts.platform, agent: opts.agent, dir: opts.dir })
-  );
+export function getPrompts(opts: { platform: Platform; agent?: string }): Promise<PromptsData> {
+  return fetchJson(withParams('/api/prompts', { platform: opts.platform, agent: opts.agent }));
 }
 
 /**
@@ -256,7 +230,6 @@ export function getPrompts(opts: { platform: Platform; agent?: string; dir?: str
 export async function getPromptAnalysis(opts: {
   platform: Platform;
   agent?: string;
-  dir?: string;
   cached?: boolean;
   refresh?: boolean;
   skipLlm?: boolean;
@@ -264,7 +237,6 @@ export async function getPromptAnalysis(opts: {
   const url = withParams('/api/prompts/analyze', {
     platform: opts.platform,
     agent: opts.agent,
-    dir: opts.dir,
     cached: opts.cached,
     refresh: opts.refresh,
     skipLlm: opts.skipLlm,
@@ -297,15 +269,12 @@ export function unhidePrompt(hash: string): Promise<{ hidden: number }> {
 
 // ---------- Tools audit ----------
 
-/** Cross-platform tool health check. Resolves null on 204 (cached probe, nothing persisted yet).
- *  per-platform 目录覆盖以 dirsByParam 字典传入（键 = PlatformInfo.dirParam，运行时平台列表驱动）。 */
+/** Cross-platform tool health check. Resolves null on 204 (cached probe, nothing persisted yet). */
 export async function getToolsAudit(opts: {
-  dirs?: Record<string, string>;
   refresh?: boolean;
 }): Promise<ToolsAudit | null> {
   const url = withParams('/api/tools/audit', {
     platform: 'all',
-    ...(opts.dirs ?? {}),
     [opts.refresh ? 'refresh' : 'cached']: true,
   });
   if (DEMO) return null; // no persisted audit in demo mode
@@ -320,26 +289,19 @@ export async function getToolsAudit(opts: {
 
 // ---------- Search ----------
 
-/** Full-text search across every platform (multi-keyword AND), with per-platform dir
- *  overrides passed as dirParam-keyed map (from dirsByParam, 运行时平台列表驱动)。 */
-export function searchSessions(q: string, dirs?: Record<string, string>): Promise<SearchResult[]> {
+/** Full-text search across every platform (multi-keyword AND). */
+export function searchSessions(q: string): Promise<SearchResult[]> {
   return fetchJson(
     withParams('/api/search', {
       q,
       platform: 'all',
-      ...(dirs ?? {}),
     })
   );
 }
 
 
-export function getOtlp(platform: Platform, sessionId: string, dir?: string): Promise<OtlpExport> {
-  return fetchJson(
-    withParams(
-      `/api/otlp/${encodeURIComponent(platform)}/${encodeURIComponent(sessionId)}`,
-      { dir }
-    )
-  );
+export function getOtlp(platform: Platform, sessionId: string): Promise<OtlpExport> {
+  return fetchJson(`/api/otlp/${encodeURIComponent(platform)}/${encodeURIComponent(sessionId)}`);
 }
 
 export function getVersion(): Promise<VersionInfo> {
@@ -402,13 +364,43 @@ export interface UiSettings {
   selectedPlatforms: Platform[];
 }
 
+/** 平台数据目录配置（GET /api/settings 的 dirs section，key = 平台 id）。
+ *  目录真源在服务端 settings.json `dirs` section；设置面板据此回显与编辑，查询
+ *  不再传 dir query（服务端 dirFor 读配置）。 */
+export interface DirSettingInfo {
+  /** 平台目录设置的字段键（dirSettingKey，如 codexDir），写回时用此键 */
+  key: string;
+  /** 已配置的目录值（未配置 = ''） */
+  value: string;
+  /** 是否已在设置面板显式配置 */
+  configured: boolean;
+  /** 平台 env（如 CODEX_DIR）已生效 → 配置不生效（Q11-B，env 优先） */
+  envActive: boolean;
+  /** 默认目录（适配器 defaultDir 解析，env 未生效时的回退，空态展示用） */
+  default: string | null;
+}
+
+export type DirsConfig = Partial<Record<string, DirSettingInfo>>;
+
+/** 平台启停/替代镜像（GET /api/settings 的 platforms section 扩展）。 */
+export interface PlatformsMirror {
+  default: Platform | null;
+  ids: string[];
+  /** 已停用的平台 id（settings.platforms.disabled） */
+  disabled: string[];
+  /** 已声明替代的平台 id（settings.platforms.replaced） */
+  replaced: string[];
+}
+
 /** GET /api/settings 全量响应（web 设置面板一次读齐所有 section）。 */
 export interface AllSettings {
   ui: UiSettings;
   cliBins: CliBins;
+  dirs: DirsConfig;
   status: StatusConfig;
   kanban: KanbanConfig;
   llm: LlmSettings;
+  platforms: PlatformsMirror;
 }
 
 export function getSettings(): Promise<AllSettings> {
@@ -419,6 +411,10 @@ export function getSettings(): Promise<AllSettings> {
 export type SettingsPatch = {
   ui?: { platform: Platform; selectedPlatforms: Platform[] };
   cliBins?: Partial<Record<string, string>>;
+  /** 平台目录：key = dirSettingKey（codexDir/openclawDir/…），空串 = 清除 */
+  dirs?: Partial<Record<string, string>>;
+  /** 平台启停/替代：随统一保存提交（复用 platform-config 守卫） */
+  platforms?: { disabled?: string[]; replaced?: string[] };
   status?: Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', number>>;
   kanban?: { maxPerStatus?: number };
   llm?: { baseUrl: string; model: string; apiKey?: string; analysisTimeoutMs?: number };
@@ -450,12 +446,11 @@ export function exportUrl(
   platform: Platform,
   sessionId: string,
   format: 'md' | 'html',
-  opts: { agent?: string; dir?: string } = {}
+  opts: { agent?: string } = {}
 ): string {
   return withParams(`/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/export`, {
     format,
     agent: opts.agent,
-    dir: opts.dir,
   });
 }
 
@@ -464,12 +459,10 @@ export function watchUrl(opts: {
   platform: Platform;
   sessionId: string;
   agent?: string;
-  dir?: string;
 }): string {
   return withParams('/api/watch', {
     platform: opts.platform,
     sessionId: opts.sessionId,
     agent: opts.agent,
-    dir: opts.dir,
   });
 }

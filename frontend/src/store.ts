@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { saveUiSettings } from '@/api/client';
-import type { DirSettings } from '@/api/client';
 import type { Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 
@@ -117,20 +116,6 @@ export const SUMMARY_COLLAPSED_KEY = 'axr-summary-collapsed';
 export const HIDE_TRIVIAL_KEY = 'axr-hide-trivial';
 export const LIB_SORT_KEY = 'axr-lib-sort';
 
-/** 持久化文件顶层的 UI 保留键：loadPersisted 复制目录设置时须跳过（settings 为扁平
- *  spread，这些键不属于目录设置）。 */
-const PERSISTED_RESERVED_KEYS = new Set([
-  'platform',
-  'selectedPlatforms',
-  'groupBy',
-  'projectFilter',
-  'collapsedGroups',
-  'sidebarCollapsed',
-  'sidebarWidth',
-  'view',
-  'theme',
-]);
-
 /** 无持久化偏好时的初始主题：跟随系统深浅色一次（此后由用户手动切换固定）。 */
 function systemTheme(): Theme {
   try {
@@ -157,24 +142,58 @@ export function saveStoredFlag(key: string, value: boolean): void {
   }
 }
 
-export const EMPTY_SETTINGS: DirSettings = {
-  openclawDir: '',
-  codexDir: '',
-  claudeCodeDir: '',
-  hermesDir: '',
-  ompDir: '',
-  dshDir: '',
-  geminiDir: '',
-};
+// Legacy 扁平目录键（旧版 localStorage 的 openclawDir/codexDir/…），Q13 一次性迁移用。
+const LEGACY_DIR_KEYS = [
+  'openclawDir',
+  'codexDir',
+  'claudeCodeDir',
+  'hermesDir',
+  'ompDir',
+  'dshDir',
+  'geminiDir',
+];
 
-/**
- * 按平台目录设置键读取目录配置。键来自 PlatformInfo.dirSettingKey
- * （如 openclaw → openclawDir），平台缺省目录不可配（dirSettingKey 为 null）
- * 或未配置时返回空串 = 用适配器 defaultDir()。
- */
-export function dirBySettingKey(settings: Record<string, string>, info: PlatformInfo | undefined): string {
-  const key = info?.dirSettingKey;
-  return key && typeof settings[key] === 'string' ? (settings[key] as string) : '';
+/** 一次性迁移用：从旧 localStorage（agent-xray-settings）读取旧版扁平目录键值
+ *  （openclawDir/codexDir/…），供 Q13 迁移到服务端 settings.json dirs section。
+ *  无旧值（或仓库损坏）返回空对象。 */
+export function readLegacyDirsFromLocalStorage(): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      for (const key of LEGACY_DIR_KEYS) {
+        if (typeof parsed[key] === 'string' && parsed[key] !== '') out[key] = parsed[key] as string;
+      }
+    }
+  } catch {
+    /* corrupted storage — nothing to migrate */
+  }
+  return out;
+}
+
+/** Q13 迁移成功后清除旧目录键（只删 LEGACY_DIR_KEYS，保留同对象内的
+ *  platform/selectedPlatforms 等 store 仍要用的键；全空则移除该键）。 */
+export function clearLegacyDirsFromLocalStorage(): void {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    let changed = false;
+    for (const key of LEGACY_DIR_KEYS) {
+      if (key in parsed) {
+        delete parsed[key];
+        changed = true;
+      }
+    }
+    const rest = Object.keys(parsed);
+    if (changed) {
+      if (rest.length === 0) localStorage.removeItem(SETTINGS_KEY);
+      else localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
+    }
+  } catch {
+    /* ignore — no-op */
+  }
 }
 
 /** 按 id 查平台条目（运行时可查询列表，含未挂载/broken），找不到返回 undefined。 */
@@ -183,20 +202,7 @@ export function platformInfoById(platforms: PlatformInfo[], id: string | null | 
   return platforms.find((p) => p.id === id);
 }
 
-/** 聚合查询（GET /api/sessions platform=… / /api/search）的目录覆盖参数：
- *  把各可查询平台的设置目录值按 dirParam 组装成 { dirCodex: '/path', … }。 */
-export function dirsByParam(settings: Record<string, string>, platforms: PlatformInfo[]): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const p of platforms) {
-    if (p.broken || p.mounted === false || !p.dirParam) continue;
-    const dir = dirBySettingKey(settings, p);
-    if (dir) out[p.dirParam] = dir;
-  }
-  return out;
-}
-
 function loadPersisted(): {
-  settings: DirSettings;
   platform: Platform;
   hasStoredPlatform: boolean;
   selectedPlatforms: Platform[];
@@ -211,7 +217,6 @@ function loadPersisted(): {
   // Demo build ships claude-code/codex fixtures only — land on a populated tab.
   const defaultPlatform: Platform = DEMO ? 'claude-code' : 'openclaw';
   const result: {
-    settings: DirSettings;
     platform: Platform;
     hasStoredPlatform: boolean;
     selectedPlatforms: Platform[];
@@ -223,7 +228,6 @@ function loadPersisted(): {
     view: MainView;
     theme: Theme;
   } = {
-    settings: { ...EMPTY_SETTINGS },
     platform: defaultPlatform,
     hasStoredPlatform: false,
     // 无持久化选择时默认「全部平台」（聚合视图）。平台列表加载成功后 setPlatforms
@@ -242,13 +246,6 @@ function loadPersisted(): {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      // 目录设置宽度为 Record<string, string>：复制除 UI 保留键外的字符串值
-      // （含内置 openclawDir/codexDir/… 与自定义平台 dirSettingKey 键）。
-      // 持久化文件为扁平结构（settings spread + UI 偏好），保留键须跳过。
-      for (const [key, value] of Object.entries(parsed)) {
-        if (PERSISTED_RESERVED_KEYS.has(key)) continue;
-        if (typeof value === 'string') result.settings[key] = value;
-      }
       // 持久化的单平台接受任意非空字符串（可能是自定义平台 id，加载时无法对运行时
       // 列表校验；由 setPlatforms 在列表就绪后收敛）。旧存储无该键 → 默认平台。
       if (typeof parsed.platform === 'string' && parsed.platform.trim() !== '') {
@@ -386,7 +383,6 @@ function persistState(): void {
     localStorage.setItem(
       SETTINGS_KEY,
       JSON.stringify({
-        ...st.settings,
         platform: st.platform,
         selectedPlatforms: st.selectedPlatforms,
         groupBy: st.groupBy,
@@ -434,7 +430,6 @@ interface AppState {
   detailAgent: string;
   selectedAgent: string; // openclaw only
   selectedSessionId: string;
-  settings: DirSettings;
   view: MainView;
   /** 界面主题：亮色 / 暗色（首启由 useTheme 跟随系统决定并回写）。 */
   theme: Theme;
@@ -452,6 +447,9 @@ interface AppState {
   platforms: PlatformInfo[];
   /** /api/platforms 拉取失败的错误信息（有则展示降级提示）。 */
   platformsError: string | null;
+  /** 平台列表是否已加载（setPlatforms 已跑）：仅在其后发起 sessions/probe 请求。
+   *  避免首帧用 FALLBACK（全部内置按已挂载）误探/误查服务端已禁用的平台。 */
+  platformsLoaded: boolean;
 
   /** 写入运行时平台列表，并把当前平台选择收敛到可查询集合（见实现注释）。 */
   setPlatforms: (infos: PlatformInfo[], error?: string | null) => void;
@@ -477,7 +475,6 @@ interface AppState {
   setDetailContext: (platform: Platform, agent: string) => void;
   setSelectedAgent: (agent: string) => void;
   setSelectedSessionId: (id: string) => void;
-  saveSettings: (settings: DirSettings) => void;
   /** 设置主题（亮/暗）并持久化；切换后由 useTheme 同步 html.dark 类。 */
   setTheme: (theme: Theme) => void;
   setView: (view: MainView) => void;
@@ -510,7 +507,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedAgent: '',
   // 刷新默认进入 URL 指定的会话详情；无则空（列表自动选首个）。
   selectedSessionId: urlDetail.selectedSessionId ?? '',
-  settings: initial.settings,
   view: urlView ?? initial.view,
   theme: initial.theme,
   insightsScope: null,
@@ -521,6 +517,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   autoScroll: false,
   platforms: FALLBACK_PLATFORM_INFOS,
   platformsError: null,
+  // DEMO 无真实后端（usePlatforms 不跑 setPlatforms），直接视为已加载走合成数据。
+  platformsLoaded: DEMO ? true : false,
 
   setPlatforms: (infos, error = null) => {
     const state = get();
@@ -544,7 +542,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       platform !== state.platform ||
       selectedPlatforms.join('|') !== state.selectedPlatforms.join('|') ||
       detailPlatform !== state.detailPlatform;
-    set({ platforms: infos, platformsError: error, platform, selectedPlatforms, detailPlatform });
+    set({ platforms: infos, platformsError: error, platformsLoaded: true, platform, selectedPlatforms, detailPlatform });
     // 收敛导致选择变化时回写持久化（localStorage + 服务端 ui-settings），保持单选/多选一致。
     if (changed) persistState();
   },
@@ -669,10 +667,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedAgent: (agent) =>
     set({ selectedAgent: agent, detailAgent: agent, selectedSessionId: '', viewingChildAgent: null }),
   setSelectedSessionId: (id) => set({ selectedSessionId: id, viewingChildAgent: null }),
-  saveSettings: (settings) => {
-    set({ settings });
-    persistState();
-  },
   setView: (view) => {
     // 右侧视图页签切换 → 持久化 localStorage + URL（URL 写入由订阅 syncSessionUrl 统一处理）。
     if (get().view === view) return;

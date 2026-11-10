@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { watchUrl } from '@/api/client';
 import type { SessionDetail, SessionMessage, SessionMeta, SessionSummary } from '@/api/types';
 import { DEMO } from '@/demo/flag';
-import { dirBySettingKey, platformInfoById, useAppStore } from '@/store';
+import { useAppStore } from '@/store';
 
 export type SseStatus = 'off' | 'connecting' | 'live' | 'error';
 
@@ -19,16 +19,13 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
   const platform = useAppStore((s) => s.detailPlatform);
   const sessionId = useAppStore((s) => s.selectedSessionId);
   const agent = useAppStore((s) => s.detailAgent);
-  const settings = useAppStore((s) => s.settings);
   const autoRefresh = useAppStore((s) => s.autoRefresh);
   const viewingChildAgent = useAppStore((s) => s.viewingChildAgent);
-  const platforms = useAppStore((s) => s.platforms);
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<SseStatus>('off');
   const onNewRef = useRef(onNewMessages);
   onNewRef.current = onNewMessages;
 
-  const dir = dirBySettingKey(settings, platformInfoById(platforms, platform));
   // Demo mode has no backend to stream from — the toggle stays visibly off.
   const enabled = !DEMO && autoRefresh && !!sessionId && !viewingChildAgent;
 
@@ -39,7 +36,7 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
     }
     setStatus('connecting');
     const es = new EventSource(
-      watchUrl({ platform, sessionId, agent: agent || undefined, dir: dir || undefined })
+      watchUrl({ platform, sessionId, agent: agent || undefined })
     );
     es.addEventListener('connected', () => setStatus('live'));
     es.addEventListener('newMessages', (e) => {
@@ -81,7 +78,7 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
       es.close();
       setStatus('off');
     };
-  }, [enabled, platform, sessionId, agent, dir, queryClient]);
+  }, [enabled, platform, sessionId, agent, queryClient]);
 
   return status;
 }

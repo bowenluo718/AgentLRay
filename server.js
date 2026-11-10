@@ -16,6 +16,7 @@ const mountPlatformsRoutes = require('./lib/routes/platforms');
 const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
 const { migrateLegacySettings } = require('./lib/settings');
+const { loadDirsConfigSync } = require('./lib/dirs-config');
 const { csrfGuard } = require('./lib/csrf');
 
 const app = express();
@@ -78,6 +79,7 @@ async function boot() {
   try {
     await migrateLegacySettings();
     setStatusConfig(await loadStatusConfig());
+    loadDirsConfigSync();
   } catch {
     // 迁移或配置加载异常 → 维持默认时间窗口，不阻塞服务。
   }

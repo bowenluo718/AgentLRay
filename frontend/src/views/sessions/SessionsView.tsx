@@ -3,7 +3,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePlatformProbe } from '@/hooks/usePlatformProbe';
-import { dirBySettingKey, platformInfoById, useAppStore } from '@/store';
+import { useAppStore } from '@/store';
 import { ChildAgentBanner } from '@/views/trace/ChildAgentsSection';
 import { useActiveSessionDetail } from '@/views/trace/childAgents';
 import { TraceView } from '@/views/trace/TraceView';
@@ -152,11 +152,7 @@ export function SessionsView() {
   const paginatedKeyRef = useRef('');
 
   const activeKey = `${platform}:${selectedSessionId}:${viewingChildAgent ?? ''}`;
-  const reviewDirectory = dirBySettingKey(
-    useAppStore.getState().settings,
-    platformInfoById(useAppStore.getState().platforms, platform)
-  );
-  const reviewScope = JSON.stringify([platform, reviewDirectory, selectedSessionId, viewingChildAgent, detailAgent ?? '']);
+  const reviewScope = JSON.stringify([platform, selectedSessionId, viewingChildAgent, detailAgent ?? '']);
   const activeDetail = activeQuery.data;
   const timing = buildTimingAnalysis(activeDetail?.messages);
 

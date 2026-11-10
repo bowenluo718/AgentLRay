@@ -4,5 +4,6 @@
 const { resolveDirs } = require('@agentlray/shared/config');
 
 module.exports = {
+  env: 'GEMINI_DIR',
   session: resolveDirs({ env: 'GEMINI_DIR', segments: ['.gemini', 'tmp'] }),
 };

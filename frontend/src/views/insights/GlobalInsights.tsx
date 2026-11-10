@@ -8,7 +8,7 @@ import { getInsights } from '@/api/client';
 import type { ErrorCluster, ErrorClusterExample, Insights } from '@/api/types';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { formatCost } from '@/lib/pure';
-import { dirBySettingKey, platformInfoById, platformLabel, useActivePlatform, useAppStore } from '@/store';
+import { platformInfoById, platformLabel, useActivePlatform, useAppStore } from '@/store';
 import { InsightSection, ScopeChip, StatCard, UsageBar, fmtTokens } from './bits';
 import { ToolsAuditSection } from './ToolsAuditSection';
 
@@ -59,7 +59,6 @@ export function GlobalInsights() {
   // 跟随当前会话所属平台（聚合视图点击会话后自动切到该平台）；无选中会话回退侧栏平台。
   const platform = useActivePlatform();
   const selectedAgent = useAppStore((s) => s.selectedAgent);
-  const settings = useAppStore((s) => s.settings);
   const platforms = useAppStore((s) => s.platforms);
   const setSelectedSessionId = useAppStore((s) => s.setSelectedSessionId);
   const setView = useAppStore((s) => s.setView);
@@ -69,7 +68,7 @@ export function GlobalInsights() {
   const agent = info?.capabilities.needsAgent && selectedAgent ? selectedAgent : undefined;
   const query = useQuery({
     queryKey: ['insights', platform, agent ?? ''],
-    queryFn: () => getInsights({ platform, agent, dir: dirBySettingKey(settings, info) || undefined }),
+    queryFn: () => getInsights({ platform, agent }),
   });
 
   // Error-example session link: land on the failing message in the sessions view.
