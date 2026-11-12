@@ -57,6 +57,8 @@ function demoPlatform(
     resume: caps.spawn ? true : false,
     create: caps.spawn ? true : false,
     bin: caps.spawn ? id : null,
+    // demo 仅 codex / claude-code 可作 openclaw exec 子命令目标（对应其 bin）。
+    execSpawnCommands: caps.spawn && id !== 'omp' && id !== 'gemini' && id !== 'hermes' ? [String(id)] : [],
     dirSettingKey: dirKey,
     dirSettingLabel: dirLabel,
     dirSettingHint: dirHint,

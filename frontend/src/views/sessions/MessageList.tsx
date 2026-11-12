@@ -2,11 +2,12 @@
 // newest-first pagination (>200 msgs → first 60 + load more) — legacy renderMessages.
 
 import { useMemo, useState } from 'react';
-import type { Platform, SessionMessage } from '@/api/types';
+import type { SessionMessage } from '@/api/types';
 import { formatDurationCompact, getTextContent, parseTimestampMs } from '@/lib/pure';
 import { cn } from '@/lib/utils';
 import type { MsgFilter, TimingAnalysis } from './lib';
 import { applyMsgFilter, messageAnchorId } from './lib';
+import { execSpawnCommandsOf, useAppStore } from '@/store';
 import { GraphLane, MessageBubble } from './MessageItem';
 import type { MessageUnit, RetryInfo, TurnUnit } from './messageUnits';
 import { buildMessageUnits, buildRetryChains, buildUserBlocks } from './messageUnits';
@@ -153,7 +154,6 @@ function TurnGroup({ unit, timing, isCodex }: { unit: TurnUnit; timing: TimingAn
 
 export function MessageList({
   messages,
-  platform,
   msgFilter,
   timing,
   sortOrder,
@@ -161,20 +161,24 @@ export function MessageList({
   onLoadMore,
 }: {
   messages: SessionMessage[];
-  platform: Platform;
   msgFilter: MsgFilter;
   timing: TimingAnalysis;
   sortOrder: 'asc' | 'desc';
   visibleUnitCount: number;
   onLoadMore: () => void;
 }) {
-  const isCodex = platform === 'codex' || platform === 'omp' || platform === 'dsh' || platform === 'gemini';
+  // 消息分组风格由数据形状动态判定：存在任意独立 role:'toolCall' 顶层记录 →
+  // 「独立记录」风格（codex/omp/dsh/gemini 的 normalize 产物）；否则为
+  // 「assistant 内嵌 toolCall part」风格（openclaw/claude-code）。不再按平台
+  // id 写死，自定义平台产出独立 toolCall 记录时自动归入独立风格。
+  const isCodex = messages.some((m) => m.role === 'toolCall');
+  const execSpawnCommands = execSpawnCommandsOf(useAppStore((s) => s.platforms));
 
   // units 保持时间正序；正序/倒序通过渲染方向控制
   const units = useMemo<MessageUnit[]>(() => {
-    const filtered = applyMsgFilter(timing.visibleMessages, msgFilter);
+    const filtered = applyMsgFilter(timing.visibleMessages, msgFilter, execSpawnCommands);
     return buildMessageUnits(filtered, isCodex);
-  }, [timing, msgFilter, isCodex]);
+  }, [timing, msgFilter, isCodex, execSpawnCommands]);
 
   // 折叠的 user 块（默认展开：collapsed 为空集合）
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());

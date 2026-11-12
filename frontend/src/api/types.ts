@@ -38,7 +38,7 @@ export interface PlatformCapabilities {
   toolAudit: boolean;
   /** 提供 inspect hook。 */
   inspect: boolean;
-  /** 提供 otlpSession hook。 */
+  /** 可导出 OTLP（文件型 find+parse 且无需 agent，与后端 surfacePlatforms('otlp') 同口径）。 */
   otlp: boolean;
 }
 
@@ -68,6 +68,8 @@ export interface PlatformInfo {
   create: boolean;
   /** 续跑/新建 spawn 的可执行命令名（无则 null）。 */
   bin: string | null;
+  /** 本平台可作 openclaw exec 子命令目标（声明 execSpawn.commands 的命令名，小写）。 */
+  execSpawnCommands: string[];
   /** 数据目录设置面板的字段键（settings.json ui section），无则缺省目录不可配。 */
   dirSettingKey: string | null;
   dirSettingLabel: string | null;

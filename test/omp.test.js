@@ -78,3 +78,16 @@ test('listOmpSessions 统计同名目录内子会话数', async (t) => {
   assert.ok(withoutChild, 'bbb… 会话应被列出');
   assert.equal(withoutChild.childrenCount, 0);
 });
+
+// --- extractOmpUserPromptText 兼容字符串 content ---
+// 回归：历史上 user content 若以纯字符串落盘，`Array.isArray` 判断会丢光提示词；
+// 现在字符串与数组块两种形状都应提取。
+
+test('extractOmpUserPromptText 兼容字符串 content 的普通用户输入', () => {
+  assert.equal(extractOmpUserPromptText({ role: 'user', attribution: 'user', content: '帮我查一下天气' }), '帮我查一下天气');
+});
+
+test('extractOmpUserPromptText 兼容字符串 content 的 <attachment> 模板', () => {
+  const msg = { role: 'user', attribution: 'user', content: ATTACHMENT_WORKER };
+  assert.equal(extractOmpUserPromptText(msg), '新建 lib/platforms/loader.js');
+});

@@ -17,6 +17,12 @@ const { PLATFORMS, ALL_PLATFORMS } = require('../lib/platforms');
 const { dirFor, loadDirsConfigSync } = require('../lib/dirs-config');
 const { hasResumeContract, buildResumeCommand } = require('../lib/resume');
 const { hasCreateContract, buildNewCommand, spawnNewSession } = require('../lib/new');
+const { formatContractPlatforms } = require('../lib/platforms/shared/contracts');
+
+// 单一真源：resume/new 支持平台名单由「声明对应契约的已挂载平台」动态收敛，
+// 不再写死内置五平台。HELP 与错误文案统一引用。
+const RESUME_PLATFORMS = formatContractPlatforms(Object.values(PLATFORMS), hasResumeContract);
+const CREATE_PLATFORMS = formatContractPlatforms(Object.values(PLATFORMS), hasCreateContract);
 const { setStatusConfig } = require('../lib/status');
 const { loadStatusConfig } = require('../lib/status-config');
 const { loadUiSettings } = require('../lib/ui-settings');
@@ -53,18 +59,19 @@ resume: 生成该会话在原 CLI 中的续跑命令（codex resume / claude --r
         **同 id 续跑、不接受派生**——codex/claude 原生同 id 续写；omp 目标若正被
         运行中的 omp 实例以 --resume 持有（会话非空闲，续跑必派生），--run 会拒绝
         并在提示中给出持有进程 pid，请先结束该实例（退出其终端令会话 dispose）再
-        续跑。内置仅 codex/claude-code/omp 有原生续跑契约；自定义平台需适配器声明
-        resume（bin + args(id,opts)），缺省则 resume 报错。
+        续跑。原生续跑契约由「声明 resume 的已挂载平台」收敛（${RESUME_PLATFORMS}）——
+        codex/claude 同 id 续写；omp 若被运行中的实例持有则拒绝并提示 pid。自定义平台
+        需适配器声明 resume（bin + args(id,opts)），缺省则 resume 报错。
 new:   生成并（可选）执行「新建会话」命令（spawn 平台 CLI 开一个全新会话，
        带提示词 + 工作目录；默认只打印命令不执行，--run 才真正 fire-and-forget
-       spawn，输出丢弃、不跟踪进程、不等待退出）。内置 codex / claude-code / omp /
-       gemini / hermes 可建（dsh 是交互式 TUI，无法 headless 传提示词 → 不支持
-       新建）；自定义平台需适配器声明 create（bin + args(opts)），缺省则 new 报错。
+       spawn，输出丢弃、不跟踪进程、不等待退出）。可建平台由「声明 create 的已挂载
+       平台」收敛（${CREATE_PLATFORMS}；交互式 TUI 如 dsh 无法 headless 传提示词 →
+       不支持新建）；自定义平台需适配器声明 create（bin + args(opts)），缺省则 new 报错。
        提示词 = new 后剩余位置参数 join(' ')，可空（空 = 无提示词裸启/开交互式）。
 
 公共参数：
   --platform <p>  可选。list/show 支持逗号分隔多平台或 all（全部平台）；resume/new 支持
-                  内置 codex|claude-code|omp（resume）或 codex|claude-code|omp|gemini|hermes
+                  ${RESUME_PLATFORMS}（resume）或 ${CREATE_PLATFORMS}
                   （new）或声明了对应契约的自定义平台。缺省使用页面持久化的平台数据（看板
                   /api/settings 落盘的 ~/.agentlray/settings.json）：list 用持久化的多选集合（单平台模式用
                   platform，未持久化或全选时 = all）；show/resume/new 用持久化的单平台，无该数据则
@@ -514,7 +521,7 @@ async function resumeSession(opts, json) {
   // 与命令串构建统一在 lib/resume.js，避免此处与 web 端点各维护一份）。
   if (!hasResumeContract(platform)) {
     throw new Error(
-      `Platform '${platform.id}' has no native resume command. Only codex / claude-code / omp / gemini / hermes, or custom platforms declaring resume, are supported.`
+      `Platform '${platform.id}' has no native resume command. Only ${RESUME_PLATFORMS}, or custom platforms declaring resume, are supported.`
     );
   }
 
@@ -614,7 +621,7 @@ async function newSession(opts, json) {
   // 无新建契约的平台快速失败（内置五平台，或自定义 create opt-in）。
   if (!hasCreateContract(platform)) {
     throw new Error(
-      `Platform '${platform.id}' has no native create command. Only codex / claude-code / omp / gemini / hermes, or custom platforms declaring create, are supported.`
+      `Platform '${platform.id}' has no native create command. Only ${CREATE_PLATFORMS}, or custom platforms declaring create, are supported.`
     );
   }
   // message = new 后剩余位置参数 join(' ')，可空（空 = 无提示词裸启/开交互式）。

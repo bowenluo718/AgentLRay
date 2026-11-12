@@ -17,6 +17,16 @@ const os = require('node:os');
 
 const oc = require(path.join(__dirname, '..', 'lib', 'platforms', 'builtin', 'openclaw', 'parse'));
 const { stripOpenClawNoise } = oc;
+// extractOpenClawPrompts 是 Prompts 提取器：必须兼容字符串 content（回归目标 3）。
+const { extractOpenClawPrompts } = require(path.join(
+  __dirname,
+  '..',
+  'lib',
+  'platforms',
+  'builtin',
+  'openclaw',
+  'prompts'
+));
 
 function writeSession(recs) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentlray-openclaw-test-'));
@@ -120,4 +130,63 @@ test('stripOpenClawNoise 剥离 cron 消息里的 Current time/Reference UTC 注
   const input =
     '[cron:074a3829-c17a-4606-a359-171a9ced2070 RPM7_RP_1793289662] 每天输出一次工作进展总结\nCurrent time: Friday, October 30th, 2026 - 14:06 (Asia/Shanghai)\nReference UTC: 2026-10-30 06:06 UTC';
   assert.equal(stripOpenClawNoise(input), '每天输出一次工作进展总结');
+});
+
+// --- extractOpenClawPrompts：Prompts 视图提取器 ---
+// 回归目标 3：openclaw user 消息 content 是字符串，提取器必须能取到，否则
+// Prompts 视图对该平台永远为空（`Array.isArray` 判断会丢光字符串 content）。
+
+test('extractOpenClawPrompts 从字符串 content 的 user 消息提取 prompt', async (t) => {
+  const recs = [
+    SESSION_REC,
+    { type: 'message', id: 'm1', timestamp: '2026-01-18T10:00:01.000Z', message: { role: 'user', content: '帮我分析一下这段代码' } },
+    {
+      type: 'message',
+      id: 'm2',
+      timestamp: '2026-01-18T10:00:05.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: '好的，马上' }] },
+    },
+  ];
+  const { dir, file } = writeSession(recs);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { prompts, timestamp } = await extractOpenClawPrompts(file);
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].text, '帮我分析一下这段代码');
+  assert.equal(prompts[0].timestamp, '2026-01-18T10:00:01.000Z');
+  assert.equal(timestamp, SESSION_REC.timestamp);
+  // lastActivity 取最后一条 message 的 timestamp
+});
+
+test('extractOpenClawPrompts 带时戳前缀的字符串 user 消息剥离后提取', async (t) => {
+  const recs = [
+    SESSION_REC,
+    {
+      type: 'message',
+      id: 'm1',
+      timestamp: '2026-01-18T10:00:01.000Z',
+      message: { role: 'user', content: '[Fri 2026-10-30 00:52 GMT+8] 拉取镜像到目录' },
+    },
+  ];
+  const { dir, file } = writeSession(recs);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { prompts } = await extractOpenClawPrompts(file);
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].text, '拉取镜像到目录');
+});
+
+test('extractOpenClawPrompts 兼容数组块 content 的 user 消息', async (t) => {
+  const recs = [
+    SESSION_REC,
+    {
+      type: 'message',
+      id: 'm1',
+      timestamp: '2026-01-18T10:00:01.000Z',
+      message: { role: 'user', content: [{ type: 'text', text: '数组块的提示词' }] },
+    },
+  ];
+  const { dir, file } = writeSession(recs);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const { prompts } = await extractOpenClawPrompts(file);
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].text, '数组块的提示词');
 });

@@ -320,3 +320,25 @@ test('脏 status 被 deriveStatus 覆盖（sort 写回真实推导值）', () =>
   sortSessionsByStatusGroups(sessions, { nowMs: NOW });
   assert.equal(sessions[0].status, STATUS.AWAITING_INPUT);
 });
+
+test('sortSessionsByStatusGroups 原地剔除空会话（userCount===0 且 messageCount===0），保留有消息会话', () => {
+  const sessions = [
+    { id: 'empty', userCount: 0, messageCount: 0, tail: {}, timestamp: 't1' },
+    { id: 'has-msg', userCount: 1, messageCount: 2, tail: {}, timestamp: 't2' },
+  ];
+  const ref = sessions;
+  sortSessionsByStatusGroups(sessions, { nowMs: NOW });
+  // 原地 splice：原数组引用仍指向过滤后结果
+  assert.equal(sessions, ref);
+  assert.deepEqual(sessions.map((s) => s.id), ['has-msg']);
+});
+
+test('sortSessionsByStatusGroups 缺 userCount/messageCount 字段不误过滤', () => {
+  const sessions = [
+    { id: 'no-counts', tail: {}, timestamp: 't1' },
+    { id: 'zero-message-only', userCount: 1, messageCount: 0, tail: {}, timestamp: 't2' },
+    { id: 'zero-user-only', userCount: 0, messageCount: 1, tail: {}, timestamp: 't3' },
+  ];
+  sortSessionsByStatusGroups(sessions, { nowMs: NOW });
+  assert.deepEqual(sessions.map((s) => s.id), ['no-counts', 'zero-message-only', 'zero-user-only']);
+});

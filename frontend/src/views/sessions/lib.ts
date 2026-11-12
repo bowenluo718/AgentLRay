@@ -43,14 +43,21 @@ export function isDisplayableMessage(msg: SessionMessage | null | undefined): bo
   return true;
 }
 
-/** legacy exec/claude spawn detection on a toolCall content part */
-export function isSpawnPart(c: MessageContentPart): boolean {
+/**
+ * exec/claude spawn 检测（toolCall content part）。
+ * `execSpawnCommands` 为各声明了 exec-spawn 平台的可执行命令名（小写，如 ['codex','claude']），
+ * 由平台声明派生（见 store.resolveExecSpawnLabel），非硬编码；缺省时回退「claude/codex 前缀」旧行为。
+ */
+export function isSpawnPart(c: MessageContentPart, execSpawnCommands?: string[]): boolean {
   if (c.type !== 'toolCall') return false;
   if (c.name === 'sessions_spawn' || c.name === 'delegate_task') return true;
   if (c.name === 'exec') {
     const command = (c.arguments as { command?: unknown } | undefined)?.command;
     if (typeof command === 'string') {
       const cmd = command.toLowerCase();
+      if (execSpawnCommands && execSpawnCommands.length > 0) {
+        return execSpawnCommands.some((b) => cmd.startsWith(`${b} `) || cmd === b || cmd.includes(` ${b} `));
+      }
       return cmd.includes('codex ') || cmd.includes('claude ');
     }
   }
@@ -218,7 +225,7 @@ export interface SessionStats {
 }
 
 // Stats block of legacy renderSummary (counts + per-turn retry tally)
-export function computeSessionStats(msgs: SessionMessage[]): SessionStats {
+export function computeSessionStats(msgs: SessionMessage[], execSpawnCommands?: string[]): SessionStats {
   const stats: SessionStats = {
     userCount: 0,
     assistantCount: 0,
@@ -259,7 +266,7 @@ export function computeSessionStats(msgs: SessionMessage[]): SessionStats {
         stats.toolCallCount++;
         const name = c.name || 'unknown';
         stats.toolNames[name] = (stats.toolNames[name] || 0) + 1;
-        if (isSpawnPart(c)) stats.spawnCount++;
+        if (isSpawnPart(c, execSpawnCommands)) stats.spawnCount++;
       }
     }
   }
@@ -267,7 +274,7 @@ export function computeSessionStats(msgs: SessionMessage[]): SessionStats {
 }
 
 // Message list stat filter (legacy renderMessages filter block)
-export function applyMsgFilter(msgs: SessionMessage[], f: MsgFilter): SessionMessage[] {
+export function applyMsgFilter(msgs: SessionMessage[], f: MsgFilter, execSpawnCommands?: string[]): SessionMessage[] {
   if (f === 'focus') {
     // 聚焦模式：只保留所有 user 消息 + 每个 user 回合（到下一条 user 前）的最后一条 assistant 消息
     const out: SessionMessage[] = [];
@@ -302,7 +309,7 @@ export function applyMsgFilter(msgs: SessionMessage[], f: MsgFilter): SessionMes
     if (f === 'error') return msg.role === 'toolResult' && msg.isError;
     if (f === 'spawn') {
       if (msg.role === 'toolCall' && msg.toolName === 'sessions_spawn') return true;
-      return (msg.content || []).some(isSpawnPart);
+      return (msg.content || []).some((c) => isSpawnPart(c, execSpawnCommands));
     }
     return true;
   });

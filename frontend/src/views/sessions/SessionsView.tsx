@@ -1,9 +1,9 @@
 // 会话 view: session detail (summary + messages/trace toggle), pagination,
 // scroll-to-message (local + cross-view via pendingScrollMsgId), SSE tail.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePlatformProbe } from '@/hooks/usePlatformProbe';
-import { useAppStore } from '@/store';
+import { resolveExecSpawnLabel, useAppStore } from '@/store';
 import { ChildAgentBanner } from '@/views/trace/ChildAgentsSection';
 import { useActiveSessionDetail } from '@/views/trace/childAgents';
 import { TraceView } from '@/views/trace/TraceView';
@@ -121,6 +121,7 @@ function revealAndFlash(el: HTMLElement, color = '#58a6ff') {
 
 export function SessionsView() {
   const platform = useAppStore((s) => s.detailPlatform);
+  const platforms = useAppStore((s) => s.platforms);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const sessionView = useAppStore((s) => s.sessionView);
   const setSessionView = useAppStore((s) => s.setSessionView);
@@ -214,6 +215,14 @@ export function SessionsView() {
     )
   );
 
+  const actx = useMemo(
+    () => ({
+      scrollToMessage,
+      resolveExecSpawnLabel: (command: string) => resolveExecSpawnLabel(platforms, command),
+    }),
+    [scrollToMessage, platforms]
+  );
+
   if (!selectedSessionId) {
     const counts = probe.data;
     const allEmpty = !!counts && Object.values(counts).every((n) => n === 0);
@@ -221,7 +230,7 @@ export function SessionsView() {
   }
 
   return (
-    <MessageActionsContext.Provider value={{ scrollToMessage }}>
+    <MessageActionsContext.Provider value={actx}>
       <div className="flex h-full min-h-0 flex-col gap-3">
         {parentQuery.data ? (
           <SessionSummary
@@ -307,7 +316,6 @@ export function SessionsView() {
               <MessageList
                 key={activeKey}
                 messages={activeDetail.messages}
-                platform={platform}
                 msgFilter={msgFilter}
                 timing={timing}
                 sortOrder={sortOrder}

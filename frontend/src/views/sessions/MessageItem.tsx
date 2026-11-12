@@ -9,9 +9,14 @@ import { formatDurationCompact, getTextContent } from '@/lib/pure';
 import { cn } from '@/lib/utils';
 import type { TimingMeta } from './lib';
 import { formatDate, formatNumber, messageAnchorId, truncateId } from './lib';
-/** scrollToMessage from SessionsView: expands pagination + clears filter + flashes. */
-export const MessageActionsContext = createContext<{ scrollToMessage: (id: string) => void }>({
+/** scrollToMessage from SessionsView: expands pagination + clears filter + flashes.
+ *  resolveExecSpawnLabel：openclaw exec 命令 → exec-spawn 目标平台 label（H3，由平台声明派生）。 */
+export const MessageActionsContext = createContext<{
+  scrollToMessage: (id: string) => void;
+  resolveExecSpawnLabel: (command: string) => string | null;
+}>({
   scrollToMessage: () => {},
+  resolveExecSpawnLabel: () => null,
 });
 
 function DurationBadge({ ms, warnAt, dangerAt, prefix, title }: { ms: number | null; warnAt: number; dangerAt: number; prefix: string; title?: string }) {
@@ -134,12 +139,14 @@ const PRE_CLASS = 'overflow-x-auto whitespace-pre-wrap break-words rounded bg-mu
 
 /** Embedded toolCall content part (OpenClaw/omp assistant messages). */
 export function ToolCallPart({ part }: { part: MessageContentPart }) {
-  const { scrollToMessage } = useContext(MessageActionsContext);
+  const { scrollToMessage, resolveExecSpawnLabel } = useContext(MessageActionsContext);
   const args = (part.arguments ?? {}) as Record<string, unknown>;
   const command = typeof args.command === 'string' ? args.command.toLowerCase() : '';
   const isSpawn = part.name === 'sessions_spawn' && !!args.agentId;
   const isDelegate = part.name === 'delegate_task';
-  const isExecSpawn = part.name === 'exec' && (command.includes('codex ') || command.includes('claude '));
+  // exec-spawn 目标由平台声明派生（H3），而非硬编码 codex/claude。
+  const execSpawnLabel = part.name === 'exec' && command ? resolveExecSpawnLabel(command) : null;
+  const isExecSpawn = execSpawnLabel !== null;
   const taskPreview = typeof (args.task ?? args.prompt) === 'string' ? String(args.task ?? args.prompt).slice(0, 80) : '';
 
   return (
@@ -165,7 +172,7 @@ export function ToolCallPart({ part }: { part: MessageContentPart }) {
           className="mb-1 block rounded border border-[#f0883e]/40 px-2 py-1 text-left text-[11px] text-[#f0883e] hover:bg-[#f0883e]/10"
         >
           {isExecSpawn
-            ? `📋 查看 ${command.includes('codex') ? 'Codex' : 'Claude Code'} 执行输出 ↓`
+            ? `📋 查看 ${execSpawnLabel ?? '执行'} 输出 ↓`
             : `🔗 Sub-agent delegated${taskPreview ? ` — ${taskPreview}…` : ''}`}
         </button>
       ) : null}

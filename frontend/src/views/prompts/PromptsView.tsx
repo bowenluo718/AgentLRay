@@ -192,7 +192,7 @@ export function PromptsView() {
           📍 当前平台：{platformLabel(platforms, platform)}
         </span>
         从会话历史自动提取的真人 prompt（已过滤工具输出与系统注入），按目录分组 — 每条可「优化」
-        用 Claude 改写 · {data.totalPrompts} prompts / {data.totalSessions} sessions /{' '}
+        用 AI 改写 · {data.totalPrompts} prompts / {data.totalSessions} sessions /{' '}
         {data.groups.length} directories
         {q && filtered ? ` — showing ${filtered.shownPrompts} prompts / ${filtered.shownSessions} sessions` : ''}
         {filtered && filtered.trivialActive && filtered.trivialHidden > 0 && (

@@ -10,7 +10,7 @@ import { getResumeCommand } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
-import { platformInfoById, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore } from '@/store';
+import { platformInfoById, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore, execSpawnCommandsOf } from '@/store';
 import { ChildAgentsSection } from '@/views/trace/ChildAgentsSection';
 import { TurnLedger } from './TurnLedger';
 import type { ExportFormat } from './exports';
@@ -84,7 +84,10 @@ function ExportMenu({ detail }: { detail: SessionDetail }) {
     ['json', '📦 JSON (.json)'],
     ['clipboard', '📋 复制到剪贴板'],
   ];
-  if (['codex', 'claude-code', 'omp', 'dsh', 'gemini'].includes(platform)) entries.push(['otlp', '🔭 OTLP JSON']);
+  // OTLP 导出能力由服务端 PlatformInfo.capabilities.otlp 能力位驱动（与后端
+  // surfacePlatforms('otlp') 即 find+parse+!needsAgent 同口径），不再按平台 id 写死白名单。
+  if (platformInfoById(platforms, platform)?.capabilities.otlp)
+    entries.push(['otlp', '🔭 OTLP JSON']);
 
   return (
     <div className="relative">
@@ -170,11 +173,12 @@ export function SessionSummary({
   onRetryJump: () => void;
 }) {
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
+  const platforms = useAppStore((s) => s.platforms);
   const { data: sessions } = useSessionsList();
   const [collapsed, setCollapsed] = useState(() => loadStoredFlag(SUMMARY_COLLAPSED_KEY, true));
 
   const msgs = detail.messages;
-  const stats = useMemo(() => computeSessionStats(msgs), [msgs]);
+  const stats = useMemo(() => computeSessionStats(msgs, execSpawnCommandsOf(platforms)), [msgs, platforms]);
   const tokenSummary = useMemo(() => summarizeTokens(msgs), [msgs]);
   const cost = useMemo(() => sessionCost(msgs), [msgs]);
   const listModel = sessions?.find((s) => s.id === selectedSessionId)?.model;

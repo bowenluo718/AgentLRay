@@ -27,17 +27,17 @@ export const FALLBACK_PLATFORM_INFOS: PlatformInfo[] = [
     id: 'openclaw', label: 'OpenClaw', origin: 'package', builtin: true,
     capabilities: { ...BASE_CAPS, list: false, needsAgent: true, listForAgent: true, listAllAgents: true, listAgents: true, spawn: true },
     resume: false, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false,
-    overrides: null, replacementPending: false, bin: null,
+    overrides: null, replacementPending: false, bin: null, execSpawnCommands: [],
     dirSettingKey: 'openclawDir', dirSettingLabel: 'OpenClaw 会话目录', dirSettingHint: 'OpenClaw agent 的会话日志位置；留空用默认目录', dirParam: 'dirOpenclaw',
     defaultDir: '~/.openclaw/agents',
     color: '#3fb950',
   },
-  { id: 'codex', label: 'Codex', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'codex', dirSettingKey: 'codexDir', dirSettingLabel: 'Codex 会话目录', dirSettingHint: 'Codex 会话日志目录', dirParam: 'dirCodex', defaultDir: '~/.codex/sessions', color: '#58a6ff' },
-  { id: 'claude-code', label: 'Claude Code', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'claude', dirSettingKey: 'claudeCodeDir', dirSettingLabel: 'Claude Code 会话目录', dirSettingHint: 'Claude Code 项目会话目录', dirParam: 'dirClaude', defaultDir: '~/.claude/projects', color: '#d2a8ff' },
-  { id: 'hermes', label: 'Hermes', origin: 'package', builtin: true, capabilities: { ...BASE_CAPS, list: true, getSession: true, watch: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'hermes', dirSettingKey: 'hermesDir', dirSettingLabel: 'Hermes 数据目录', dirSettingHint: 'Hermes 数据目录', dirParam: 'dirHermes', defaultDir: '~/.hermes', color: '#f78166' },
-  { id: 'omp', label: 'OMP', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'omp', dirSettingKey: 'ompDir', dirSettingLabel: 'OMP 会话目录', dirSettingHint: 'OMP（oh-my-pi）会话目录', dirParam: 'dirOmp', defaultDir: '~/.omp/agent/sessions', color: '#ffd33d' },
-  { id: 'dsh', label: 'DeepSeek Harness', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: null, dirSettingKey: 'dshDir', dirSettingLabel: 'DeepSeek Harness 会话目录', dirSettingHint: 'DeepSeek Harness 会话目录（同时识别 DSH_HOME）', dirParam: 'dirDsh', defaultDir: '~/.dsh/sessions', color: '#4d6bfe' },
-  { id: 'gemini', label: 'Gemini CLI', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'gemini', dirSettingKey: 'geminiDir', dirSettingLabel: 'Gemini CLI 临时目录', dirSettingHint: 'Gemini CLI 项目临时目录', dirParam: 'dirGemini', defaultDir: '~/.gemini/tmp', color: '#4285f4' },
+  { id: 'codex', label: 'Codex', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'codex', execSpawnCommands: ['codex'], dirSettingKey: 'codexDir', dirSettingLabel: 'Codex 会话目录', dirSettingHint: 'Codex 会话日志目录', dirParam: 'dirCodex', defaultDir: '~/.codex/sessions', color: '#58a6ff' },
+  { id: 'claude-code', label: 'Claude Code', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'claude', execSpawnCommands: ['claude'], dirSettingKey: 'claudeCodeDir', dirSettingLabel: 'Claude Code 会话目录', dirSettingHint: 'Claude Code 项目会话目录', dirParam: 'dirClaude', defaultDir: '~/.claude/projects', color: '#d2a8ff' },
+  { id: 'hermes', label: 'Hermes', origin: 'package', builtin: true, capabilities: { ...BASE_CAPS, list: true, getSession: true, watch: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'hermes', execSpawnCommands: [], dirSettingKey: 'hermesDir', dirSettingLabel: 'Hermes 数据目录', dirSettingHint: 'Hermes 数据目录', dirParam: 'dirHermes', defaultDir: '~/.hermes', color: '#f78166' },
+  { id: 'omp', label: 'OMP', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS, children: true }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'omp', execSpawnCommands: [], dirSettingKey: 'ompDir', dirSettingLabel: 'OMP 会话目录', dirSettingHint: 'OMP（oh-my-pi）会话目录', dirParam: 'dirOmp', defaultDir: '~/.omp/agent/sessions', color: '#ffd33d' },
+  { id: 'dsh', label: 'DeepSeek Harness', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: false, create: false, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: null, execSpawnCommands: [], dirSettingKey: 'dshDir', dirSettingLabel: 'DeepSeek Harness 会话目录', dirSettingHint: 'DeepSeek Harness 会话目录（同时识别 DSH_HOME）', dirParam: 'dirDsh', defaultDir: '~/.dsh/sessions', color: '#4d6bfe' },
+  { id: 'gemini', label: 'Gemini CLI', origin: 'package', builtin: true, capabilities: { ...BUILTIN_CAPS }, resume: true, create: true, broken: false, mounted: true, configuredMounted: true, restartRequired: false, overrides: null, replacementPending: false, bin: 'gemini', execSpawnCommands: [], dirSettingKey: 'geminiDir', dirSettingLabel: 'Gemini CLI 临时目录', dirSettingHint: 'Gemini CLI 项目临时目录', dirParam: 'dirGemini', defaultDir: '~/.gemini/tmp', color: '#4285f4' },
 ];
 
 const EMPTY_CAPABILITIES: PlatformCapabilities = { ...BASE_CAPS };
@@ -78,6 +78,32 @@ export function platformLabel(infos: PlatformInfo[], id: string): string {
 /** 平台能力位；未知 id → 全 false。 */
 export function capabilitiesOf(infos: PlatformInfo[], id: string): PlatformCapabilities {
   return selectablePlatforms(infos).find((p) => p.id === id)?.capabilities ?? EMPTY_CAPABILITIES;
+}
+
+/** 所有声明了 exec-spawn 平台的可执行命令名汇总（小写、去重），H3 供 isSpawnPart 使用。 */
+export function execSpawnCommandsOf(infos: PlatformInfo[]): string[] {
+  const seen = new Set<string>();
+  for (const p of selectablePlatforms(infos)) {
+    for (const c of p.execSpawnCommands ?? []) seen.add(String(c).toLowerCase());
+  }
+  return [...seen];
+}
+
+/** openclaw exec 子命令目标（H3 exec-spawn）。由平台声明的 execSpawnCommands 派生，
+ *  而非硬编码平台 id/bin。命中命令前缀返回平台 label，未命中返回 null。 */
+export function resolveExecSpawnLabel(infos: PlatformInfo[], command: string): string | null {
+  if (typeof command !== 'string' || command.length === 0) return null;
+  const lower = command.toLowerCase();
+  for (const p of selectablePlatforms(infos)) {
+    const commands = p.execSpawnCommands ?? [];
+    for (const c of commands) {
+      const cName = String(c).toLowerCase();
+      if (lower.startsWith(`${cName} `) || lower === cName || lower.includes(` ${cName} `) || lower.includes(`\n${cName} `)) {
+        return p.label ?? p.id ?? null;
+      }
+    }
+  }
+  return null;
 }
 
 /**

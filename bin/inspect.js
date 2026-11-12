@@ -1,7 +1,19 @@
-// 帮助文本的平台列表默认取内置三平台；lib/inspect 加载成功后按注册表实际
-// inspect 平台集更新（自定义平台声明 inspect hook 后同样可用）。
-let helpPlatforms = 'omp|codex|claude-code';
-const HELP = () => `Usage: agentlray inspect --platform <${helpPlatforms}> <file.jsonl> [--json] [--summary] [--fail-on pending-failures]
+// 帮助文本的平台列表按注册表实际 inspect 平台集生成（单一真源在 lib/inspect 的
+// PLATFORMS，自定义平台声明 inspect hook 后同样可用）。不在模块顶层写死内置三平台。
+function getHelpPlatforms() {
+  try {
+    const implementation = require('../lib/inspect');
+    if (implementation.PLATFORMS && implementation.PLATFORMS.length) {
+      return implementation.PLATFORMS.join('|');
+    }
+  } catch {
+    /* 规则不可用时 HELP 以空名单渲染，撞不到硬编码 */
+  }
+  return '';
+}
+const HELP = () => {
+  const helpPlatforms = getHelpPlatforms();
+  return `Usage: agentlray inspect --platform <${helpPlatforms}> <file.jsonl> [--json] [--summary] [--fail-on pending-failures]
        agentlray evidence --platform <${helpPlatforms}> <file.jsonl> --sha256 <hash> --line <number> [--offset <bytes>] [--max-bytes <4..16384>] [--json]
 
 Read one stable regular UTF-8 JSONL file (maximum 64 MiB), without starting a server.
@@ -13,6 +25,7 @@ Exit 2: pending failure records found, only when inspect --fail-on pending-failu
 JSON failures: {schemaVersion:1,kind:"error",error:{code,message}} on stdout.
 Incomplete coverage retains report data on stdout and reports COVERAGE_INCOMPLETE on stderr.
 `;
+};
 
 function wantsJson(args, mode) {
   if (mode === 'evidence') return true;
@@ -92,7 +105,6 @@ async function main(args, mode = 'inspect') {
   let implementation, detail;
   try {
     implementation = require('../lib/inspect');
-    if (implementation.PLATFORMS.length) helpPlatforms = implementation.PLATFORMS.join('|');
     if (summary || mode === 'evidence') detail = require('../lib/inspect-detail');
   } catch {
     emitError(json, mode, 'RULES_UNAVAILABLE', 'Bundled rules unavailable; rebuild or reinstall the package.');

@@ -16,6 +16,8 @@ const {
 const { fileBasedGetSession } = require('@agentlray/shared/helpers');
 const { searchGeminiFile } = require('./search');
 const { extractGeminiPrompts } = require('./prompts');
+const { scanGeminiFileForInsights } = require('./insights');
+const { scanGeminiFileForToolAudit } = require('./tool-audit');
 
 module.exports = {
   id: 'gemini',
@@ -79,4 +81,9 @@ module.exports = {
   searchFile: (sf, keywords) => searchGeminiFile(sf, keywords),
   // Prompts 面：gemini fold 后提取。
   extractPromptsFromFile: (filePath) => extractGeminiPrompts(filePath),
+  // Insights 面：gemini 记录形状（type:'gemini' + 内联 toolCalls）专属扫描器，
+  // 返回与共享 scanFileForInsights 相同的结构。
+  insightsScanFile: (filePath, sessionId) => scanGeminiFileForInsights(filePath, sessionId),
+  // Tool-audit 面：同款 gemini 记录形状专属扫描器。
+  scanToolAuditFile: (filePath, tools, platform) => scanGeminiFileForToolAudit(filePath, tools, platform),
 };
