@@ -273,3 +273,75 @@ test('resolveExecutablePath：win32 下将裸命令名 resolve 成 PATH 内 .cmd
   // posix：裸名原样返回（PATH 解析交给 spawn 自身）
   assert.equal(resolveProbe('linux', 'omp'), 'omp');
 });
+
+// ---- 类 3.5：omp 续跑治理的 Windows 降级（无法判断激活/无法关进程 → 直接续跑） ----
+
+// omp 的 resumeHooks.prepare/terminateOmpHolder 依赖 /proc 与 SIGTERM/SIGKILL，
+// 仅 Linux 可用。Windows 上应降级为「不抛错、直接放行续跑」（terminated=false、
+// livePid=null），保证任务执行不被激活状态判断/进程关闭阻塞。
+const OMP_RESUME_PATH = path.join(REPO_ROOT, 'lib', 'platforms', 'builtin', 'omp', 'resume');
+
+test('omp resumeHooks：win32 下 prepare 无法判断激活状态时直接放行续跑（不抛错）', () => {
+  const out = runInPlatform(
+    'win32',
+    `
+      require(${JSON.stringify(path.join(REPO_ROOT, 'test', 'setup-env.cjs'))});
+      const { createOmpResumeHooks, terminateOmpHolder } = require(${JSON.stringify(OMP_RESUME_PATH)});
+      const hooks = createOmpResumeHooks();
+      (async () => {
+        const t = terminateOmpHolder(12345); // win32：恒 false（无信号语义）
+        const prepared = await hooks.prepare({
+          run: true,
+          dir: ${JSON.stringify(path.join(__dirname, 'fixtures', 'home', '.omp', 'agent', 'sessions'))},
+          id: '019a0000-0000-7000-8000-00000000aaaa',
+          cwd: '/fixtures/project-gamma',
+        });
+        console.log(JSON.stringify({ terminateResult: t, prepared }));
+      })().catch((e) => { console.error('RESUME_ERR', e && e.message); process.exit(2); });
+    `,
+    { AGENTLRAY_NO_PLUGINS: '1' }
+  );
+  const doc = JSON.parse(out.split('\n').filter((l) => l.trim()).pop());
+  // 无法关闭进程：terminateOmpHolder 返回 false 而非抛错
+  assert.equal(doc.terminateResult, false);
+  // 无法判断激活状态：prepare 直接放行（livePid=null、terminated=false、不抛错）
+  assert.equal(doc.prepared.livePid, null);
+  assert.equal(doc.prepared.terminated, false);
+  assert.ok(doc.prepared.state, '--run 仍应带回 state 供 after 派生兜底校验');
+});
+
+// Linux 下持有进程「无法被终止」时（kill 抛 EPERM 等），terminateOmpHolder 应
+// 返回 false（降级：直接续跑、terminated=false）而非抛错——保证进程关闭失败
+// 不阻塞任务执行。通过 mock /proc 与 process.kill 模拟「存活但无终止权限」。
+test('omp resumeHooks：linux 下进程无法终止时 terminateOmpHolder 返回 false 不抛错（降级）', () => {
+  const out = runInPlatform(
+    'linux',
+    `
+      require(${JSON.stringify(path.join(REPO_ROOT, 'test', 'setup-env.cjs'))});
+      const fs = require('node:fs');
+      const realRead = fs.readFileSync;
+      const realKill = process.kill;
+      // mock：目标 pid 在 /proc 存在且非僵尸（alive → true），但 kill 一律 EPERM
+      //（无权限终止，如跨用户进程）→ SIGTERM/SIGKILL 均失败 → 最终返回 false。
+      fs.readFileSync = (p, ...rest) => {
+        if (String(p).startsWith('/proc/424242/stat')) return '424242 (holder) S 1 1 1 0 -1 4194560 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0';
+        return realRead(p, ...rest);
+      };
+      process.kill = (pid, sig) => {
+        if (sig === 0) return; // 存活探测成功
+        const err = new Error('operation not permitted');
+        err.code = 'EPERM';
+        throw err;
+      };
+      const { terminateOmpHolder } = require(${JSON.stringify(OMP_RESUME_PATH)});
+      // 缩短等待窗口，避免测试长时间空转
+      const result = terminateOmpHolder(424242, { termWaitMs: 100, killWaitMs: 100 });
+      console.log(JSON.stringify({ result }));
+      fs.readFileSync = realRead;
+      process.kill = realKill;
+    `,
+    { AGENTLRAY_NO_PLUGINS: '1' }
+  );
+  const doc = JSON.parse(out.split('\n').filter((l) => l.trim()).pop());
+  assert.equal(doc.result, false, '无法终止时应返回 false（降级续跑），而非抛错');
+});
