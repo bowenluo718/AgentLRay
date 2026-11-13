@@ -7,9 +7,9 @@ import { useEffect } from 'react';
 import { fetchPlatforms, getSessionDetail, getSessions, getSessionsAll } from '@/api/client';
 import type { Platform, SessionDetail, SessionSummary } from '@/api/types';
 import { DEMO } from '@/demo/flag';
+import { useHostGate } from '@/hooks/useHostGate';
 import {
   FALLBACK_PLATFORM_INFOS,
-  selectablePlatformIds,
   useAppStore,
 } from '@/store';
 
@@ -17,12 +17,13 @@ import {
  *  store.platforms 读取派生；拉取失败时 store 保持内置降级表并记录错误信息。 */
 export function usePlatforms() {
   const setPlatforms = useAppStore((s) => s.setPlatforms);
+  const hostReady = useHostGate(); // 先连后加载：主机未就绪（连接中）不拉平台表
   const query = useQuery({
     queryKey: ['platforms'] as const,
     // 平台列表通常跨请求不变（增删需重启 server），页面内不重复拉取。
     staleTime: Number.POSITIVE_INFINITY,
     gcTime: Number.POSITIVE_INFINITY,
-    enabled: !DEMO,
+    enabled: !DEMO && hostReady,
     queryFn: async () => {
       const data = await fetchPlatforms();
       setPlatforms(data);
@@ -55,20 +56,14 @@ export function sessionsListOptions(scope: ListScope) {
   };
 }
 
-/** 聚合视图查询：GET /api/sessions?platform=<子集，全选时 all>，铺平为带来源标记的 SessionSummary[]。 */
-export function sessionsAllListOptions(scope: {
-  platformIds: Platform[];
-  /** 运行时可查询平台数（store 派生），用于「全选 → platform=all」判定。 */
-  selectableCount: number;
-}) {
-  const { platformIds, selectableCount } = scope;
-  // 「全部」判定：选择数与运行时可查询平台数一致 → 交给后端 platform=all
-  // （含 needsAgent 平台 per-agent 展开）；否则按所选子集逗号拼接。
-  const all = platformIds.length > 0 && platformIds.length >= selectableCount;
+/** 聚合视图查询：GET /api/sessions 无 platform → 读服务端 ui.selectedPlatforms
+ *  （空 → 全部），铺平为带来源标记的 SessionSummary[]。后端配置驱动。 */
+export function sessionsAllListOptions() {
   return {
-    queryKey: ['sessions', 'multi', all ? 'all' : [...platformIds].sort().join(':')] as const,
+    // 后端配置驱动：GET /api/sessions 无 platform → 读配置 selectedPlatforms（空 → 全部）。
+    queryKey: ['sessions', 'multi', 'config'] as const,
     queryFn: async (): Promise<SessionSummary[]> => {
-      const result = await getSessionsAll({ platforms: all ? [] : platformIds });
+      const result = await getSessionsAll();
       const flat: SessionSummary[] = [];
       for (const block of result.platforms) {
         for (const session of block.sessions) {
@@ -81,20 +76,15 @@ export function sessionsAllListOptions(scope: {
 }
 
 export function useSessionsList(): UseQueryResult<SessionSummary[]> {
-  const platform = useAppStore((s) => s.platform);
-  const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
-  const agent = useAppStore((s) => s.selectedAgent);
   const autoRefresh = useAppStore((s) => s.autoRefresh);
   const platformsLoaded = useAppStore((s) => s.platformsLoaded);
-  const selectableCount = useAppStore((s) => selectablePlatformIds(s.platforms).length);
-  const listOptions =
-    selectedPlatforms.length > 0
-      ? sessionsAllListOptions({ platformIds: selectedPlatforms, selectableCount })
-      : sessionsListOptions({ platform, agent });
+  // 列表恒走聚合接口（后端配置驱动）；platform/selectedPlatforms 由侧栏 UI 与
+  // 详情聚焦订阅（见 store），不再决定列表取数。
+  const listOptions = sessionsAllListOptions();
   return useQuery<SessionSummary[]>({
     ...listOptions,
-    // 平台列表未加载（store 仍是 FALLBACK 全挂载表）时禁用：避免单平台模式的
-    // 持久化/URL 平台在 setPlatforms 收敛前指向服务端已禁用平台，误打其 sessions 接口。
+    // 平台列表未加载（store 仍是 FALLBACK 全挂载表）时禁用：避免在 setPlatforms
+    // 收敛前误打已禁用平台的 sessions 接口。
     enabled: platformsLoaded,
     // Legacy restartRefreshLoop: poll the list every 5s while auto-refresh is on
     refetchInterval: autoRefresh ? 5000 : false,

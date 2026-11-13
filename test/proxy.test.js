@@ -39,6 +39,9 @@ before(async () => {
     } else if (req.url.startsWith('/api/watch')) {
       res.writeHead(200);
       res.end(JSON.stringify({ sse: 'ok' }));
+    } else if (req.url.startsWith('/api/ui-selection')) {
+      res.writeHead(200);
+      res.end(JSON.stringify({ selectedPlatforms: ['codex'] }));
     } else {
       res.writeHead(404);
       res.end(JSON.stringify({ error: 'not found' }));
@@ -151,7 +154,7 @@ test('SSE ?host= 转发剥离 host 参数（远端不再二次路由 → 不 503
   }
 });
 
-test('写设置面（PUT /api/settings）远端 → 403 不透传', async () => {
+test('本机设置（PUT /api/settings）远端 → 本地化走本地路由（200 本地 mock）', async () => {
   setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
   const app = await startApp();
   try {
@@ -159,8 +162,46 @@ test('写设置面（PUT /api/settings）远端 → 403 不透传', async () => 
       method: 'PUT',
       headers: { 'X-Host-Id': 'remote1', 'content-type': 'application/json' },
     });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).ok, 'local-settings');
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('本机设置（GET /api/settings）远端 → 本地化走本地路由（200 本地 mock）', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/settings', { headers: { 'X-Host-Id': 'remote1' } });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).where, 'settings');
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('GET /api/ui-selection 远端 → 透传取远端真源', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/ui-selection', { headers: { 'X-Host-Id': 'remote1' } });
+    assert.equal(r.status, 200);
+    assert.deepEqual(JSON.parse(r.body), { selectedPlatforms: ['codex'] });
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('GET /api/settings/cli-bins 远端 → 仍 403（本机化仅精确匹配 /api/settings）', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/settings/cli-bins', { headers: { 'X-Host-Id': 'remote1' } });
     assert.equal(r.status, 403);
-    assert.match(r.body, /不透传/);
   } finally {
     app.server.close();
     closeHost('remote1');

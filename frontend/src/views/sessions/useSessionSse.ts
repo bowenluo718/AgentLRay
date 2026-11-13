@@ -3,7 +3,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { watchUrl } from '@/api/client';
+import { getHostReady, watchUrl } from '@/api/client';
 import type { SessionDetail, SessionMessage, SessionMeta, SessionSummary } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 import { useAppStore } from '@/store';
@@ -27,7 +27,8 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
   onNewRef.current = onNewMessages;
 
   // Demo mode has no backend to stream from — the toggle stays visibly off.
-  const enabled = !DEMO && autoRefresh && !!sessionId && !viewingChildAgent;
+  // 先连后加载：主机未就绪（连接中）不建 SSE（EventSource 不能带自定义头，走 ?host=）。
+  const enabled = !DEMO && getHostReady() && autoRefresh && !!sessionId && !viewingChildAgent;
 
   useEffect(() => {
     if (!enabled) {
@@ -54,6 +55,11 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
           if (!old) return old;
           return old.map((s) => (s.id === sessionId ? { ...s, status: pushedStatus } : s));
         });
+        // 列表恒走聚合接口（['sessions','multi',...]），即时同步其状态，避免等下个 5s 轮询。
+        queryClient.setQueriesData<SessionSummary[]>({ queryKey: ['sessions', 'multi'], type: 'active' }, (old) => {
+          if (!old) return old;
+          return old.map((s) => (s.id === sessionId ? { ...s, status: pushedStatus } : s));
+        });
       }
       if (!hasMsgs) {
         if (payload.session) {
@@ -71,6 +77,8 @@ export function useSessionSse(onNewMessages: (count: number) => void): SseStatus
       onNewRef.current(newMsgs.length);
       // Refresh sidebar counters (legacy loadSessions(true) on newMessages)
       queryClient.invalidateQueries({ queryKey: ['sessions', platform] });
+      // 聚合列表（恒走 GET /api/sessions）同样失效重拉，即时反映新消息（不依赖 5s 轮询）。
+      queryClient.invalidateQueries({ queryKey: ['sessions', 'multi'] });
     });
     // EventSource auto-reconnects on error — just reflect the state (🔴 Live)
     es.addEventListener('error', () => setStatus('error'));

@@ -108,9 +108,11 @@ export function SettingsDialog({
   const platforms = useAppStore((s) => s.platforms);
   const queryClient = useQueryClient();
   // 单一 GET /api/settings：一次读齐 dirs / cliBins / platforms / status / kanban / llm。
-  const all = useQuery({ queryKey: ['settings'], queryFn: getSettings });
+  // 仅在弹窗打开时拉取（SettingsDialog 常驻挂载于 Sidebar，缺省关闭不请求）。
+  const all = useQuery({ queryKey: ['settings'], queryFn: getSettings, enabled: open });
   // 平台卡片必须看到含未挂载条目的完整 catalog（含 broken），否则「启用」无从出现。
-  const full = useQuery({ queryKey: ['platforms-catalog'], queryFn: fetchPlatforms });
+  // 同样仅在打开时拉取，避免与 App 的 usePlatforms（['platforms']）重复打 /api/platforms。
+  const full = useQuery({ queryKey: ['platforms-catalog'], queryFn: fetchPlatforms, enabled: open });
 
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   // 服务器 section 的脏标记：保存时只提交已编辑的 section，未触碰的保持服务器原值。

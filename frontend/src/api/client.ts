@@ -40,6 +40,10 @@ type ParamValue = string | number | boolean | undefined | null;
 // 缺省 'local' = 本机直连。SSE（EventSource）不能带自定义头，改用 ?host= query（见 watchUrl）。
 let activeHostId = 'local';
 
+/** 当前主机数据面是否就绪（local 恒 true；远端=连接成功）。store 在连接状态变化时
+ *  setHostReady 同步镜像，供 SSE（无法用 hook 订阅）与手动 fetch 读取。 */
+let hostReady = true;
+
 /** 设置当前选中主机 id（供 client 请求注入 X-Host-Id）。 */
 export function setActiveHostId(id: string): void {
   activeHostId = id;
@@ -48,6 +52,16 @@ export function setActiveHostId(id: string): void {
 /** 当前选中主机 id（SSE watchUrl 等需带 ?host= 或读状态用）。 */
 export function getActiveHostId(): string {
   return activeHostId;
+}
+
+/** 同步数据面就绪镜像（store 连接状态机调用；本地资源端点不受影响）。 */
+export function setHostReady(v: boolean): void {
+  hostReady = v;
+}
+
+/** 当前主机数据面是否就绪（SSE enabled 等同步判定用）。 */
+export function getHostReady(): boolean {
+  return hostReady;
 }
 
 function withParams(path: string, params: Record<string, ParamValue>): string {
@@ -126,13 +140,12 @@ export function getSessions(
 }
 
 /**
- * Multi-platform session list (GET /api/sessions?platform=a,b|all…). Returns one
- * block per platform (needsAgent platform without `agent` → one block per agent).
- * `platforms` 缺省 = all（全部平台）。
+ * Multi-platform session list (GET /api/sessions). Returns one block per platform
+ * (needsAgent platform without `agent` → one block per agent). 后端配置驱动：不传
+ * platform → 读服务端 ui.selectedPlatforms（空 → 全部平台），前端不再决定平台选择。
  */
 export function getSessionsAll(
   opts: {
-    platforms?: Platform[];
     agent?: string;
     status?: string;
     match?: string;
@@ -140,10 +153,7 @@ export function getSessionsAll(
     offset?: number;
   } = {}
 ): Promise<SessionsListResponse> {
-  // platforms 缺省/空数组 = 全部平台（`platform=all`）；非空子集用逗号拼接。
-  const allPlatforms = !opts.platforms || opts.platforms.length === 0;
   const params: Record<string, ParamValue> = {
-    platform: allPlatforms ? 'all' : (opts.platforms ?? []).join(','),
     agent: opts.agent || undefined,
     status: opts.status,
     match: opts.match,
@@ -437,6 +447,15 @@ export function getSettings(): Promise<AllSettings> {
   return fetchJson('/api/settings');
 }
 
+/** GET /api/ui-selection — 远端只读真源：当前主机（本机/远端）已选平台集合。
+ *  远端下经 X-Host-Id 头透传取远端配置；不再从 /api/settings 取（settings 已本机化）。 */
+export interface UiSelection {
+  selectedPlatforms: Platform[];
+}
+export function getSelectedPlatforms(): Promise<UiSelection> {
+  return fetchJson('/api/ui-selection');
+}
+
 /** PUT /api/settings 可选项：只含已编辑的 section，未提供者原样保留。 */
 export type SettingsPatch = {
   /** ui section 部分更新：platform（默认平台）/ selectedPlatforms（侧栏多选）独立，未传字段保留原值 */
@@ -473,7 +492,9 @@ export function saveUiSettings(body: { platform?: Platform; selectedPlatforms?: 
   return requestJson('/api/settings', 'PUT', { ui: body });
 }
 
-/** URL for the server-side session export (Markdown / standalone HTML download). */
+/** URL for the server-side session export (Markdown / standalone HTML download).
+ *  `<a href>` 下载不能带自定义头，非 local 主机时用 ?host= query 指定路由目标
+ *  （与 watchUrl 同款），否则远端下导出会打回本机。 */
 export function exportUrl(
   platform: Platform,
   sessionId: string,
@@ -483,6 +504,7 @@ export function exportUrl(
   return withParams(`/api/${encodeURIComponent(platform)}/sessions/${encodeURIComponent(sessionId)}/export`, {
     format,
     agent: opts.agent,
+    host: activeHostId === 'local' ? undefined : activeHostId,
   });
 }
 

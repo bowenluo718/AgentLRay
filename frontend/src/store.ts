@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { saveUiSettings, setActiveHostId, connectHost, getHosts } from '@/api/client';
+import { saveUiSettings, setActiveHostId, setHostReady, connectHost, getHosts } from '@/api/client';
 import type { HostInfo, HostStatus, Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 
@@ -477,14 +477,24 @@ interface AppState {
   hostStatus: Record<string, HostStatus>;
   /** 主机错误文案，按 host id。 */
   hostError: Record<string, string>;
+  /** 数据面是否可发（local 恒 true；远端=隧道连接+探测成功）。首帧「先连后加载」
+   *  门控：记忆远端时先置 false，连接成功后置 true 才渲染/拉取数据面。 */
+  hostReady: boolean;
+  /** 主机就绪失败/回落的文案（有值=已回落本机数据）。 */
+  hostReadyError: string | null;
 
   /** 写入运行时主机列表（列表拉取 + 连接状态更新）。 */
   setHosts: (hosts: HostInfo[]) => void;
   /** 设置/更新单个主机连接状态与错误。 */
   setHostRuntime: (id: string, status: HostStatus, error?: string | null) => void;
   /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
-   *  返回是否成功（调用方据此 toast）。 */
+   *  返回是否成功（调用方据此 toast）。内部同步 hostReady 状态机。 */
   setSelectedHostId: (id: string) => Promise<boolean>;
+  /** 直接进入「连接中」：置 hostReady=false（数据面暂不可发，占位渲染）。 */
+  setHostConnecting: () => void;
+  /** 连接/恢复流程结束：hostReady=true 回落（本机或停留的远端仍可发数据面），
+   *  可选记录回落文案。 */
+  setHostReadyResult: (hostReadyError: string | null) => void;
   /** 应用远端主机 server ui 的选中值（platform/selectedPlatforms/detailPlatform）。
    *  只写前端状态，不落本机持久化（远端只读）。local 主机下不调用。 */
   applyRemoteSelection: (sel: { platform: Platform; selectedPlatforms: Platform[] }) => void;
@@ -527,6 +537,8 @@ interface AppState {
 }
 
 const initial = loadPersisted();
+// client 数据面就绪镜像与 store 同步初始化（记忆远端时占位期即 false）。
+setHostReady(initial.rememberedHostId === 'local');
 const urlDetail = parseDetailFromUrl();
 // 右侧视图页签初始值：URL > localStorage > 默认 sessions。
 const urlView = parseViewFromUrl();
@@ -564,6 +576,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   hosts: [],
   hostStatus: { local: 'connected' },
   hostError: {},
+  // 首帧主机就绪：记忆的是本机 → 立即可发数据面；记忆的是远端 → 等连接成功才就绪。
+  hostReady: initial.rememberedHostId === 'local',
+  hostReadyError: null,
 
   setHosts: (hosts) => {
     const status: Record<string, HostStatus> = { local: 'connected' };
@@ -579,21 +594,40 @@ export const useAppStore = create<AppState>((set, get) => ({
       hostStatus: { ...s.hostStatus, [id]: status },
       hostError: error ? { ...s.hostError, [id]: error } : s.hostError,
     })),
+  setHostConnecting: () => {
+    set({ hostReady: false, hostReadyError: null });
+    setHostReady(false); // 同步 client 镜像（SSE/手动 fetch 判定）
+  },
+  setHostReadyResult: (hostReadyError) => {
+    set({ hostReady: true, hostReadyError });
+    setHostReady(true); // 同步 client 镜像（SSE/手动 fetch 判定）
+  },
   setSelectedHostId: async (id) => {
     const cur = get().selectedHostId;
     if (id === cur) return true;
     if (id !== 'local') {
+      // 就绪状态机：进入连接中（数据面暂不可发）。
       get().setHostRuntime(id, 'connecting', null);
+      set({ hostReady: false, hostReadyError: null });
+      setHostReady(false); // 同步 client 镜像
+      let ok = false;
       try {
         await connectHost(id);
+        ok = true;
       } catch (e) {
+        // 失败停留原主机（selectedHostId 不变，隧道未动）：原主机数据面仍可发。
         get().setHostRuntime(id, 'error', e instanceof Error ? e.message : String(e));
-        return false;
+      } finally {
+        // 原主机仍可用（local 直连恒可；失败停留的远端其隧道可能仍活着）。
+        get().setHostReadyResult(null);
       }
+      if (!ok) return false;
       get().setHostRuntime(id, 'connected', null);
     }
     // 切换本地 host 时关闭旧远端隧道（服务端 connectHost 已处理，local 直连无需关）。
     setActiveHostId(id);
+    // 提交成功 → 数据面就绪（同步 client 镜像供 SSE/手动 fetch）。
+    setHostReady(true);
     // 读取目标主机的持久化偏好，按当前主机应用（使用也按主机区分）。切到 local 时完整
     // 恢复该主机上次的平台/筛选/主题偏好；切到远端时平台/多选由远端 server 真源（随后
     // applyRemoteSelection 覆盖），这里只恢复本地缓存的 UI 偏好（theme/view/groupBy 等）。
@@ -609,6 +643,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       selectedHostId: id,
       rememberedHostId: id,
+      // 提交成功 → 数据面就绪（本地路径也适用：App 早退回本机 / 占位回本机）。
+      hostReady: true,
       // 远端（selectedHostId !== 'local'）下筛选（平台/项目）只读：数据与选中值来自远端。
       filtersReadOnly: isRemote,
       // 切换主机 → 清会话上下文（平台/会话随新主机列表收敛，setPlatforms 复用）。
@@ -691,9 +727,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().filtersReadOnly) return; // 远端只读：平台选中值来源远端，不可本地变更
     if (platform === get().platform && get().selectedPlatforms.length === 0) return;
     // Mirrors legacy platform switch: clear agent/session selection.
+    // 单平台选择同步落服务端 ui.selectedPlatforms=[platform]：列表恒走聚合接口
+    // （GET /api/sessions 后端读 selectedPlatforms，空 → all），不写则后端取全部
+    // 平台、单平台会话与其余平台混列（侧栏单选与列表不一致回归）。
     set({
       platform,
-      selectedPlatforms: [],
+      selectedPlatforms: [platform],
       hasStoredPlatform: true,
       detailPlatform: platform,
       detailAgent: '',
@@ -727,12 +766,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       persistState();
       return;
     }
-    // 取消一个：只剩一个时退回单平台该平台
+    // 取消一个：只剩一个时退回单平台该平台。单平台同步落服务端
+    // ui.selectedPlatforms=[p]（与 setPlatform 同口径，见其注释）。
     const rest = cur.filter((x) => x !== p);
     if (rest.length === 0) {
       set({
         platform: p,
-        selectedPlatforms: [],
+        selectedPlatforms: [p],
         hasStoredPlatform: true,
         detailPlatform: p,
         detailAgent: '',
@@ -747,7 +787,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (rest.length === 1) {
       set({
         platform: rest[0],
-        selectedPlatforms: [],
+        selectedPlatforms: [rest[0]],
         hasStoredPlatform: true,
         detailPlatform: rest[0],
         detailAgent: '',

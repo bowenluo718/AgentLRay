@@ -449,6 +449,43 @@ describe('AgentLRay API', () => {
     });
   });
 
+  describe('GET /api/ui-selection 与 /api/sessions 缺省取数（settings 本机化 + 后端配置驱动）', () => {
+    let srv;
+    before(async () => {
+      srv = await startServer();
+    });
+    after(async () => {
+      await srv.stop();
+    });
+
+    it('GET /api/ui-selection 默认 { selectedPlatforms: [] }（只含 selectedPlatforms，不含 platform）', async () => {
+      const sel = await getJson(srv.base, '/api/ui-selection');
+      assert.deepEqual(sel, { selectedPlatforms: [] });
+    });
+
+    it('GET /api/sessions 无 platform → 缺省全部平台（all:true、platformIds 全部已挂载）', async () => {
+      const result = await getJson(srv.base, '/api/sessions');
+      assert.equal(result.all, true);
+      const settings = await getJson(srv.base, '/api/settings');
+      // 新服务器无 disabled/replaced → platforms.ids 即全部已挂载平台。
+      assert.deepEqual([...result.platformIds].sort(), [...settings.platforms.ids].sort());
+    });
+
+    it('PUT ui.selectedPlatforms=[omp,codex] 后 GET /api/ui-selection 返回同值', async () => {
+      await sendJson(srv.base, 'PUT', '/api/settings', {
+        ui: { selectedPlatforms: ['omp', 'codex'] },
+      });
+      const sel = await getJson(srv.base, '/api/ui-selection');
+      assert.deepEqual(sel, { selectedPlatforms: ['omp', 'codex'] });
+    });
+
+    it('PUT 后 GET /api/sessions 缺省 → 只取所选平台（all:false、platformIds 收敛）', async () => {
+      const result = await getJson(srv.base, '/api/sessions');
+      assert.equal(result.all, false);
+      assert.deepEqual([...result.platformIds].sort(), ['codex', 'omp']);
+    });
+  });
+
   describe('search', () => {
     it('finds a keyword in one platform', async () => {
       const results = await getJson(srv.base, '/api/search?q=search-needle-alpha&platform=codex');

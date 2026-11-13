@@ -227,6 +227,7 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (parsed.pathname === '/api/search') return ok(searchFixtures(parsed.searchParams.get('q') || ''));
   if (parsed.pathname === '/api/spawn-map') return ok(data.spawnMap ?? []);
   if (seg(1) === 'spawn-tree') return ok({ node: null, parent: null });
+  if (parsed.pathname === '/api/ui-selection') return ok({ selectedPlatforms: [] });
   if (parsed.pathname === '/api/settings') {
     return ok({
       ui: { platform: null, selectedPlatforms: [] },
