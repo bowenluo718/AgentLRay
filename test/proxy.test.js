@@ -269,6 +269,24 @@ test('主机管理（/api/hosts）远端 → 403 不透传（本地网关资源�
   }
 });
 
+test('入站 peer（/api/inbound）远端 → 403 不透传（被连接方本地资源）', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    // 带 X-Host-Id 指向远端时：/api/inbound 是被连接方本机资源，不透传 → 403。
+    const r = await app.request('/api/inbound', { headers: { 'X-Host-Id': 'remote1' } });
+    assert.equal(r.status, 403);
+    const rHello = await app.request('/api/inbound/hello', {
+      method: 'POST',
+      headers: { 'X-Host-Id': 'remote1' },
+    });
+    assert.equal(rHello.status, 403);
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
 test('远端未连接 → 503', async () => {
   closeHost('remote1'); // 确保未连接
   const app = await startApp();

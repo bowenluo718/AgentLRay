@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { saveUiSettings, setActiveHostId, setHostReady, connectHost, getHosts } from '@/api/client';
-import type { HostInfo, HostStatus, Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
+import type { HostInfo, HostStatus, InboundInfo, Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 
 // —— 平台列表降级表 ——
@@ -482,9 +482,13 @@ interface AppState {
   hostReady: boolean;
   /** 主机就绪失败/回落的文案（有值=已回落本机数据）。 */
   hostReadyError: string | null;
+  /** 本机当前被哪些其他主机连接（inbound peers，由 useInboundPoller 拉取）。 */
+  inbound: InboundInfo | null;
 
   /** 写入运行时主机列表（列表拉取 + 连接状态更新）。 */
   setHosts: (hosts: HostInfo[]) => void;
+  /** 写入入站 peer 快照（inbound peers）。 */
+  setInbound: (inbound: InboundInfo | null) => void;
   /** 设置/更新单个主机连接状态与错误。 */
   setHostRuntime: (id: string, status: HostStatus, error?: string | null) => void;
   /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
@@ -579,6 +583,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // 首帧主机就绪：记忆的是本机 → 立即可发数据面；记忆的是远端 → 等连接成功才就绪。
   hostReady: initial.rememberedHostId === 'local',
   hostReadyError: null,
+  inbound: null,
 
   setHosts: (hosts) => {
     const status: Record<string, HostStatus> = { local: 'connected' };
@@ -589,6 +594,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ hosts, hostStatus: status, hostError: err });
   },
+  setInbound: (inbound) => set({ inbound }),
   setHostRuntime: (id, status, error = null) =>
     set((s) => ({
       hostStatus: { ...s.hostStatus, [id]: status },

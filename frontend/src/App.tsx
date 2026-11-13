@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
 import { useVersionPoller } from '@/hooks/useVersionPoller';
+import { useInboundPoller } from '@/hooks/useInboundPoller';
 import { DEMO } from '@/demo/flag';
 import { getHosts, getSelectedPlatforms } from '@/api/client';
 import { useAppStore } from '@/store';
@@ -31,6 +32,7 @@ const TABS: { view: MainView; label: string; title: string }[] = [
 export default function App() {
   usePlatforms(); // 服务端平台列表驱动（结果写入 store）
   useVersionPoller();
+  useInboundPoller();
   const { theme, setTheme } = useTheme();
   const view = useAppStore((s) => s.view);
   const setView = useAppStore((s) => s.setView);

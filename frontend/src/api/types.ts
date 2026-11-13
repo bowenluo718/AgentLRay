@@ -502,3 +502,21 @@ export interface VersionInfo {
 export interface OtlpExport {
   resourceSpans: unknown[];
 }
+
+// ---------- Inbound peers（被连接主机，design-inbound-peers）----------
+
+/** GET /api/inbound 单条：本机被某台连接方上报/心跳的存活记录。 */
+export interface InboundPeer {
+  peerId: string;
+  label: string;
+  version: string | null;
+  bootId: string | null;
+  connectedAt: string;
+  lastSeen: string;
+}
+
+/** GET /api/inbound 响应：本机当前被哪些主机连接。 */
+export interface InboundInfo {
+  count: number;
+  peers: InboundPeer[];
+}

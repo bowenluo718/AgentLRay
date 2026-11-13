@@ -188,6 +188,9 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   // /api/version — keep the stale-page poller quiet
   if (parsed.pathname === '/api/version') return ok({ bootId: 'demo' });
 
+  // /api/inbound — demo 无入站连接，让 useInboundPoller 轮询安静（徽标不显示）。
+  if (parsed.pathname === '/api/inbound') return ok({ count: 0, peers: [] });
+
   // /api/platforms — demo 只含 fixture 覆盖的三平台；mt/replace 属写操作，
   // 已被上方 read-only 守卫拒绝。
   if (parsed.pathname === '/api/platforms') return ok(DEMO_PLATFORMS);

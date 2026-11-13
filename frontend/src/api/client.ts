@@ -7,6 +7,7 @@ import type {
   HidePromptsResult,
   HostInfo,
   HostsResponse,
+  InboundInfo,
   Insights,
   OtlpExport,
   Platform,
@@ -529,6 +530,12 @@ export function watchUrl(opts: {
  *  主机列表是本地网关配置（~/.agentlray/hosts.json），不随当前查看的远端变化 → 强制 local。 */
 export function getHosts(): Promise<HostsResponse> {
   return fetchJson('/api/hosts', { local: true });
+}
+
+/** GET /api/inbound — 本机当前被哪些其他主机连接（被连接方本地资源，inbound peers）。
+ *  强制 local 语义，不随当前查看的远端变化，同 getHosts。 */
+export function getInbound(): Promise<InboundInfo> {
+  return fetchJson('/api/inbound', { local: true });
 }
 
 /** POST /api/hosts — 新建主机。 */

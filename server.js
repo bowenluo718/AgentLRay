@@ -17,9 +17,10 @@ const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
 const { loadDirsConfigSync } = require('./lib/dirs-config');
 const { csrfGuard } = require('./lib/csrf');
-const { shutdownHosts } = require('./lib/hosts');
+const { shutdownHosts, setSelfIdentity } = require('./lib/hosts');
 const mountProxyRoutes = require('./lib/routes/proxy');
 const mountHostsRoutes = require('./lib/routes/hosts');
+const mountInboundRoutes = require('./lib/routes/inbound');
 const pkg = require('./package.json');
 
 const app = express();
@@ -40,6 +41,9 @@ mountProxyRoutes(app);
 // when the serving process (and thus possibly the code) has changed.
 // version 字段供多主机跨主机版本提示（design R3-Q3/P0）。
 const SERVER_BOOT_ID = `${Date.now().toString(36)}-${process.pid}`;
+// 本机身份（连接方视角）：作为连接方主动向被连接方上报，供被连接方展示「被谁连接」。
+// peerId/label 已由 lib/hosts.js 默认为本机 hostname 短名，此处仅补充版本/启动标识。
+setSelfIdentity({ version: pkg.version, bootId: SERVER_BOOT_ID });
 app.get('/api/version', (req, res) => {
   res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
 });
@@ -74,6 +78,7 @@ mountCliBinsRoutes(app);
 mountSettingsRoutes(app, { status: { setStatusConfig } });
 mountPlatformsRoutes(app);
 mountHostsRoutes(app);
+mountInboundRoutes(app);
 
 // SPA fallback: unknown paths render the React UI shell
 app.get('*', (req, res) => {

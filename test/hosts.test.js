@@ -25,6 +25,9 @@ const {
   getRuntime,
   shutdownHosts,
   setRuntimeForTest,
+  setSelfIdentity,
+  reportPeer,
+  shortHostname,
 } = require('../lib/hosts');
 
 // 每个测试前重置 hosts.json 与运行时，保证用例间无共享落盘状态。
@@ -133,4 +136,46 @@ test('closeAllExcept：保留 keepId 隧道，关闭其余（design R4-Q1 无常
   setRuntimeForTest('host-b', 'http://127.0.0.1:41002');
   closeAllExcept(LOCAL_ID);
   assert.equal(getRuntime('host-b'), undefined);
+});
+
+test('reportPeer：向被连接方 POST /api/inbound/hello 上报本机身份（inbound peers）', async () => {
+  const http = require('node:http');
+  let received = null;
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      received = { url: req.url, method: req.method, body: JSON.parse(body) };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const hn = shortHostname();
+    setSelfIdentity({ version: '0.1.0', bootId: 'boot-1' });
+    // 自报身份：peerId/label 缺省为本机 hostname 短名（区分「哪台机器在连」）。
+    const ok = await reportPeer(baseUrl, { peerId: hn, label: hn, version: '0.1.0', bootId: 'boot-1' });
+    assert.equal(ok, true);
+    assert.equal(received.method, 'POST');
+    assert.equal(received.url, '/api/inbound/hello');
+    assert.deepEqual(received.body, { peerId: hn, label: hn, version: '0.1.0', bootId: 'boot-1' });
+  } finally {
+    server.close();
+  }
+});
+
+test('shortHostname：去域后缀返回短名，非空', () => {
+  const hn = shortHostname();
+  assert.equal(typeof hn, 'string');
+  assert.ok(hn.length > 0);
+  // 短名不含点（域后缀已被剥离）。
+  assert.ok(!hn.includes('.'));
+});
+
+test('reportPeer：对端不可达静默失败（不抛错，不阻塞连接）', async () => {
+  const ok = await reportPeer('http://127.0.0.1:1', { peerId: shortHostname(), label: shortHostname() });
+  assert.equal(ok, false);
 });
