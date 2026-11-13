@@ -5,6 +5,8 @@ import type {
   ChildAgentSummary,
   HiddenPromptsData,
   HidePromptsResult,
+  HostInfo,
+  HostsResponse,
   Insights,
   OtlpExport,
   Platform,
@@ -33,6 +35,21 @@ export type DirSettings = Record<string, string>;
 
 type ParamValue = string | number | boolean | undefined | null;
 
+// —— 多主机（multi-host）当前选中主机 ——
+// fetchJson/requestJson 统一注入 X-Host-Id 头；由 store 在切换主机时 setActiveHostId。
+// 缺省 'local' = 本机直连。SSE（EventSource）不能带自定义头，改用 ?host= query（见 watchUrl）。
+let activeHostId = 'local';
+
+/** 设置当前选中主机 id（供 client 请求注入 X-Host-Id）。 */
+export function setActiveHostId(id: string): void {
+  activeHostId = id;
+}
+
+/** 当前选中主机 id（SSE watchUrl 等需带 ?host= 或读状态用）。 */
+export function getActiveHostId(): string {
+  return activeHostId;
+}
+
 function withParams(path: string, params: Record<string, ParamValue>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -43,9 +60,18 @@ function withParams(path: string, params: Record<string, ParamValue>): string {
   return qs ? `${path}?${qs}` : path;
 }
 
-async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
+// fetchJson 的扩展 init：`local: true` 强制走本地网关（主机管理等本地资源端点）。
+export type FetchInit = RequestInit & { local?: boolean };
+
+async function fetchJson<T>(url: string, init?: FetchInit): Promise<T> {
   if (DEMO) return demoJson<T>(url, init);
-  const response = await fetch(url, init);
+  const headers = new Headers(init?.headers);
+  // 默认注入当前选中主机；显式 opts.local 强制走本地网关（主机管理等本地资源，
+  // 不随当前查看的远端变化）。SSE 走 watchUrl 的 ?host=，不走这里。
+  if (init?.local !== true && activeHostId !== 'local') {
+    headers.set('X-Host-Id', activeHostId);
+  }
+  const response = await fetch(url, { ...init, headers });
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { error?: string } | null;
     throw new Error(body?.error || response.statusText);
@@ -53,11 +79,12 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function requestJson<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown): Promise<T> {
+function requestJson<T>(url: string, method: 'POST' | 'PUT' | 'DELETE', body?: unknown, opts?: { local?: boolean }): Promise<T> {
   return fetchJson<T>(url, {
     method,
     headers: { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...opts,
   });
 }
 
@@ -305,7 +332,10 @@ export function getOtlp(platform: Platform, sessionId: string): Promise<OtlpExpo
 }
 
 export function getVersion(): Promise<VersionInfo> {
-  return fetchJson('/api/version');
+  // "AgentLRay 已更新" 指本机安装的 AgentLRay 服务有新版本（需刷新本地页面加载新
+  // 前端构建），与当前查看的数据主机无关。强制走本地网关（local: true），避免
+  // 连接远端主机时拿到远端 bootId 而误报更新。
+  return fetchJson('/api/version', { local: true });
 }
 
 // ---------- 统一设置端点 ----------
@@ -456,7 +486,8 @@ export function exportUrl(
   });
 }
 
-/** URL for the real-time tail EventSource (GET /api/watch, SSE — consumed via new EventSource()). */
+/** URL for the real-time tail EventSource (GET /api/watch, SSE — consumed via new EventSource()).
+ *  EventSource 不能带自定义头，非 local 主机时用 ?host= query 指定路由目标。 */
 export function watchUrl(opts: {
   platform: Platform;
   sessionId: string;
@@ -466,5 +497,72 @@ export function watchUrl(opts: {
     platform: opts.platform,
     sessionId: opts.sessionId,
     agent: opts.agent,
+    host: activeHostId === 'local' ? undefined : activeHostId,
   });
+}
+
+// ---------- Hosts（multi-host）----------
+
+/** GET /api/hosts — 主机列表（[local, ...hosts]，含运行时 status/version）。
+ *  主机列表是本地网关配置（~/.agentlray/hosts.json），不随当前查看的远端变化 → 强制 local。 */
+export function getHosts(): Promise<HostsResponse> {
+  return fetchJson('/api/hosts', { local: true });
+}
+
+/** POST /api/hosts — 新建主机。 */
+export function createHost(body: {
+  id: string;
+  label: string;
+  type?: 'ssh';
+  ssh: {
+    host: string;
+    user?: string;
+    port?: number | null;
+    remoteAgentLrayPort?: number;
+    identityFile?: string;
+    useAgent?: boolean;
+  };
+}): Promise<HostInfo> {
+  return requestJson('/api/hosts', 'POST', body, { local: true });
+}
+
+/** PUT /api/hosts/:id — 编辑主机（全量替换字段；id 不可改）。 */
+export function updateHost(
+  id: string,
+  body: {
+    label: string;
+    type?: 'ssh';
+    ssh: {
+      host: string;
+      user?: string;
+      port?: number | null;
+      remoteAgentLrayPort?: number;
+      identityFile?: string;
+      useAgent?: boolean;
+    };
+  }
+): Promise<HostInfo> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}`, 'PUT', body, { local: true });
+}
+
+/** DELETE /api/hosts/:id — 删除主机（关隧道 + 移除）。 */
+export function deleteHost(id: string): Promise<{ id: string }> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}`, 'DELETE', undefined, { local: true });
+}
+
+export interface HostTestResult {
+  ok: boolean;
+  status: string;
+  bootId: string | null;
+  error: string | null;
+}
+
+/** POST /api/hosts/:id/test — 测试连接（建隧道→探测→关，不影响当前选中）。 */
+export function testHost(id: string): Promise<HostTestResult> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}/test`, 'POST', undefined, { local: true });
+}
+
+/** POST /api/hosts/:id/connect — 建立并保持隧道（前端切换当前选中主机用）。 */
+export function connectHost(id: string): Promise<HostTestResult> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}/connect`, 'POST', undefined, { local: true });
 }

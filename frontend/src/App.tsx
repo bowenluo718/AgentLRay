@@ -2,12 +2,15 @@ import { ArrowLeft, Copy, Moon, PanelLeft, Sun } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from '@/components/Sidebar';
+import { HostSelector } from '@/components/HostSelector';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
 import { useVersionPoller } from '@/hooks/useVersionPoller';
 import { DEMO } from '@/demo/flag';
+import { getHosts, getSettings } from '@/api/client';
 import { useAppStore } from '@/store';
 import type { MainView } from '@/store';
 import { usePlatforms } from '@/views/sessions/queries';
@@ -35,9 +38,66 @@ export default function App() {
   const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
   const sidebarWidth = useAppStore((s) => s.sidebarWidth);
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
+  const setHosts = useAppStore((s) => s.setHosts);
+  const hosts = useAppStore((s) => s.hosts);
+  const selectedHostId = useAppStore((s) => s.selectedHostId);
+  const platformsLoaded = useAppStore((s) => s.platformsLoaded);
+  const applyRemoteSelection = useAppStore((s) => s.applyRemoteSelection);
+  const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
+  // 刷新后重连记忆的远端主机（问题 1/2）。只跑一次：hosts 首帧拉取到位后，
+  // 若记忆的是远端，重新 connectHost 以 X-Host-Id 访问其数据。不 reload（防循环）。
+  const didRestoreHost = useRef(false);
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const navigationPanel = useRef<HTMLDivElement>(null);
+
+  // 首帧拉取主机列表（[local, ...hosts]），写入 store；切换主机时 store 内部已负责刷新。
+  useEffect(() => {
+    if (DEMO) return;
+    getHosts()
+      .then((hosts) => setHosts(hosts))
+      .catch(() => {});
+  }, [setHosts]);
+
+  // 刷新后重连记忆的远端主机（问题 1/2）。hosts 首帧到位且记忆的是远端时重新
+  // connectHost（以 X-Host-Id 访问远端数据）。只恢复一次；不 reload（防循环）。
+  useEffect(() => {
+    if (DEMO || didRestoreHost.current) return;
+    if (hosts.length === 0) return; // 等首帧主机列表落位
+    // 记忆的主机必须仍在主机列表中（可能已被删除 → 回落本机）。
+    const remembered = useAppStore.getState().rememberedHostId;
+    if (remembered === 'local' || !hosts.some((h) => h.id === remembered)) return;
+    didRestoreHost.current = true;
+    useAppStore.getState().setSelectedHostId(remembered).then((ok) => {
+      if (!ok) return; // 连不上远端则停留本机（选中的本地路由保持可用）
+      // 重连成功后使平台 list 缓存失效：usePlatforms 以当前（远端）host 头重拉远端平台。
+      queryClient.invalidateQueries({ queryKey: ['platforms'] });
+    });
+  }, [hosts, queryClient]);
+
+  // 远端下筛选（平台/项目）数据与选中值来自远端 server ui（只读）。远端恢复/切换
+  // 后、平台列表就绪时读取一次 GET /api/settings（跟随远端 host 头 → 远端 ui），
+  // 应用其选中值。不落本机持久化（applyRemoteSelection 只写前端状态）。
+  useEffect(() => {
+    if (DEMO || selectedHostId === 'local') return;
+    if (!platformsLoaded) return;
+    let cancelled = false;
+    getSettings()
+      .then((settings) => {
+        if (cancelled) return;
+        const ui = settings?.ui;
+        applyRemoteSelection({
+          platform: ui?.platform ?? 'openclaw',
+          selectedPlatforms: ui?.selectedPlatforms ?? [],
+        });
+      })
+      .catch(() => {
+        /* 远端 ui 读取失败：保持当前选择，不阻断 */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedHostId, platformsLoaded, applyRemoteSelection]);
   const returnToContent = useCallback(() => {
     setNavigationOpen(false);
     if (window.matchMedia('(max-width: 767px)').matches) {
@@ -187,6 +247,9 @@ export default function App() {
                     </TabsTrigger>
                   ))}
                 </TabsList>
+                <div className="ml-auto pr-1">
+                  <HostSelector />
+                </div>
               </div>
               <TabsContent value="sessions" className="mt-0 min-h-0 flex-1 overflow-auto p-2 md:p-4">
                 <SessionsView />

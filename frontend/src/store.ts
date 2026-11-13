@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { saveUiSettings } from '@/api/client';
-import type { Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
+import { saveUiSettings, setActiveHostId, connectHost, getHosts } from '@/api/client';
+import type { HostInfo, HostStatus, Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 
 // —— 平台列表降级表 ——
@@ -122,13 +122,20 @@ export function useActivePlatform(): Platform {
   return hasSession && detailValid ? detailPlatform : platform;
 }
 
-// Settings persist to the SAME localStorage key/shape as the legacy app
-// (public/js/app.js SETTINGS_KEY) so both UIs share settings:
-//   { openclawDir, codexDir, claudeCodeDir, hermesDir, ompDir, platform }
-export const SETTINGS_KEY = 'agent-xray-settings';
+// 浏览器 UI 设置按主机区分缓存：每个 host 用独立 localStorage 键
+//   agent-lray-settings:<hostId>
+// 这样切到远端再切回本机（或切到不同远端）时，各自恢复各自的平台/筛选/主题偏好。
+// 旧版本把所有 host 共用单一键 agent-lray-settings（loadPersisted 做一次性回退迁移）。
+export const SETTINGS_KEY_PREFIX = 'agent-lray-settings';
+/** 记忆「上次选中主机」的全局键（不属于任何单主机，单独存放）。 */
+export const REMEMBERED_HOST_KEY = 'agent-lray-remembered-host';
+/** 按主机生成对应的设置缓存键（local 为 agent-lray-settings:local）。 */
+export function settingsKeyFor(hostId: string): string {
+  return `${SETTINGS_KEY_PREFIX}:${hostId}`;
+}
 
 // 左侧菜单（会话导航）宽度与折叠：桌面端可拖拽调宽（最小 200 / 最大 480），
-// 折叠后主内容占满；两者都随 agent-xray-settings 持久化（移动端抽屉逻辑不受影响）。
+// 折叠后主内容占满；两者都随当前主机的 agent-lray-settings:<hostId> 持久化（移动端抽屉逻辑不受影响）。
 export const SIDEBAR_DEFAULT_WIDTH = 280;
 export const SIDEBAR_MIN_WIDTH = 200;
 export const SIDEBAR_MAX_WIDTH = 480;
@@ -174,7 +181,8 @@ export function platformInfoById(platforms: PlatformInfo[], id: string | null | 
   return platforms.find((p) => p.id === id);
 }
 
-function loadPersisted(): {
+/** 单个主机持久化的 UI 偏好（persistState 写入的内容，loadPersisted/切换主机时读取）。 */
+interface PersistedUI {
   platform: Platform;
   hasStoredPlatform: boolean;
   selectedPlatforms: Platform[];
@@ -185,21 +193,58 @@ function loadPersisted(): {
   sidebarWidth: number;
   view: MainView;
   theme: Theme;
-} {
+}
+
+/** 从某主机的持久化 JSON 解析 UI 偏好（非法/缺省字段保留 defaults）。供 loadPersisted 与切换主机复用。 */
+function parsePersistedSettings(parsed: Record<string, unknown>, def: PersistedUI): PersistedUI {
+  const out: PersistedUI = { ...def };
+  // 持久化的单平台接受任意非空字符串（可能是自定义平台 id，加载时无法对运行时
+  // 列表校验；由 setPlatforms 在列表就绪后收敛）。旧存储无该键 → 默认平台。
+  if (typeof parsed.platform === 'string' && parsed.platform.trim() !== '') {
+    out.platform = parsed.platform.trim();
+    out.hasStoredPlatform = true;
+  }
+  // 显式持久化的平台多选与 UI 偏好（旧存储无这些键 → 各自默认值）。
+  if (Array.isArray(parsed.selectedPlatforms)) {
+    const picked = parsed.selectedPlatforms.filter((x): x is string => typeof x === 'string');
+    out.selectedPlatforms = picked;
+  }
+  if (parsed.groupBy === 'platform' || parsed.groupBy === 'project') {
+    out.groupBy = parsed.groupBy;
+  }
+  if (Array.isArray(parsed.projectFilter)) {
+    out.projectFilter = parsed.projectFilter.filter((x): x is string => typeof x === 'string');
+  }
+  if (parsed.collapsedGroups && typeof parsed.collapsedGroups === 'object') {
+    const cg = parsed.collapsedGroups as Record<string, unknown>;
+    for (const mode of ['platform', 'project', 'none'] as const) {
+      if (Array.isArray(cg[mode])) {
+        out.collapsedGroups[mode] = cg[mode].filter((x): x is string => typeof x === 'string');
+      }
+    }
+  }
+  // 桌面端侧栏折叠与宽度（旧存储无这些键 → 各自默认值）。宽度需为正数，越界收敛。
+  if (typeof parsed.sidebarCollapsed === 'boolean') {
+    out.sidebarCollapsed = parsed.sidebarCollapsed;
+  }
+  if (typeof parsed.sidebarWidth === 'number' && Number.isFinite(parsed.sidebarWidth)) {
+    out.sidebarWidth = clampSidebarWidth(parsed.sidebarWidth);
+  }
+  // 右侧视图页签（旧存储无该键 → 默认 sessions）。非法值回退，避免脏数据卡死页面。
+  if (isMainView(parsed.view)) {
+    out.view = parsed.view;
+  }
+  // 主题（旧存储无该键 → 默认由 useTheme 首启跟随系统决定）。只接受亮/暗两值。
+  if (parsed.theme === 'light' || parsed.theme === 'dark') {
+    out.theme = parsed.theme;
+  }
+  return out;
+}
+
+function loadPersisted(): PersistedUI & { rememberedHostId: string } {
   // Demo build ships claude-code/codex fixtures only — land on a populated tab.
   const defaultPlatform: Platform = DEMO ? 'claude-code' : 'openclaw';
-  const result: {
-    platform: Platform;
-    hasStoredPlatform: boolean;
-    selectedPlatforms: Platform[];
-    groupBy: GroupBy;
-    projectFilter: string[];
-    collapsedGroups: Record<GroupBy, string[]>;
-    sidebarCollapsed: boolean;
-    sidebarWidth: number;
-    view: MainView;
-    theme: Theme;
-  } = {
+  const result: PersistedUI & { rememberedHostId: string } = {
     platform: defaultPlatform,
     hasStoredPlatform: false,
     // 无持久化选择时默认「全部平台」（聚合视图）。平台列表加载成功后 setPlatforms
@@ -213,51 +258,42 @@ function loadPersisted(): {
     view: 'sessions',
     // 无持久化偏好时跟随系统深浅色（与 index.html 的防闪烁脚本一致）。
     theme: systemTheme(),
+    // 记忆上次选中的主机（默认本机）。切换远端后刷新仍重连回该远端。
+    rememberedHostId: 'local',
   };
+  // 首启/刷新时主机为 local（远端重连是异步的，首帧即本机），故只读本机缓存键。
+  // 旧版本把所有 host 共用单一键 agent-lray-settings（无 host 后缀），读不到 local 键时
+  // 回退旧键做一次性迁移：老键里的 host 字段并入全局记忆键，UI 字段并入 local 键。
+  const localKey = settingsKeyFor('local');
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    const legacy = localStorage.getItem(SETTINGS_KEY_PREFIX);
+    let raw = localStorage.getItem(localKey);
+    if (!raw && legacy) {
+      raw = legacy;
+      localStorage.setItem(localKey, legacy);
+      localStorage.removeItem(SETTINGS_KEY_PREFIX);
+    }
+    // 记忆的上次选中主机单独存全局键（不属于任何单主机）。
+    try {
+      const remembered = localStorage.getItem(REMEMBERED_HOST_KEY);
+      if (remembered && remembered.trim() !== '') {
+        result.rememberedHostId = remembered.trim();
+      }
+    } catch {
+      /* ignore */
+    }
     if (raw) {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
-      // 持久化的单平台接受任意非空字符串（可能是自定义平台 id，加载时无法对运行时
-      // 列表校验；由 setPlatforms 在列表就绪后收敛）。旧存储无该键 → 默认平台。
-      if (typeof parsed.platform === 'string' && parsed.platform.trim() !== '') {
-        result.platform = parsed.platform.trim();
-        result.hasStoredPlatform = true;
-      }
-      // 显式持久化的平台多选与 UI 偏好（旧存储无这些键 → 各自默认值）。
-      if (Array.isArray(parsed.selectedPlatforms)) {
-        const picked = parsed.selectedPlatforms.filter((x): x is string => typeof x === 'string');
-        result.selectedPlatforms = picked;
-      }
-      if (parsed.groupBy === 'platform' || parsed.groupBy === 'project') {
-        result.groupBy = parsed.groupBy;
-      }
-      if (Array.isArray(parsed.projectFilter)) {
-        result.projectFilter = parsed.projectFilter.filter((x): x is string => typeof x === 'string');
-      }
-      if (parsed.collapsedGroups && typeof parsed.collapsedGroups === 'object') {
-        const cg = parsed.collapsedGroups as Record<string, unknown>;
-        for (const mode of ['platform', 'project', 'none'] as const) {
-          if (Array.isArray(cg[mode])) {
-            result.collapsedGroups[mode] = cg[mode].filter((x): x is string => typeof x === 'string');
-          }
+      // 旧数据（agent-lray-settings 单键）里的 host 字段并入全局记忆键，一次性迁移。
+      if (typeof parsed.host === 'string' && parsed.host.trim() !== '' && result.rememberedHostId === 'local') {
+        result.rememberedHostId = parsed.host.trim();
+        try {
+          localStorage.setItem(REMEMBERED_HOST_KEY, result.rememberedHostId);
+        } catch {
+          /* ignore */
         }
       }
-      // 桌面端侧栏折叠与宽度（旧存储无这些键 → 各自默认值）。宽度需为正数，越界收敛。
-      if (typeof parsed.sidebarCollapsed === 'boolean') {
-        result.sidebarCollapsed = parsed.sidebarCollapsed;
-      }
-      if (typeof parsed.sidebarWidth === 'number' && Number.isFinite(parsed.sidebarWidth)) {
-        result.sidebarWidth = clampSidebarWidth(parsed.sidebarWidth);
-      }
-      // 右侧视图页签（旧存储无该键 → 默认 sessions）。非法值回退，避免脏数据卡死页面。
-      if (isMainView(parsed.view)) {
-        result.view = parsed.view;
-      }
-      // 主题（旧存储无该键 → 默认由 useTheme 首启跟随系统决定）。只接受亮/暗两值。
-      if (parsed.theme === 'light' || parsed.theme === 'dark') {
-        result.theme = parsed.theme;
-      }
+      Object.assign(result, parsePersistedSettings(parsed, result));
     }
   } catch {
     /* corrupted storage — fall back to defaults */
@@ -352,8 +388,9 @@ function syncSessionUrl(): void {
 function persistState(): void {
   const st = useAppStore.getState();
   try {
+    // 按当前主机写入独立缓存键，并记忆当前主机（全局键）——切回该主机时恢复其偏好。
     localStorage.setItem(
-      SETTINGS_KEY,
+      settingsKeyFor(st.selectedHostId),
       JSON.stringify({
         platform: st.platform,
         selectedPlatforms: st.selectedPlatforms,
@@ -366,13 +403,16 @@ function persistState(): void {
         theme: st.theme,
       })
     );
+    localStorage.setItem(REMEMBERED_HOST_KEY, st.selectedHostId);
   } catch {
     /* non-fatal */
   }
   // 把侧栏多选集合同步到服务端 ui section 的 selectedPlatforms（CLI list 未传
   // --platform 时读取为缺省，保证终端命令与页面视角一致）。只写 selectedPlatforms：
   // ui.platform（默认平台）由设置面板独占管理，侧栏不再覆盖。DEMO 无真实后端，跳过。
-  if (!DEMO) {
+  // 远端（selectedHostId !== 'local'）下选中值来自远端只读，且写面被网关 403，
+  // 一律同步给本机 server 会污染本机默认 —— 跳过。
+  if (!DEMO && st.selectedHostId === 'local') {
     saveUiSettings({ selectedPlatforms: st.selectedPlatforms }).catch(() => {
       /* non-fatal */
     });
@@ -423,6 +463,31 @@ interface AppState {
   /** 平台列表是否已加载（setPlatforms 已跑）：仅在其后发起 sessions/probe 请求。
    *  避免首帧用 FALLBACK（全部内置按已挂载）误探/误查服务端已禁用的平台。 */
   platformsLoaded: boolean;
+
+  /** 当前选中主机（默认 'local' 本机；切换成功后提交，失败停留原主机）。 */
+  selectedHostId: string;
+  /** 记忆的上次选中主机（从 localStorage 恢复；刷新后 App 据此重连）。 */
+  rememberedHostId: string;
+  /** 远端（selectedHostId !== 'local'）下筛选是否只读：平台/项目数据与选中值来自
+   *  远端且不可本地变更。 */
+  filtersReadOnly: boolean;
+  /** 主机列表（[local 内建, ...hosts]），含运行时 status。 */
+  hosts: HostInfo[];
+  /** 主机连接状态，按 host id（local 恒 connected）。 */
+  hostStatus: Record<string, HostStatus>;
+  /** 主机错误文案，按 host id。 */
+  hostError: Record<string, string>;
+
+  /** 写入运行时主机列表（列表拉取 + 连接状态更新）。 */
+  setHosts: (hosts: HostInfo[]) => void;
+  /** 设置/更新单个主机连接状态与错误。 */
+  setHostRuntime: (id: string, status: HostStatus, error?: string | null) => void;
+  /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
+   *  返回是否成功（调用方据此 toast）。 */
+  setSelectedHostId: (id: string) => Promise<boolean>;
+  /** 应用远端主机 server ui 的选中值（platform/selectedPlatforms/detailPlatform）。
+   *  只写前端状态，不落本机持久化（远端只读）。local 主机下不调用。 */
+  applyRemoteSelection: (sel: { platform: Platform; selectedPlatforms: Platform[] }) => void;
 
   /** 写入运行时平台列表，并把当前平台选择收敛到可查询集合（见实现注释）。 */
   setPlatforms: (infos: PlatformInfo[], error?: string | null) => void;
@@ -492,6 +557,107 @@ export const useAppStore = create<AppState>((set, get) => ({
   platformsError: null,
   // DEMO 无真实后端（usePlatforms 不跑 setPlatforms），直接视为已加载走合成数据。
   platformsLoaded: DEMO ? true : false,
+  selectedHostId: 'local',
+  // 刷新后由 App 据此重连记忆的远端；initial 从 localStorage 读取（默认 'local'）。
+  rememberedHostId: initial.rememberedHostId,
+  filtersReadOnly: false,
+  hosts: [],
+  hostStatus: { local: 'connected' },
+  hostError: {},
+
+  setHosts: (hosts) => {
+    const status: Record<string, HostStatus> = { local: 'connected' };
+    const err: Record<string, string> = {};
+    for (const h of hosts) {
+      status[h.id] = h.status;
+      if (h.error) err[h.id] = h.error;
+    }
+    set({ hosts, hostStatus: status, hostError: err });
+  },
+  setHostRuntime: (id, status, error = null) =>
+    set((s) => ({
+      hostStatus: { ...s.hostStatus, [id]: status },
+      hostError: error ? { ...s.hostError, [id]: error } : s.hostError,
+    })),
+  setSelectedHostId: async (id) => {
+    const cur = get().selectedHostId;
+    if (id === cur) return true;
+    if (id !== 'local') {
+      get().setHostRuntime(id, 'connecting', null);
+      try {
+        await connectHost(id);
+      } catch (e) {
+        get().setHostRuntime(id, 'error', e instanceof Error ? e.message : String(e));
+        return false;
+      }
+      get().setHostRuntime(id, 'connected', null);
+    }
+    // 切换本地 host 时关闭旧远端隧道（服务端 connectHost 已处理，local 直连无需关）。
+    setActiveHostId(id);
+    // 读取目标主机的持久化偏好，按当前主机应用（使用也按主机区分）。切到 local 时完整
+    // 恢复该主机上次的平台/筛选/主题偏好；切到远端时平台/多选由远端 server 真源（随后
+    // applyRemoteSelection 覆盖），这里只恢复本地缓存的 UI 偏好（theme/view/groupBy 等）。
+    let restored: PersistedUI | null = null;
+    try {
+      const raw = localStorage.getItem(settingsKeyFor(id));
+      // hasStoredPlatform 基线用 false：该值表示「目标主机是否带显式平台偏好」，不应继承当前主机的。
+      if (raw) restored = parsePersistedSettings(JSON.parse(raw), { ...get(), hasStoredPlatform: false });
+    } catch {
+      restored = null; /* corrupted per-host storage — fall back to current values */
+    }
+    const isRemote = id !== 'local';
+    set({
+      selectedHostId: id,
+      rememberedHostId: id,
+      // 远端（selectedHostId !== 'local'）下筛选（平台/项目）只读：数据与选中值来自远端。
+      filtersReadOnly: isRemote,
+      // 切换主机 → 清会话上下文（平台/会话随新主机列表收敛，setPlatforms 复用）。
+      selectedSessionId: '',
+      selectedAgent: '',
+      detailAgent: '',
+      viewingChildAgent: null,
+      // 应用目标主机的 UI 偏好（远端不覆盖 platform 相关，留给远端真源）。
+      ...(restored
+        ? {
+            ...(isRemote ? {} : { platform: restored.platform, hasStoredPlatform: restored.hasStoredPlatform, selectedPlatforms: restored.selectedPlatforms }),
+            groupBy: restored.groupBy,
+            projectFilter: restored.projectFilter,
+            collapsedGroups: restored.collapsedGroups,
+            sidebarCollapsed: restored.sidebarCollapsed,
+            sidebarWidth: restored.sidebarWidth,
+            view: restored.view,
+            theme: restored.theme,
+          }
+        : {}),
+    });
+    // 切换主机瞬间若没有目标主机偏好（restored 为 null），UI 值仍是旧主机的——不写全量
+    // persistState（会把旧主机偏好写进新主机键）。这里只更新「记忆当前主机」的全局键。
+    try {
+      localStorage.setItem(REMEMBERED_HOST_KEY, id);
+    } catch {
+      /* non-fatal */
+    }
+    // 拉取新主机的平台列表（local 也刷新，保证平台列表跟随主机）。
+    getHosts().then((hosts) => get().setHosts(hosts)).catch(() => {});
+    return true;
+  },
+
+  applyRemoteSelection: (sel) => {
+    const ids = new Set(selectablePlatformIds(get().platforms));
+    // 只保留远端 server 提供的、且当前运行时仍可查询的平台（防脏值）。
+    const platform = ids.has(sel.platform) ? sel.platform : get().platform;
+    const selectedPlatforms = (sel.selectedPlatforms ?? []).filter((p) => ids.has(p));
+    set({
+      platform,
+      selectedPlatforms: selectedPlatforms.length > 0 ? selectedPlatforms : [],
+      detailPlatform: platform,
+      detailAgent: '',
+      selectedAgent: '',
+      selectedSessionId: '',
+      viewingChildAgent: null,
+    });
+    // 不落本机持久化/不写服务端（远端只读，见 persistState 的 host 守卫）。
+  },
 
   setPlatforms: (infos, error = null) => {
     const state = get();
@@ -517,9 +683,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       detailPlatform !== state.detailPlatform;
     set({ platforms: infos, platformsError: error, platformsLoaded: true, platform, selectedPlatforms, detailPlatform });
     // 收敛导致选择变化时回写持久化（localStorage + 服务端 ui-settings），保持单选/多选一致。
-    if (changed) persistState();
+    // 远端下 platform/selectedPlatforms 来自远端、只读，不落本机（persistState 的
+    // host 守卫同样会跳过 saveUiSettings）。
+    if (changed && get().selectedHostId === 'local') persistState();
   },
   setPlatform: (platform) => {
+    if (get().filtersReadOnly) return; // 远端只读：平台选中值来源远端，不可本地变更
     if (platform === get().platform && get().selectedPlatforms.length === 0) return;
     // Mirrors legacy platform switch: clear agent/session selection.
     set({
@@ -536,6 +705,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     persistState();
   },
   togglePlatform: (p) => {
+    if (get().filtersReadOnly) return; // 远端只读
     const cur = get().selectedPlatforms;
     const currentPlatform = get().platform;
     if (cur.length === 0) {
@@ -593,6 +763,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     persistState();
   },
   selectAllPlatforms: () => {
+    if (get().filtersReadOnly) return; // 远端只读
     set({
       selectedPlatforms: selectablePlatformIds(get().platforms),
       selectedAgent: '',
@@ -608,6 +779,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     persistState();
   },
   toggleProjectFilter: (project) => {
+    // 项目筛选远端下仍可本地调整（仅平台只读；项目选中值只存客户端 localStorage）。
     const cur = get().projectFilter;
     const next = cur.includes(project) ? cur.filter((x) => x !== project) : [...cur, project];
     set({ projectFilter: next });

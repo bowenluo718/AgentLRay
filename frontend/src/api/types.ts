@@ -88,6 +88,36 @@ export interface PlatformInfo {
 /** GET /api/platforms 响应（服务端顺序即展示顺序）。 */
 export type PlatformsResponse = PlatformInfo[];
 
+// ---------- Hosts（multi-host）----------
+
+/** 主机连接状态机（design R3-Q3）。 */
+export type HostStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+export interface HostSsh {
+  /** ssh 配置：host 直接透传 ~/.ssh/config 别名或 hostname。 */
+  host: string;
+  user: string;
+  port: number | null;
+  /** 远端 AgentLRay 监听端口（默认 3800）。 */
+  remoteAgentLrayPort: number;
+  identityFile: string;
+  useAgent: boolean;
+}
+
+/** GET /api/hosts 单条。local 内建恒在（ssh 为 null，status 恒 connected）。 */
+export interface HostInfo {
+  id: string;
+  label: string;
+  type: 'ssh' | 'dsh';
+  ssh: HostSsh | null;
+  status: HostStatus;
+  error: string | null;
+  version: { bootId: string; version?: string } | null;
+}
+
+/** GET /api/hosts 响应：[local, ...hosts]。 */
+export type HostsResponse = HostInfo[];
+
 // ---------- Sessions ----------
 
 export interface TopTool {

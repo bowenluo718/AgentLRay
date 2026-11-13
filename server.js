@@ -17,6 +17,10 @@ const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
 const { loadDirsConfigSync } = require('./lib/dirs-config');
 const { csrfGuard } = require('./lib/csrf');
+const { shutdownHosts } = require('./lib/hosts');
+const mountProxyRoutes = require('./lib/routes/proxy');
+const mountHostsRoutes = require('./lib/routes/hosts');
+const pkg = require('./package.json');
 
 const app = express();
 const PORT = process.env.PORT || 3800;
@@ -27,11 +31,17 @@ const DIST_DIR = path.join(__dirname, 'frontend', 'dist');
 // 只服务构建后的 React UI；未构建时 SPA fallback 返回提示（legacy vanilla UI 已移除）。
 const HAS_DIST = fs.existsSync(path.join(DIST_DIR, 'index.html'));
 
+// 网关 host 路由：必须是第一个 /api 处理器——放在 /api/version 等任何本地路由之前，
+// 以便带 X-Host-Id（或 ?host=）的远端请求先被拦截转发；local 请求 next() 继续往下。
+// 也必须在 express.json 之前——远端转发需要原始 body 流（req.pipe），被 parser 消费则无法透传。
+mountProxyRoutes(app);
+
 // Frontend staleness detection: the SPA polls this and prompts a reload
 // when the serving process (and thus possibly the code) has changed.
+// version 字段供多主机跨主机版本提示（design R3-Q3/P0）。
 const SERVER_BOOT_ID = `${Date.now().toString(36)}-${process.pid}`;
 app.get('/api/version', (req, res) => {
-  res.json({ bootId: SERVER_BOOT_ID });
+  res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
 });
 
 if (HAS_DIST) {
@@ -63,6 +73,7 @@ mountWatchRoutes(app);
 mountCliBinsRoutes(app);
 mountSettingsRoutes(app, { status: { setStatusConfig } });
 mountPlatformsRoutes(app);
+mountHostsRoutes(app);
 
 // SPA fallback: unknown paths render the React UI shell
 app.get('*', (req, res) => {
@@ -92,6 +103,15 @@ async function boot() {
       }
       if (dir) console.log(`  ${(p.label || id).padEnd(16)}: ${dir}`);
     }
+  });
+}
+
+// 进程退出兜底：kill 所有 ssh 隧道子进程，防孤儿（design R4-Q1）。
+process.on('exit', shutdownHosts);
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    shutdownHosts();
+    process.exit(0);
   });
 }
 

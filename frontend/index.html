@@ -3,12 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <script>
-      // 防闪烁：首帧前按持久化偏好（agent-xray-settings.theme）或系统深浅色预置
+      // 防闪烁：首帧前按持久化偏好（agent-lray-settings:local.theme）或系统深浅色预置
       // <html> 的 .dark 类，避免 React 挂载前主题跳变。与 store.loadPersisted 同规则。
+      // 设置缓存按主机区分，首帧为本机（远端重连异步），故读本机键；兼容旧单键回退。
       (function () {
         try {
           var theme = null;
-          var raw = localStorage.getItem('agent-xray-settings');
+          var raw = localStorage.getItem('agent-lray-settings:local') || localStorage.getItem('agent-lray-settings');
           if (raw) {
             var parsed = JSON.parse(raw);
             if (parsed.theme === 'light' || parsed.theme === 'dark') theme = parsed.theme;

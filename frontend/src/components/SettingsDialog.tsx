@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { useAppStore } from '@/store';
+import { HostsTab } from '@/components/HostsTab';
 
 // 平台设置全部内聚到「平台」面板：每个平台一张卡片，聚合启停 Switch、数据目录、
 // CLI 命令。目录真源在服务端 settings.json `dirs` section（env > dirs > 默认）、
@@ -57,7 +58,7 @@ const STATUS_FIELDS: {
 const UNIT_MS = { min: 60_000, hour: 3_600_000 };
 
 type StatusKey = 'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs';
-type SectionKey = 'platforms' | 'llm' | 'status' | 'kanban';
+type SectionKey = 'platforms' | 'llm' | 'status' | 'kanban' | 'hosts';
 
 // 全对话框单一 draft：所有 panel 的待保存输入。服务器 section 的「空串 = 回默认」。
 // 平台按 id 聚合 { mounted, replaced, dir, bin }：mounted/replaced 初始 =
@@ -94,6 +95,7 @@ const MENU: { key: SectionKey; label: string }[] = [
   { key: 'llm', label: 'LLM 接口' },
   { key: 'status', label: '状态时间配置' },
   { key: 'kanban', label: '任务看板' },
+  { key: 'hosts', label: '主机' },
 ];
 
 export function SettingsDialog({
@@ -117,6 +119,7 @@ export function SettingsDialog({
     llm: false,
     status: false,
     kanban: false,
+    hosts: false,
   });
   // 当前激活的左侧导航面板。
   const [menu, setMenu] = useState<SectionKey>('platforms');
@@ -169,7 +172,7 @@ export function SettingsDialog({
       status: {},
       kanban: '',
     });
-    setTouched({ platforms: false, llm: false, status: false, kanban: false });
+    setTouched({ platforms: false, llm: false, status: false, kanban: false, hosts: false });
   }
 
   function handleOpenChange(next: boolean) {
@@ -326,7 +329,7 @@ export function SettingsDialog({
         kanban: '',
       };
     });
-    setTouched({ platforms: true, llm: true, status: true, kanban: true });
+    setTouched({ platforms: true, llm: true, status: true, kanban: true, hosts: false });
   };
 
   const statusFieldBadge = (field: (typeof STATUS_FIELDS)[number]) =>
@@ -730,6 +733,7 @@ export function SettingsDialog({
             {menu === 'llm' && renderLlm()}
             {menu === 'status' && renderStatus()}
             {menu === 'kanban' && renderKanban()}
+            {menu === 'hosts' && <HostsTab />}
           </div>
         </div>
 

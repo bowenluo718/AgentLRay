@@ -171,7 +171,7 @@
     {
       "id": "install-command",
       "claim": "The published install command is `npx @bowenluo718/agent-lray`, and the package exposes that launcher under two bin names.",
-      "value": "@bowenluo718/agent-lray · bins: agentlray, agent-xray",
+      "value": "@bowenluo718/agent-lray · bins: agentlray, agent-lray",
       "metric": "package.json name and bin keys vs the README install block",
       "method": "The name and the bin keys are read from package.json, and README.md must still carry the `npx <name>` line, so the documented command cannot drift from the published package name.",
       "repro": "node scripts/claims-receipts.mjs install-command",
@@ -179,7 +179,7 @@
       "as_of": "2026-09-13",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs install-command",
-        "expect": { "equals": "@bowenluo718/agent-lray · bins: agentlray, agent-xray · README.md npx line present" },
+        "expect": { "equals": "@bowenluo718/agent-lray · bins: agentlray, agent-lray · README.md npx line present" },
         "timeout": 60
       }
     },
