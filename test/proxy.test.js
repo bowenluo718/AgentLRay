@@ -19,33 +19,53 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-test-'));
 process.env.HOME = tmpHome;
 const { LOCAL_ID, setRuntimeForTest, closeHost } = require('../lib/hosts');
 const mountProxyRoutes = require('../lib/routes/proxy');
+const { isConsentedWrite } = mountProxyRoutes;
 
 // mock 远端 AgentLRay：模拟 /api/version /api/sessions（数据面）+ /api/settings（写面）。
 let remote; // http.Server
 const remotePorts = {};
 // 记录 mock 收到的最后一个 URL（断言转发是否剥离 ?host= / X-Host-Id）。
 let receivedUrl = null;
+// 记录 mock 收到的最后一个请求体（POST 透传 body 断言）。
+let receivedBody = null;
 
 before(async () => {
   remote = http.createServer((req, res) => {
     receivedUrl = req.url;
-    res.setHeader('content-type', 'application/json');
-    if (req.url.startsWith('/api/version')) {
-      res.writeHead(200);
-      res.end(JSON.stringify({ bootId: 'remote-1', version: '9.9.9' }));
-    } else if (req.url.startsWith('/api/sessions')) {
-      res.writeHead(200);
-      res.end(JSON.stringify([{ id: 's1', platform: 'codex' }]));
-    } else if (req.url.startsWith('/api/watch')) {
-      res.writeHead(200);
-      res.end(JSON.stringify({ sse: 'ok' }));
-    } else if (req.url.startsWith('/api/ui-selection')) {
-      res.writeHead(200);
-      res.end(JSON.stringify({ selectedPlatforms: ['codex'] }));
-    } else {
-      res.writeHead(404);
-      res.end(JSON.stringify({ error: 'not found' }));
-    }
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      receivedBody = body;
+      res.setHeader('content-type', 'application/json');
+      if (req.url.startsWith('/api/version')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ bootId: 'remote-1', version: '9.9.9' }));
+      } else if (req.url.startsWith('/api/sessions')) {
+        res.writeHead(200);
+        res.end(JSON.stringify([{ id: 's1', platform: 'codex' }]));
+      } else if (req.url.startsWith('/api/watch')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ sse: 'ok' }));
+      } else if (req.url.startsWith('/api/ui-selection')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ selectedPlatforms: ['codex'] }));
+      } else if (req.url.startsWith('/api/prompts/analyze')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ clusters: ['c1'], llm: true }));
+      } else if (req.url.startsWith('/api/prompts/rewrite')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ rewritten: true }));
+      } else if (req.url.includes('/sessions/new')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ triggered: true, platform: 'codex' }));
+      } else if (req.url.includes('/resume-command')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ supported: true, bin: 'codex', args: ['-r'], command: 'codex resume s1' }));
+      } else {
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: 'not found' }));
+      }
+    });
   });
   await new Promise((r) => remote.listen(0, '127.0.0.1', r));
   remotePorts.port = remote.address().port;
@@ -76,7 +96,7 @@ function startApp() {
       const port = server.address().port;
       resolveApp({
         server,
-        request: (pathStr, { method = 'GET', headers = {} } = {}) =>
+        request: (pathStr, { method = 'GET', headers = {}, body } = {}) =>
           new Promise((resolve, reject) => {
             const req = http.request(
               { host: '127.0.0.1', port, path: pathStr, method, headers },
@@ -88,12 +108,24 @@ function startApp() {
               }
             );
             req.on('error', reject);
-            req.end();
+            req.end(body);
           }),
       });
     });
   });
 }
+
+// P1 合意写放行审计登记：resume/create + prompts analyze/rewrite 显式入册（写面网关放行审计）。
+test('P1 合意写放行审计登记（resume/create + prompts analyze/rewrite）', () => {
+  assert.equal(isConsentedWrite('GET', '/api/prompts/analyze'), true);
+  assert.equal(isConsentedWrite('POST', '/api/prompts/rewrite'), true);
+  assert.equal(isConsentedWrite('POST', '/api/codex/sessions/new'), true);
+  assert.equal(isConsentedWrite('POST', '/api/omp/sessions/new'), true);
+  // resume-command 是 GET 数据面，不属于合意写登记；写设置面不受合意登记放行。
+  assert.equal(isConsentedWrite('GET', '/api/codex/sessions/s1/resume-command'), false);
+  assert.equal(isConsentedWrite('PUT', '/api/settings'), false);
+  assert.equal(isConsentedWrite('PUT', '/api/platforms/codex/mount'), false);
+});
 
 test('X-Host-Id 缺省/local → 走本地路由（未转发）', async () => {
   const app = await startApp();
@@ -246,5 +278,75 @@ test('远端未连接 → 503', async () => {
     assert.match(r.body, /未连接/);
   } finally {
     app.server.close();
+  }
+});
+
+// ---- P1 合意写透传（design R2-Q5 / R3-Q6）----
+// resume/create + prompts analyze/rewrite 在选中主机的远端真实执行，代理放行透传。
+
+test('P1 create（POST /api/:platform/sessions/new）远端 → 透传 body', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const payload = JSON.stringify({ message: 'hello', cwd: '/tmp/x' });
+    const r = await app.request('/api/codex/sessions/new', {
+      method: 'POST',
+      headers: { 'X-Host-Id': 'remote1', 'content-type': 'application/json' },
+      body: payload,
+    });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).triggered, true);
+    // 远端收到完整请求体（原始 body 流透传，未被网关 json parser 消费）。
+    assert.equal(receivedBody, payload);
+    assert.match(receivedUrl, /^\/api\/codex\/sessions\/new$/);
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('P1 resume-command（GET /api/:platform/sessions/:id/resume-command）远端 → 透传', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/codex/sessions/s1/resume-command', { headers: { 'X-Host-Id': 'remote1' } });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).supported, true);
+    assert.equal(JSON.parse(r.body).command, 'codex resume s1');
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('P1 prompts analyze（GET /api/prompts/analyze）远端 → 透传（远端 LLM 后端）', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/prompts/analyze?platform=codex', { headers: { 'X-Host-Id': 'remote1' } });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).llm, true);
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('P1 prompts rewrite（POST /api/prompts/rewrite）远端 → 透传 body', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const payload = JSON.stringify({ text: '写个排序' });
+    const r = await app.request('/api/prompts/rewrite', {
+      method: 'POST',
+      headers: { 'X-Host-Id': 'remote1', 'content-type': 'application/json' },
+      body: payload,
+    });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).rewritten, true);
+    assert.equal(receivedBody, payload);
+  } finally {
+    app.server.close();
+    closeHost('remote1');
   }
 });

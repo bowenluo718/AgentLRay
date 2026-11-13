@@ -10,6 +10,7 @@ import { getResumeCommand } from '@/api/client';
 import { DEMO } from '@/demo/flag';
 import { formatCost, formatDurationCompact } from '@/lib/pure';
 import { cn } from '@/lib/utils';
+import { hostLabel } from '@/lib/host-status';
 import { platformInfoById, loadStoredFlag, saveStoredFlag, SUMMARY_COLLAPSED_KEY, useAppStore, execSpawnCommandsOf } from '@/store';
 import { ChildAgentsSection } from '@/views/trace/ChildAgentsSection';
 import { TurnLedger } from './TurnLedger';
@@ -120,6 +121,11 @@ function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
   const platform = useAppStore((s) => s.detailPlatform);
   const selectedSessionId = useAppStore((s) => s.selectedSessionId);
   const platforms = useAppStore((s) => s.platforms);
+  // 多主机：远端下恢复命令经透传由远端 resolveCliBin 解析远端 cli-bins 配置。
+  const selectedHostId = useAppStore((s) => s.selectedHostId);
+  const hosts = useAppStore((s) => s.hosts);
+  const remoteHost = selectedHostId !== 'local';
+  const hostName = hostLabel(hosts, selectedHostId);
   const [copied, setCopied] = useState(false);
   // 统一走服务端 resume-command 生成命令串（单一真源在 lib/resume.js
   // buildResumeCommand，内部按 process.platform 出 POSIX/PowerShell 并解析同一份
@@ -139,7 +145,11 @@ function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
     <button
       type="button"
       className={ACTION_BTN}
-      title={cmd ? `复制在终端恢复此会话的命令：${cmd}` : '复制在终端恢复此会话的命令'}
+      title={
+        cmd
+          ? `复制在终端恢复此会话的命令：${cmd}${remoteHost ? `（会话位于 ${hostName}，命令按远端 cli-bins 解析）` : ''}`
+          : '复制在终端恢复此会话的命令'
+      }
       data-testid="resume-btn"
       onClick={async () => {
         if (!cmd) return;
@@ -152,7 +162,7 @@ function ResumeButton({ cwd }: { cwd: string | null | undefined }) {
         }
       }}
     >
-      {copied ? '已复制' : '📋 复制恢复命令'}
+      {copied ? '已复制' : remoteHost ? `📋 复制恢复命令（${hostName}）` : '📋 复制恢复命令'}
     </button>
   );
 }

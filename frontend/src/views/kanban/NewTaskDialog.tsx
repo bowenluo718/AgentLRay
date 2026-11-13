@@ -46,6 +46,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
+import { hostLabel } from '@/lib/host-status';
 import { createCapablePlatforms, selectablePlatforms, useAppStore } from '@/store';
 import { UNKNOWN_PROJECT, buildProjectOptions, resolveProjectValues } from '@/views/sessions/lib';
 import { useSessionsList } from '@/views/sessions/queries';
@@ -224,6 +225,9 @@ export function NewTaskDialog({
   const platforms = useAppStore((s) => s.platforms);
   const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
   const singlePlatform = useAppStore((s) => s.platform);
+  // 多主机：远端下新建会话在选中主机的远端 real-spawn，展示「将在 <host> 上执行」提示。
+  const selectedHostId = useAppStore((s) => s.selectedHostId);
+  const hosts = useAppStore((s) => s.hosts);
   const creatable = useMemo(() => createCapablePlatforms(platforms), [platforms]);
   // 可新建平台 id 静态查找表（只读下标查询）。
   const creatableIds = useMemo(() => {
@@ -357,12 +361,20 @@ export function NewTaskDialog({
             {fieldErrors.message && <span className="text-xs text-destructive">{fieldErrors.message}</span>}
           </label>
           {error && <div className="text-sm text-destructive">{error}</div>}
+          {selectedHostId !== 'local' && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400" data-testid="newtask-host-hint">
+              <span>⚠️</span>
+              <span>
+                将在 <strong>{hostLabel(hosts, selectedHostId)}</strong> 上执行新建会话（远端经 ssh 隧道 real-spawn）
+              </span>
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               取消
             </Button>
             <Button onClick={handleSubmit} disabled={submit.isPending || options.length === 0}>
-              {submit.isPending ? '触发中…' : '新建'}
+              {submit.isPending ? '触发中…' : selectedHostId !== 'local' ? `在 ${hostLabel(hosts, selectedHostId)} 新建` : '新建'}
             </Button>
           </div>
         </div>
