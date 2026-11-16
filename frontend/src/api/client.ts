@@ -448,8 +448,9 @@ export function getSettings(): Promise<AllSettings> {
   return fetchJson('/api/settings');
 }
 
-/** GET /api/ui-selection — 远端只读真源：当前主机（本机/远端）已选平台集合。
- *  远端下经 X-Host-Id 头透传取远端配置；不再从 /api/settings 取（settings 已本机化）。 */
+/** GET /api/ui-selection — 当前主机（本机/远端）已选平台集合的专用只读接口。
+ *  远端下经 X-Host-Id 头透传取远端配置；设置面整体随远端透传，此处只读是为前端
+ *  初始化平台选中值提供一个窄接口（避免拉全量 settings）。 */
 export interface UiSelection {
   selectedPlatforms: Platform[];
 }

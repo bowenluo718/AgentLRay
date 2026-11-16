@@ -1,8 +1,8 @@
 'use strict';
 // 网关 host 路由中间件（multi-host，P0）：
 // - X-Host-Id=local（或缺省）→ next() 走本地路由。
-// - 远端 connected → 转发到隧道 baseUrl（数据面）。
-// - 写设置面（settings / platforms mount|replace / cli-bins）→ 403。
+// - 远端 connected → 转发到隧道 baseUrl（数据面 + 设置面）。
+// - 本地网关资源（/api/hosts、/api/inbound）→ 403 不透传。
 // - 远端未连接 → 503。
 // 用测试专用 setRuntimeForTest 注入 connected 运行时（指向本机 mock server），
 // 避免真实 ssh spawn 依赖。
@@ -19,9 +19,8 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'proxy-test-'));
 process.env.HOME = tmpHome;
 const { LOCAL_ID, setRuntimeForTest, closeHost } = require('../lib/hosts');
 const mountProxyRoutes = require('../lib/routes/proxy');
-const { isConsentedWrite } = mountProxyRoutes;
 
-// mock 远端 AgentLRay：模拟 /api/version /api/sessions（数据面）+ /api/settings（写面）。
+// mock 远端 AgentLRay：模拟 /api/version /api/sessions（数据面）+ 设置面（settings / cli-bins / platforms）。
 let remote; // http.Server
 const remotePorts = {};
 // 记录 mock 收到的最后一个 URL（断言转发是否剥离 ?host= / X-Host-Id）。
@@ -61,6 +60,15 @@ before(async () => {
       } else if (req.url.includes('/resume-command')) {
         res.writeHead(200);
         res.end(JSON.stringify({ supported: true, bin: 'codex', args: ['-r'], command: 'codex resume s1' }));
+      } else if (req.url.startsWith('/api/settings/cli-bins')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ codex: { bin: 'codex', configured: true, default: 'codex' } }));
+      } else if (req.url.startsWith('/api/settings')) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ where: 'remote-settings', method: req.method }));
+      } else if (req.url.startsWith('/api/platforms/') && /\/(mount|replace)$/.test(req.url.split('?')[0])) {
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: 'remote-platform-write', method: req.method }));
       } else {
         res.writeHead(404);
         res.end(JSON.stringify({ error: 'not found' }));
@@ -83,9 +91,9 @@ function makeApp() {
   mountProxyRoutes(app);
   app.use(express.json());
   app.get('/api/hello', (_req, res) => res.json({ where: 'local' }));
-  app.get('/api/settings', (_req, res) => res.json({ where: 'settings' }));
-  app.put('/api/settings', (_req, res) => res.json({ ok: 'local-settings' }));
-  app.get('/api/platforms/x/mount', (_req, res) => res.json({ ok: 'local' }));
+  // 本地设置面（用于断言 hostId=local 时未被转发到远端）。
+  app.get('/api/settings', (_req, res) => res.json({ where: 'local-settings' }));
+  app.put('/api/settings', (_req, res) => res.json({ where: 'local-settings', method: 'PUT' }));
   app.get('/api/hosts', (_req, res) => res.json([{ id: 'local' }]));
   return app;
 }
@@ -115,18 +123,6 @@ function startApp() {
   });
 }
 
-// P1 合意写放行审计登记：resume/create + prompts analyze/rewrite 显式入册（写面网关放行审计）。
-test('P1 合意写放行审计登记（resume/create + prompts analyze/rewrite）', () => {
-  assert.equal(isConsentedWrite('GET', '/api/prompts/analyze'), true);
-  assert.equal(isConsentedWrite('POST', '/api/prompts/rewrite'), true);
-  assert.equal(isConsentedWrite('POST', '/api/codex/sessions/new'), true);
-  assert.equal(isConsentedWrite('POST', '/api/omp/sessions/new'), true);
-  // resume-command 是 GET 数据面，不属于合意写登记；写设置面不受合意登记放行。
-  assert.equal(isConsentedWrite('GET', '/api/codex/sessions/s1/resume-command'), false);
-  assert.equal(isConsentedWrite('PUT', '/api/settings'), false);
-  assert.equal(isConsentedWrite('PUT', '/api/platforms/codex/mount'), false);
-});
-
 test('X-Host-Id 缺省/local → 走本地路由（未转发）', async () => {
   const app = await startApp();
   try {
@@ -137,6 +133,26 @@ test('X-Host-Id 缺省/local → 走本地路由（未转发）', async () => {
     assert.equal(JSON.parse(rLocal.body).where, 'local');
   } finally {
     app.server.close();
+  }
+});
+
+test('设置面（hostId=local）→ 走本地路由（未转发远端）', async () => {
+  // 回归：设置面收窄为「随远端透传」后，local 仍必须走本地路由，不能被误转发。
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const get = await app.request('/api/settings');
+    assert.equal(get.status, 200);
+    assert.equal(JSON.parse(get.body).where, 'local-settings');
+    const put = await app.request('/api/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.equal(put.status, 200);
+    assert.equal(JSON.parse(put.body).where, 'local-settings');
+  } finally {
+    app.server.close();
+    closeHost('remote1');
   }
 });
 
@@ -186,29 +202,34 @@ test('SSE ?host= 转发剥离 host 参数（远端不再二次路由 → 不 503
   }
 });
 
-test('本机设置（PUT /api/settings）远端 → 本地化走本地路由（200 本地 mock）', async () => {
+test('设置面（PUT /api/settings）远端 → 透传远端真源（含请求体）', async () => {
   setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
   const app = await startApp();
   try {
+    const payload = JSON.stringify({ ui: { selectedPlatforms: ['codex'] } });
     const r = await app.request('/api/settings', {
       method: 'PUT',
       headers: { 'X-Host-Id': 'remote1', 'content-type': 'application/json' },
+      body: payload,
     });
     assert.equal(r.status, 200);
-    assert.equal(JSON.parse(r.body).ok, 'local-settings');
+    assert.equal(JSON.parse(r.body).where, 'remote-settings');
+    assert.equal(JSON.parse(r.body).method, 'PUT');
+    // 设置写是 body 敏感场景：请求体必须原样到达远端（proxy 在 express.json 之前，原始流透传）。
+    assert.equal(receivedBody, payload);
   } finally {
     app.server.close();
     closeHost('remote1');
   }
 });
 
-test('本机设置（GET /api/settings）远端 → 本地化走本地路由（200 本地 mock）', async () => {
+test('设置面（GET /api/settings）远端 → 透传远端真源', async () => {
   setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
   const app = await startApp();
   try {
     const r = await app.request('/api/settings', { headers: { 'X-Host-Id': 'remote1' } });
     assert.equal(r.status, 200);
-    assert.equal(JSON.parse(r.body).where, 'settings');
+    assert.equal(JSON.parse(r.body).where, 'remote-settings');
   } finally {
     app.server.close();
     closeHost('remote1');
@@ -228,19 +249,20 @@ test('GET /api/ui-selection 远端 → 透传取远端真源', async () => {
   }
 });
 
-test('GET /api/settings/cli-bins 远端 → 仍 403（本机化仅精确匹配 /api/settings）', async () => {
+test('设置面（GET /api/settings/cli-bins）远端 → 透传远端真源', async () => {
   setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
   const app = await startApp();
   try {
     const r = await app.request('/api/settings/cli-bins', { headers: { 'X-Host-Id': 'remote1' } });
-    assert.equal(r.status, 403);
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).codex.bin, 'codex');
   } finally {
     app.server.close();
     closeHost('remote1');
   }
 });
 
-test('写设置面（platforms/:id/mount）远端 → 403', async () => {
+test('设置面（PUT /api/platforms/:id/mount）远端 → 透传远端真源', async () => {
   setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
   const app = await startApp();
   try {
@@ -248,7 +270,43 @@ test('写设置面（platforms/:id/mount）远端 → 403', async () => {
       method: 'PUT',
       headers: { 'X-Host-Id': 'remote1', 'content-type': 'application/json' },
     });
-    assert.equal(r.status, 403);
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).ok, 'remote-platform-write');
+    assert.equal(JSON.parse(r.body).method, 'PUT');
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('设置面（DELETE /api/platforms/:id/mount）远端 → 透传远端真源（不再 403）', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/platforms/codex/mount', {
+      method: 'DELETE',
+      headers: { 'X-Host-Id': 'remote1' },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).ok, 'remote-platform-write');
+    assert.equal(JSON.parse(r.body).method, 'DELETE');
+  } finally {
+    app.server.close();
+    closeHost('remote1');
+  }
+});
+
+test('设置面（PUT /api/platforms/:id/replace）远端 → 透传远端真源（不再 403）', async () => {
+  setRuntimeForTest('remote1', `http://127.0.0.1:${remotePorts.port}`);
+  const app = await startApp();
+  try {
+    const r = await app.request('/api/platforms/codex/replace', {
+      method: 'PUT',
+      headers: { 'X-Host-Id': 'remote1', 'content-type': 'application/json' },
+    });
+    assert.equal(r.status, 200);
+    assert.equal(JSON.parse(r.body).ok, 'remote-platform-write');
+    assert.equal(JSON.parse(r.body).method, 'PUT');
   } finally {
     app.server.close();
     closeHost('remote1');

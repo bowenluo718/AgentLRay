@@ -104,6 +104,7 @@ export function SettingsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const platforms = useAppStore((s) => s.platforms);
+  const selectedHostId = useAppStore((s) => s.selectedHostId);
   const queryClient = useQueryClient();
   // 单一 GET /api/settings：一次读齐 dirs / cliBins / platforms / status / kanban / llm。
   // 仅在弹窗打开时拉取（SettingsDialog 常驻挂载于 Sidebar，缺省关闭不请求）。
@@ -699,6 +700,11 @@ export function SettingsDialog({
       >
         <DialogHeader>
           <DialogTitle>设置</DialogTitle>
+          {selectedHostId !== 'local' ? (
+            <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-4 text-amber-500">
+              正在编辑远端 {selectedHostId} 的设置，保存会写回该远端主机的配置。
+            </p>
+          ) : null}
         </DialogHeader>
 
         <div className="grid gap-4 md:grid-cols-[12rem_minmax(0,1fr)]">

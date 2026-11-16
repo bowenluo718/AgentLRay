@@ -107,9 +107,10 @@ export default function App() {
     });
   }, [hosts, queryClient]);
 
-  // 远端下筛选（平台/项目）数据与选中值来自远端 server ui（只读）。远端恢复/切换
-  // 后、平台列表就绪时读取一次 GET /api/ui-selection（跟随远端 host 头透传 → 远端
-  // ui），应用其选中值。不落本机持久化（applyRemoteSelection 只写前端状态）。
+  // 远端下平台选中值来自远端 server ui（可写，改动经 PUT /api/settings 写回远端）。
+  // 远端恢复/切换后、平台列表就绪时读取一次 GET /api/ui-selection（跟随远端 host 头
+  // 透传 → 远端 ui），应用其选中值作为初始化；若用户已自主改动（remoteDirty）则跳过
+  // 覆盖（applyRemoteSelection 内置竞态守卫）。
   useEffect(() => {
     if (DEMO || selectedHostId === 'local') return;
     if (!platformsLoaded) return;

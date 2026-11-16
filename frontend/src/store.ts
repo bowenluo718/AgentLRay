@@ -406,16 +406,22 @@ function persistState(): void {
   } catch {
     /* non-fatal */
   }
-  // 把侧栏多选集合同步到服务端 ui section 的 selectedPlatforms（CLI list 未传
-  // --platform 时读取为缺省，保证终端命令与页面视角一致）。只写 selectedPlatforms：
-  // ui.platform（默认平台）由设置面板独占管理，侧栏不再覆盖。DEMO 无真实后端，跳过。
-  // 远端（selectedHostId !== 'local'）下选中值来自远端只读，且写面被网关 403，
-  // 一律同步给本机 server 会污染本机默认 —— 跳过。
-  if (!DEMO && st.selectedHostId === 'local') {
-    saveUiSettings({ selectedPlatforms: st.selectedPlatforms }).catch(() => {
-      /* non-fatal */
-    });
-  }
+}
+
+/** 同步侧栏平台选择到服务端 ui section 的 selectedPlatforms（CLI list 未传
+ *  --platform 时读取为缺省，保证终端命令与页面视角一致）。只写 selectedPlatforms：
+ *  ui.platform（默认平台）由设置面板独占管理，侧栏不再覆盖。DEMO 无真实后端，跳过。
+ *  按当前主机透传：local 写本机、远端（selectedHostId !== 'local'）经 X-Host-Id 写远端
+ *  server（设置面随远端透传），本机 server 不受污染。
+ *  **仅平台选择变更（用户操作 / 本机收敛）时调用**，非平台 UI 状态（groupBy/theme 等）
+ *  不写服务端——否则远端下任一状态变更都会触发 PUT /api/settings，可能用本机恢复值
+ *  覆盖远端真源（连接远端→切平台→立即刷新可复现）。 */
+function syncSelectedPlatforms(): void {
+  const st = useAppStore.getState();
+  if (DEMO) return;
+  saveUiSettings({ selectedPlatforms: st.selectedPlatforms }).catch(() => {
+    /* non-fatal */
+  });
 }
 
 interface AppState {
@@ -467,9 +473,6 @@ interface AppState {
   selectedHostId: string;
   /** 记忆的上次选中主机（从 localStorage 恢复；刷新后 App 据此重连）。 */
   rememberedHostId: string;
-  /** 远端（selectedHostId !== 'local'）下筛选是否只读：平台/项目数据与选中值来自
-   *  远端且不可本地变更。 */
-  filtersReadOnly: boolean;
   /** 主机列表（[local 内建, ...hosts]），含运行时 status。 */
   hosts: HostInfo[];
   /** 主机连接状态，按 host id（local 恒 connected）。 */
@@ -483,6 +486,10 @@ interface AppState {
   hostReadyError: string | null;
   /** 本机当前被哪些其他主机连接（inbound peers，由 useInboundPoller 拉取）。 */
   inbound: InboundInfo | null;
+  /** 远端初始化竞态守卫：切换远端后置 false；用户自主改动平台选择后置 true。
+   *  applyRemoteSelection（切换远端时拉远端 server 真源）若 dirty 则跳过覆盖，
+   *  避免初始化返回晚于用户即时操作而覆盖用户选择。 */
+  remoteDirty: boolean;
 
   /** 写入运行时主机列表（列表拉取 + 连接状态更新）。 */
   setHosts: (hosts: HostInfo[]) => void;
@@ -502,7 +509,7 @@ interface AppState {
    *  可选记录回落文案。 */
   setHostReadyResult: (hostReadyError: string | null) => void;
   /** 应用远端主机 server ui 的选中值（platform/selectedPlatforms/detailPlatform）。
-   *  只写前端状态，不落本机持久化（远端只读）。local 主机下不调用。 */
+   *  只写前端状态、不回写服务端（该值本身即远端真源）；local 主机下不调用。 */
   applyRemoteSelection: (sel: { platform: Platform; selectedPlatforms: Platform[] }) => void;
 
   /** 写入运行时平台列表，并把当前平台选择收敛到可查询集合（见实现注释）。 */
@@ -578,7 +585,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedHostId: 'local',
   // 刷新后由 App 据此重连记忆的远端；initial 从 localStorage 读取（默认 'local'）。
   rememberedHostId: initial.rememberedHostId,
-  filtersReadOnly: false,
+  remoteDirty: false,
   hosts: [],
   hostStatus: { local: 'connected' },
   hostError: {},
@@ -653,8 +660,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       rememberedHostId: id,
       // 提交成功 → 数据面就绪（本地路径也适用：App 早退回本机 / 占位回本机）。
       hostReady: true,
-      // 远端（selectedHostId !== 'local'）下筛选（平台/项目）只读：数据与选中值来自远端。
-      filtersReadOnly: isRemote,
+      // 远端平台选择可写（设置面随远端透传，写回远端 server）；切换远端时重置竞态守卫
+      // （applyRemoteSelection 初始化前用户改动会置 dirty 以跳过覆盖）。
+      remoteDirty: isRemote ? false : get().remoteDirty,
       // 切换主机 → 清会话上下文（平台/会话随新主机列表收敛，setPlatforms 复用）。
       selectedSessionId: '',
       selectedAgent: '',
@@ -703,6 +711,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   applyRemoteSelection: (sel) => {
+    // 竞态守卫：切换远端后若用户已自主改动平台选择（remoteDirty=true），跳过远端
+    // 初始化覆盖，保留用户选择（初始化返回可能晚于用户即时操作）。
+    if (get().remoteDirty) return;
     const ids = new Set(selectablePlatformIds(get().platforms));
     // 只保留远端 server 提供的、且当前运行时仍可查询的平台（防脏值）。
     const platform = ids.has(sel.platform) ? sel.platform : get().platform;
@@ -716,7 +727,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedSessionId: '',
       viewingChildAgent: null,
     });
-    // 不落本机持久化/不写服务端（远端只读，见 persistState 的 host 守卫）。
+    // 该值来自远端 server 真源，无需回写（回写仅发生在用户显式操作平台时，见 syncSelectedPlatforms）。
   },
 
   setPlatforms: (infos, error = null) => {
@@ -742,13 +753,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedPlatforms.join('|') !== state.selectedPlatforms.join('|') ||
       detailPlatform !== state.detailPlatform;
     set({ platforms: infos, platformsError: error, platformsLoaded: true, platform, selectedPlatforms, detailPlatform });
-    // 收敛导致选择变化时回写持久化（localStorage + 服务端 ui-settings），保持单选/多选一致。
-    // 远端下 platform/selectedPlatforms 来自远端、只读，不落本机（persistState 的
-    // host 守卫同样会跳过 saveUiSettings）。
+    // 收敛导致选择变化时仅持久化到 localStorage（本机），保持刷新后恢复一致。
+    // 服务端 ui.selectedPlatforms（后端聚合列表 defaultSelection 的缺省真源）**仅由用户
+    // 操作**（setPlatform/togglePlatform/selectAllPlatforms）同步——收敛属被动对齐，
+    // 不写服务端，避免平台列表加载自动触发 PUT 的复杂性与潜在覆盖（连接远端→切平台→
+    // 立即刷新曾因此覆盖远端真源）。取舍：自定义平台 + 全选扩展场景下，列表真源会在
+    // 收敛后短暂与页面不一致，待用户下次操作同步（可接受）。
     if (changed && get().selectedHostId === 'local') persistState();
   },
   setPlatform: (platform) => {
-    if (get().filtersReadOnly) return; // 远端只读：平台选中值来源远端，不可本地变更
     if (platform === get().platform && get().selectedPlatforms.length === 0) return;
     // Mirrors legacy platform switch: clear agent/session selection.
     // 单平台选择同步落服务端 ui.selectedPlatforms=[platform]：列表恒走聚合接口
@@ -764,11 +777,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedSessionId: '',
       sessionView: 'messages',
       viewingChildAgent: null,
+      remoteDirty: true,
     });
     persistState();
+    syncSelectedPlatforms();
   },
   togglePlatform: (p) => {
-    if (get().filtersReadOnly) return; // 远端只读
     const cur = get().selectedPlatforms;
     const currentPlatform = get().platform;
     if (cur.length === 0) {
@@ -780,14 +794,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedSessionId: '',
         sessionView: 'messages',
         viewingChildAgent: null,
+        remoteDirty: true,
       });
       persistState();
+      syncSelectedPlatforms();
       return;
     }
     if (!cur.includes(p)) {
       // 加入平台
-      set({ selectedPlatforms: [...cur, p], selectedAgent: '', selectedSessionId: '', sessionView: 'messages', viewingChildAgent: null });
+      set({ selectedPlatforms: [...cur, p], selectedAgent: '', selectedSessionId: '', sessionView: 'messages', viewingChildAgent: null, remoteDirty: true });
       persistState();
+      syncSelectedPlatforms();
       return;
     }
     // 取消一个：只剩一个时退回单平台该平台。单平台同步落服务端
@@ -804,8 +821,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedSessionId: '',
         sessionView: 'messages',
         viewingChildAgent: null,
+        remoteDirty: true,
       });
       persistState();
+      syncSelectedPlatforms();
       return;
     }
     if (rest.length === 1) {
@@ -819,23 +838,27 @@ export const useAppStore = create<AppState>((set, get) => ({
         selectedSessionId: '',
         sessionView: 'messages',
         viewingChildAgent: null,
+        remoteDirty: true,
       });
       persistState();
+      syncSelectedPlatforms();
       return;
     }
-    set({ selectedPlatforms: rest, selectedAgent: '', selectedSessionId: '', sessionView: 'messages', viewingChildAgent: null });
+    set({ selectedPlatforms: rest, selectedAgent: '', selectedSessionId: '', sessionView: 'messages', viewingChildAgent: null, remoteDirty: true });
     persistState();
+    syncSelectedPlatforms();
   },
   selectAllPlatforms: () => {
-    if (get().filtersReadOnly) return; // 远端只读
     set({
       selectedPlatforms: selectablePlatformIds(get().platforms),
       selectedAgent: '',
       selectedSessionId: '',
       sessionView: 'messages',
       viewingChildAgent: null,
+      remoteDirty: true,
     });
     persistState();
+    syncSelectedPlatforms();
   },
   setGroupBy: (groupBy) => {
     if (get().groupBy === groupBy) return;
@@ -843,7 +866,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     persistState();
   },
   toggleProjectFilter: (project) => {
-    // 项目筛选远端下仍可本地调整（仅平台只读；项目选中值只存客户端 localStorage）。
+    // 项目筛选始终只存客户端 localStorage（不随主机透传到服务端）。
     const cur = get().projectFilter;
     const next = cur.includes(project) ? cur.filter((x) => x !== project) : [...cur, project];
     set({ projectFilter: next });

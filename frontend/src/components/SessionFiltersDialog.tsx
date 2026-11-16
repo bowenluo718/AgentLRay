@@ -70,26 +70,26 @@ function PlatformNav() {
   const setPlatform = useAppStore((s) => s.setPlatform);
   const togglePlatform = useAppStore((s) => s.togglePlatform);
   const selectAllPlatforms = useAppStore((s) => s.selectAllPlatforms);
-  const filtersReadOnly = useAppStore((s) => s.filtersReadOnly);
+  const selectedHostId = useAppStore((s) => s.selectedHostId);
   const platforms = useAppStore((s) => s.platforms);
   const selectable = selectablePlatforms(platforms);
   const broken = brokenPlatforms(platforms);
   const multi = selectedPlatforms.length > 0;
   const allSelected = multi && selectedPlatforms.length === selectable.length;
   const active = (p: Platform) => (multi ? selectedPlatforms.includes(p) : p === platform);
+  const isRemote = selectedHostId !== 'local';
   return (
     <div className="space-y-1.5">
       <SectionLabel>平台</SectionLabel>
-      {filtersReadOnly ? (
+      {isRemote ? (
         <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] leading-4 text-amber-500">
-          已连接远端主机 — 平台筛选与选中值来自远端，仅平台只读。
+          正在编辑远端 {selectedHostId} 的平台选择，平台选择会写回该远端主机（分组/项目筛选仍只存本机）。
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-1">
         <button
           type="button"
           aria-pressed={allSelected}
-          disabled={filtersReadOnly}
           onClick={() => (allSelected ? setPlatform(platform) : selectAllPlatforms())}
           title="同时选中全部平台的会话列表（全部 / 取消多选退回单平台）"
           className={cn(chipBase, allSelected ? chipActive : chipIdle)}
@@ -101,7 +101,6 @@ function PlatformNav() {
             key={p.id}
             type="button"
             aria-pressed={active(p.id)}
-            disabled={filtersReadOnly}
             onClick={() => togglePlatform(p.id)}
             title={p.dirSettingHint ?? `${p.label ?? p.id} 会话`}
             className={cn(chipBase, active(p.id) ? chipActive : chipIdle)}
