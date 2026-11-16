@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { saveUiSettings, setActiveHostId, setHostReady, connectHost, getHosts } from '@/api/client';
+import { saveUiSettings, setActiveHostId, setHostReady, connectHost, disconnectHost as apiDisconnectHost, getHosts } from '@/api/client';
 import type { HostInfo, HostStatus, InboundInfo, Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 
@@ -147,7 +147,6 @@ function clampSidebarWidth(value: number): number {
 // Legacy per-view flags, reused as-is ('1'/'0' strings, default true when absent).
 export const SUMMARY_COLLAPSED_KEY = 'axr-summary-collapsed';
 export const HIDE_TRIVIAL_KEY = 'axr-hide-trivial';
-export const LIB_SORT_KEY = 'axr-lib-sort';
 
 /** 无持久化偏好时的初始主题：跟随系统深浅色一次（此后由用户手动切换固定）。 */
 function systemTheme(): Theme {
@@ -494,6 +493,9 @@ interface AppState {
   /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
    *  返回是否成功（调用方据此 toast）。内部同步 hostReady 状态机。 */
   setSelectedHostId: (id: string) => Promise<boolean>;
+  /** 手动断开某远端连接：调后端 disconnectHost（关隧道）。若断开的是当前查看的远端，
+   *  自动切回本机（local）；否则只更新该主机运行时状态。返回是否成功。 */
+  disconnectHost: (id: string) => Promise<boolean>;
   /** 直接进入「连接中」：置 hostReady=false（数据面暂不可发，占位渲染）。 */
   setHostConnecting: () => void;
   /** 连接/恢复流程结束：hostReady=true 回落（本机或停留的远端仍可发数据面），
@@ -681,6 +683,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     // 拉取新主机的平台列表（local 也刷新，保证平台列表跟随主机）。
     getHosts().then((hosts) => get().setHosts(hosts)).catch(() => {});
+    return true;
+  },
+
+  disconnectHost: async (id) => {
+    try {
+      await apiDisconnectHost(id);
+    } catch (e) {
+      return false;
+    }
+    // 断开的是当前查看的远端 → 自动切回本机（setSelectedHostId 内部连 local 恒成功、
+    // 置 hostReady，并把 REMEMBERED_HOST_KEY 写回 local）。否则只更新该主机运行时状态。
+    if (id === get().selectedHostId) {
+      await get().setSelectedHostId('local');
+    } else {
+      get().setHostRuntime(id, 'disconnected', null);
+    }
     return true;
   },
 

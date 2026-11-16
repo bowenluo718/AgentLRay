@@ -22,6 +22,7 @@ const {
   openHost,
   closeHost,
   closeAllExcept,
+  testHostSpec,
   getRuntime,
   shutdownHosts,
   setRuntimeForTest,
@@ -99,6 +100,30 @@ test('updateHost：编辑字段并保留 id；不存在 → not-found', async ()
   );
 });
 
+test('updateHost：当前已连接的主机被编辑 → 先关隧道（运行时清空，待前端重连）', async () => {
+  await createHost({ id: 'live', label: '旧', ssh: { host: 'h' } });
+  // 模拟当前已连接（connected 运行时 = 已建隧道）。
+  setRuntimeForTest('live', 'http://127.0.0.1:41001', { bootId: 'boot-x' });
+  assert.equal(getRuntime('live').status, 'connected');
+
+  const updated = await updateHost('live', { label: '新', ssh: { host: 'h2' } });
+  assert.equal(updated.label, '新');
+  // 配置可能变化 → 隧道已断：运行时清空（前端据此用新配置重连）。
+  assert.equal(getRuntime('live'), undefined);
+});
+
+test('deleteHost：当前已连接的主机被删除 → 先关隧道（运行时清空）', async () => {
+  await createHost({ id: 'live', label: 'x', ssh: { host: 'h' } });
+  setRuntimeForTest('live', 'http://127.0.0.1:41001', { bootId: 'boot-x' });
+  assert.equal(getRuntime('live').status, 'connected');
+
+  await deleteHost('live');
+  // 删除 + 隧道一并关闭：运行时清空、hosts.json 不含该 id。
+  assert.equal(getRuntime('live'), undefined);
+  const raw = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  assert.ok(!raw.hosts.some((h) => h.id === 'live'));
+});
+
 test('deleteHost：移除并保留其他；不存在 → not-found', async () => {
   await createHost({ id: 'keep', label: 'x', ssh: { host: 'h' } });
   await createHost({ id: 'drop', label: 'y', ssh: { host: 'h' } });
@@ -119,6 +144,97 @@ test('openHost(local) → connected 直连 baseUrl，不建隧道', async () => 
 test('openHost(不存在) → not-found 错误', async () => {
   await assert.rejects(() => openHost('no-such-host'), (e) => e.code === 'not-found');
 });
+
+test('closeHost：断开指定主机（关隧道 + 清运行时）；local 无副作用；幂等不抛', () => {
+  // 注入一个 connected 远端运行时（模拟已建隧道）。
+  setRuntimeForTest('host-a', 'http://127.0.0.1:41001');
+  assert.equal(getRuntime('host-a').status, 'connected');
+  closeHost('host-a');
+  assert.equal(getRuntime('host-a'), undefined);
+
+  // local 恒 connected、不在 runtime：closeHost 无副作用，不抛。
+  closeHost(LOCAL_ID);
+  // 对不存在的 id 幂等，不抛。
+  closeHost('no-such-host');
+});
+
+test('testHostSpec：成功路径 → 建隧道探测到 version、不残留运行时、不落盘、不向被连接方上报', async () => {
+  // 用本地 mock HTTP server 模拟被连接方 AgentLRay：/api/version 与 /api/inbound/hello。
+  // 隧道用 test/fixtures/ssh-mock.cjs 转发到该本地 server（经 AGENTLRAY_SSH_BIN 注入，
+  // 避免依赖系统 sshd；对齐 cli-bins 的 AGENTLRAY_*_BIN 覆盖模式）。
+  const http = require('node:http');
+  let helloCount = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/api/inbound/hello') {
+      helloCount += 1; // skipReporting=true 不应有上报
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.url === '/api/version') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ bootId: 'boot-probe', version: '0.1.0' }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+
+  process.env.AGENTLRAY_SSH_BIN = path.join(__dirname, 'fixtures', 'ssh-mock.cjs');
+  try {
+    // ssh-mock 把本地转发端口代理到 rhost:rport；ssh.host=127.0.0.1 仅作命令串填充。
+    const result = await testHostSpec({
+      id: 'probe-ok',
+      label: '探针',
+      ssh: { host: '127.0.0.1', port, remoteAgentLrayPort: port },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'connected');
+    assert.equal(result.bootId, 'boot-probe');
+    // 合成 id 隔离：测试结束后运行时不含 __probe__ 残留。
+    assert.equal(getRuntime('__probe__probe-ok'), undefined);
+    // 不落盘：hosts.json 不存在或不含该主机（testHostSpec 不写盘）。
+    let ids = [];
+    try {
+      const raw = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+      ids = raw?.hosts ?? [];
+    } catch {
+      /* 文件不存在 → 未落盘，符合预期 */
+    }
+    assert.ok(!ids.some((h) => h.id === 'probe-ok'));
+    // skipReporting=true → 不向被连接方上报身份/心跳。
+    assert.equal(helloCount, 0);
+  } finally {
+    delete process.env.AGENTLRAY_SSH_BIN;
+    server.close();
+  }
+});
+
+test('testHostSpec：非法/缺 ssh.host 配置 → 拒绝；不落盘', async () => {
+  // 缺 ssh.host → normalizeHost 抛错（校验必填）。
+  await assert.rejects(
+    () => testHostSpec({ id: 'bad', label: 'x', ssh: { host: '' } }),
+    /ssh\.host 必填/
+  );
+  await assert.rejects(
+    () => testHostSpec({ id: 'bad', label: '', ssh: { host: 'h' } }),
+    /label 必填/
+  );
+  // 测试不持久化：即使校验通过，hosts.json 也不含该主机（用 id 唯一去重探测路径，
+  // 但校验失败即返回，这里确认文件仍为空/不含）。
+  await assert.rejects(() => testHostSpec({ id: 'probe-x', label: 'x', ssh: { host: '' } }));
+  let raw = null;
+  try {
+    raw = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  } catch {
+    /* 文件不存在 */
+  }
+  const ids = (raw?.hosts ?? []).map((h) => h.id);
+  assert.ok(!ids.includes('probe-x'));
+});
+
 
 test('closeAllExcept：保留 keepId 隧道，关闭其余（design R4-Q1 无常驻池）', async () => {
   // 注入两个远端 connected runtime（模拟已建隧道）。

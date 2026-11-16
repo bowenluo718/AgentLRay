@@ -96,12 +96,17 @@ function startApp() {
   });
 }
 
-test('GET /api/inbound 空 → count 0', async () => {
+test('GET /api/inbound 空 → count 0，含本机自报身份 self', async () => {
   const app = await startApp();
   try {
     const r = await app.request('/api/inbound');
     assert.equal(r.status, 200);
-    assert.deepEqual(JSON.parse(r.body), { count: 0, peers: [] });
+    const body = JSON.parse(r.body);
+    assert.equal(body.count, 0);
+    assert.deepEqual(body.peers, []);
+    // self：本机上报的主机名（shortHostname），供前端展示「上报的主机名」。
+    assert.equal(body.self.label, require('../lib/hosts').shortHostname());
+    assert.equal(body.self.peerId, body.self.label);
   } finally {
     app.server.close();
   }

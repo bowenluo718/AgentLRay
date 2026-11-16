@@ -586,12 +586,30 @@ export interface HostTestResult {
   error: string | null;
 }
 
-/** POST /api/hosts/:id/test — 测试连接（建隧道→探测→关，不影响当前选中）。 */
-export function testHost(id: string): Promise<HostTestResult> {
-  return requestJson(`/api/hosts/${encodeURIComponent(id)}/test`, 'POST', undefined, { local: true });
+/** POST /api/hosts/test — 测试「未保存」的主机配置（表单「测试连接」）：
+ *  按 body 的 ssh 规格建隧道→探测→关，不持久化。 */
+export function testHostSpec(body: {
+  id: string;
+  label: string;
+  type?: 'ssh';
+  ssh: {
+    host: string;
+    user?: string;
+    port?: number | null;
+    remoteAgentLrayPort?: number;
+    identityFile?: string;
+    useAgent?: boolean;
+  };
+}): Promise<HostTestResult> {
+  return requestJson('/api/hosts/test', 'POST', body, { local: true });
 }
 
 /** POST /api/hosts/:id/connect — 建立并保持隧道（前端切换当前选中主机用）。 */
 export function connectHost(id: string): Promise<HostTestResult> {
   return requestJson(`/api/hosts/${encodeURIComponent(id)}/connect`, 'POST', undefined, { local: true });
+}
+
+/** POST /api/hosts/:id/disconnect — 手动断开连接（关隧道 + 停心跳；local 不可断）。 */
+export function disconnectHost(id: string): Promise<{ id: string; status: string }> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}/disconnect`, 'POST', undefined, { local: true });
 }

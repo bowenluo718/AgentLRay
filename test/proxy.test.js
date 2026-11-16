@@ -263,6 +263,12 @@ test('主机管理（/api/hosts）远端 → 403 不透传（本地网关资源�
     assert.equal(r.status, 403);
     const rSub = await app.request('/api/hosts/abc/test', { headers: { 'X-Host-Id': 'remote1' } });
     assert.equal(rSub.status, 403);
+    // disconnect 同属主机本地资源，不透传 → 403。
+    const rDisc = await app.request('/api/hosts/abc/disconnect', {
+      method: 'POST',
+      headers: { 'X-Host-Id': 'remote1' },
+    });
+    assert.equal(rDisc.status, 403);
   } finally {
     app.server.close();
     closeHost('remote1');

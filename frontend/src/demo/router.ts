@@ -189,7 +189,9 @@ export function demoJson<T>(url: string, init?: RequestInit): Promise<T> {
   if (parsed.pathname === '/api/version') return ok({ bootId: 'demo' });
 
   // /api/inbound — demo 无入站连接，让 useInboundPoller 轮询安静（徽标不显示）。
-  if (parsed.pathname === '/api/inbound') return ok({ count: 0, peers: [] });
+  // self：本机自报身份（上报的主机名），demo 用占位 hostname。
+  if (parsed.pathname === '/api/inbound')
+    return ok({ count: 0, peers: [], self: { peerId: 'localhost', label: 'localhost', version: null, bootId: null } });
 
   // /api/platforms — demo 只含 fixture 覆盖的三平台；mt/replace 属写操作，
   // 已被上方 read-only 守卫拒绝。

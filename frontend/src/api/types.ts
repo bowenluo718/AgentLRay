@@ -515,8 +515,9 @@ export interface InboundPeer {
   lastSeen: string;
 }
 
-/** GET /api/inbound 响应：本机当前被哪些主机连接。 */
+/** GET /api/inbound 响应：本机当前被哪些主机连接。self = 本机自报身份（上报的主机名）。 */
 export interface InboundInfo {
   count: number;
   peers: InboundPeer[];
+  self: { peerId: string; label: string; version: string | null; bootId: string | null };
 }

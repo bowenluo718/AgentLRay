@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from '@/components/Sidebar';
-import { HostSelector } from '@/components/HostSelector';
 import { HostConnectingView } from '@/components/HostConnectingView';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -292,9 +291,6 @@ export default function App() {
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                <div className="ml-auto pr-1">
-                  <HostSelector />
-                </div>
               </div>
               <TabsContent value="sessions" className="mt-0 min-h-0 flex-1 overflow-auto p-2 md:p-4">
                 <SessionsView />

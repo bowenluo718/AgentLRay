@@ -4,8 +4,10 @@
 import { ChevronsLeft, Moon, Settings, SlidersHorizontal, Sun } from 'lucide-react';
 import type { PointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { SessionFiltersDialog } from '@/components/SessionFiltersDialog';
 import { SettingsDialog } from '@/components/SettingsDialog';
+import { HostsDialog } from '@/components/HostsDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTheme } from '@/hooks/useTheme';
@@ -24,10 +26,26 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const dragStart = useRef<{ x: number; width: number } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [hostsOpen, setHostsOpen] = useState(false);
   const [filterTerm, setFilterTerm] = useState('');
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [cmdkSeed, setCmdkSeed] = useState('');
   const multi = selectedPlatforms.length > 0;
+
+  // 主机入口（侧栏底部固定）：当前使用本地时文本「远程连接」，否则显示当前连接主机名。
+  const hosts = useAppStore((s) => s.hosts);
+  const selectedHostId = useAppStore((s) => s.selectedHostId);
+  const disconnectHost = useAppStore((s) => s.disconnectHost);
+  const inbound = useAppStore((s) => s.inbound);
+  const currentHost = hosts.find((h) => h.id === selectedHostId) ?? null;
+  const currentHostLabel = selectedHostId === 'local' ? null : (currentHost?.label || selectedHostId);
+  const onEntryDisconnect = () => {
+    if (selectedHostId === 'local') return;
+    disconnectHost(selectedHostId).then((ok) => {
+      if (ok) toast.success('已断开连接');
+      else toast.error('断开连接失败');
+    });
+  };
 
   // Global ⌘K / Ctrl+K toggle (legacy document keydown)
   useEffect(() => {
@@ -144,8 +162,55 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         </button>
       </div>
       <SessionList filterTerm={filterTerm} onNavigate={onNavigate} />
+      {/* 主机入口（固定在侧栏底部）：mt-auto 使其无论 SessionList 是否挂载都贴底；
+          本地时「远程连接」，否则显示当前主机名 + 断开。 */}
+      <div className="mt-auto flex shrink-0 items-center gap-1 rounded-md border border-border bg-background/60 px-2 py-1.5">
+        <button
+          type="button"
+          title="主机设置"
+          aria-label="主机设置"
+          onClick={() => setHostsOpen(true)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded px-1 py-0.5 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0"
+          >
+            <rect x="3" y="4" width="18" height="13" rx="2"></rect>
+            <path d="M8 21h8M12 17v4"></path>
+          </svg>
+          <span className="truncate">{currentHostLabel ?? '远程连接'}</span>
+        </button>
+        {selectedHostId !== 'local' ? (
+          <Button
+            variant="ghost"
+            size="icon"
+            title="断开当前远端连接"
+            aria-label="断开当前远端连接"
+            className="h-6 w-6 shrink-0 text-muted-foreground hover:text-destructive"
+            onClick={onEntryDisconnect}
+          >
+            <span className="text-base leading-none">×</span>
+          </Button>
+        ) : inbound && inbound.count > 0 ? (
+          <span
+            title={`${inbound.count} 台其他主机正在连接本机`}
+            className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/10 px-1.5 text-[11px] font-medium text-sky-600 dark:text-sky-400"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+            {inbound.count}
+          </span>
+        ) : null}
+      </div>
       <SessionFiltersDialog open={filtersOpen} onOpenChange={setFiltersOpen} />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <HostsDialog open={hostsOpen} onOpenChange={setHostsOpen} />
       <CmdkDialog open={cmdkOpen} onOpenChange={setCmdkOpen} seedQuery={cmdkSeed} onNavigate={onNavigate} />
       {/* 右缘拖拽手柄：横向拖拽调宽，拖到最小宽度以下折叠。 */}
       <div

@@ -1,5 +1,5 @@
 // 主机连接状态机的展示映射（multi-host）：状态徽标配色与中文标签。
-// HostSelector（顶栏）与 HostsTab（设置面板）共用，避免两处重复定义。
+// HostsDialog（主机设置弹框）与 Sidebar 主机入口共用，避免多处重复定义。
 import type { HostStatus } from '@/api/types';
 import type { HostInfo } from '@/api/types';
 
