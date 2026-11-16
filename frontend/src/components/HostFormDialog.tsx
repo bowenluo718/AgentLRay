@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useAppStore } from '@/store';
 import { settleHostSwitch } from '@/components/HostsDialog';
@@ -32,6 +33,10 @@ interface FormState {
   port: string;
   remoteAgentLrayPort: string;
   identityFile: string;
+  /** 私钥内容（PEM 原文）：编辑态空串=保留原密钥（不清除）。 */
+  identityKey: string;
+  /** 编辑态：是否显式清空已保存的私钥内容。 */
+  clearIdentityKey: boolean;
   useAgent: boolean;
 }
 
@@ -43,11 +48,16 @@ const EMPTY_FORM: FormState = {
   port: '',
   remoteAgentLrayPort: '3800',
   identityFile: '',
+  identityKey: '',
+  clearIdentityKey: false,
   useAgent: false,
 };
 
-function formToBody(f: FormState) {
+/** 组装提交 body。identityKey 语义：空串 + 编辑态保留 → 不传（后端保留原密钥）；
+ *  编辑态勾选「清除」→ 传显式 ''（后端删除密文）。 */
+function formToBody(f: FormState, editing: boolean) {
   const port = f.port.trim() ? Number(f.port) : null;
+  const hasNewKey = f.identityKey.trim() !== '';
   return {
     label: f.label.trim() || f.id.trim(),
     type: 'ssh' as const,
@@ -57,6 +67,13 @@ function formToBody(f: FormState) {
       port,
       remoteAgentLrayPort: f.remoteAgentLrayPort.trim() ? Number(f.remoteAgentLrayPort) : 3800,
       identityFile: f.identityFile.trim() || '',
+      // 私钥内容原样透传（不 trim，保留 PEM 结构）。仅当输入了新内容或显式清除时
+      // 才携带 identityKey；否则不传（后端保留既有密文，避免编辑留空误清密钥）。
+      ...(hasNewKey
+        ? { identityKey: f.identityKey }
+        : editing && f.clearIdentityKey
+          ? { identityKey: '' }
+          : {}),
       useAgent: f.useAgent,
     },
   };
@@ -89,6 +106,9 @@ export function HostFormDialog({
         port: editing.ssh?.port ? String(editing.ssh.port) : '',
         remoteAgentLrayPort: editing.ssh?.remoteAgentLrayPort ? String(editing.ssh.remoteAgentLrayPort) : '3800',
         identityFile: editing.ssh?.identityFile ?? '',
+        // 私钥内容只写不读：编辑态不预填（不可回显明文），空串=保留原密钥。
+        identityKey: '',
+        clearIdentityKey: false,
         useAgent: editing.ssh?.useAgent ?? false,
       });
     } else {
@@ -111,7 +131,7 @@ export function HostFormDialog({
   };
 
   const createMut = useMutation({
-    mutationFn: () => apiCreateHost({ ...formToBody(form), id: form.id.trim() }),
+    mutationFn: () => apiCreateHost({ ...formToBody(form, false), id: form.id.trim() }),
     onSuccess: () => {
       invalidate();
       onOpenChange(false);
@@ -120,7 +140,7 @@ export function HostFormDialog({
     onError: (e) => toast.error(`添加失败：${(e as Error).message}`),
   });
   const updateMut = useMutation({
-    mutationFn: () => apiUpdateHost(editing!.id, formToBody(form)),
+    mutationFn: () => apiUpdateHost(editing!.id, formToBody(form, true)),
     onSuccess: async (res) => {
       invalidate();
       onOpenChange(false);
@@ -137,7 +157,7 @@ export function HostFormDialog({
   });
   // 测试连接：用当前表单未保存的配置建隧道→探测→关，不持久化、不影响当前选中主机。
   const testMut = useMutation({
-    mutationFn: () => apiTestHostSpec({ ...formToBody(form), id: form.id.trim() || 'test' }),
+    mutationFn: () => apiTestHostSpec({ ...formToBody(form, true), id: form.id.trim() || 'test' }),
     onSuccess: (res) => {
       if (res.ok) toast.success(`「${form.label.trim() || form.id.trim()}」连接成功`);
       else toast.error(`「${form.label.trim() || form.id.trim()}」连接失败：${res.error ?? '未知错误'}`);
@@ -146,6 +166,16 @@ export function HostFormDialog({
   });
 
   const isWorking = createMut.isPending || updateMut.isPending || testMut.isPending;
+
+  // 「选择文件导入私钥内容」：读取所选私钥文件内容填入 identityKey。
+  // 失败 toast 提示，不阻塞表单。
+  const onImportKeyFile = (file: File | undefined) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => setForm({ ...form, identityKey: String(reader.result ?? '') });
+    reader.onerror = () => toast.error('读取私钥文件失败');
+    reader.readAsText(file);
+  };
 
   const onSave = () => {
     if (!validateRequired()) return;
@@ -213,6 +243,47 @@ export function HostFormDialog({
             <span className="text-xs text-muted-foreground">私钥文件（identityFile，可空走 ssh-agent）</span>
             <Input value={form.identityFile} placeholder="如：~/.ssh/id_ed25519" onChange={(e) => setForm({ ...form, identityFile: e.target.value })} />
           </label>
+          <div className="space-y-1 md:col-span-2">
+            <span className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                私钥内容（identityKey，非空则优先于上方文件；可留空）
+                {editing && editing.ssh?.hasIdentityKey && form.identityKey === '' && !form.clearIdentityKey ? (
+                  <span className="ml-1 text-emerald-600">· 已保存，留空保持不变</span>
+                ) : null}
+              </span>
+              <label className="flex cursor-pointer items-center gap-1 text-xs text-primary hover:underline">
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pem,.key,id_rsa,id_ed25519"
+                  onChange={(e) => onImportKeyFile(e.target.files?.[0])}
+                />
+                选择文件导入
+              </label>
+            </span>
+            <Textarea
+              value={form.identityKey}
+              rows={5}
+              placeholder={
+                editing?.ssh?.hasIdentityKey && !form.identityKey
+                  ? '已保存私钥；粘贴新内容可替换，或勾选下方「清除私钥」移除'
+                  : '粘贴私钥内容（-----BEGIN … PRIVATE KEY-----）…'
+              }
+              className="font-mono text-xs"
+              onChange={(e) => setForm({ ...form, identityKey: e.target.value })}
+            />
+            {editing && editing.ssh?.hasIdentityKey ? (
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={form.clearIdentityKey}
+                  onChange={(e) => setForm({ ...form, clearIdentityKey: e.target.checked })}
+                  className="h-3.5 w-3.5"
+                />
+                清除已保存的私钥内容（改用 ssh-agent / 文件）
+              </label>
+            ) : null}
+          </div>
           <label className="flex items-center gap-2 md:col-span-2">
             <input
               type="checkbox"

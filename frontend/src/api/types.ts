@@ -101,6 +101,8 @@ export interface HostSsh {
   /** 远端 AgentLRay 监听端口（默认 3800）。 */
   remoteAgentLrayPort: number;
   identityFile: string;
+  /** 私钥内容只写不读：回传是否已配置，绝不明文。 */
+  hasIdentityKey: boolean;
   useAgent: boolean;
 }
 

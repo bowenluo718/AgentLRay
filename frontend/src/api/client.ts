@@ -550,6 +550,7 @@ export function createHost(body: {
     port?: number | null;
     remoteAgentLrayPort?: number;
     identityFile?: string;
+    identityKey?: string;
     useAgent?: boolean;
   };
 }): Promise<HostInfo> {
@@ -568,6 +569,7 @@ export function updateHost(
       port?: number | null;
       remoteAgentLrayPort?: number;
       identityFile?: string;
+      identityKey?: string;
       useAgent?: boolean;
     };
   }
@@ -599,6 +601,7 @@ export function testHostSpec(body: {
     port?: number | null;
     remoteAgentLrayPort?: number;
     identityFile?: string;
+    identityKey?: string;
     useAgent?: boolean;
   };
 }): Promise<HostTestResult> {

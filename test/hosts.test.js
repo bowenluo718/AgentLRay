@@ -10,6 +10,7 @@ const path = require('node:path');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'hosts-test-'));
 process.env.HOME = tmpHome;
+const { encrypt: encryptSecret, decrypt: decryptSecret } = require('../lib/secret');
 const {
   LOCAL_ID,
   HOSTS_FILE,
@@ -23,6 +24,7 @@ const {
   closeHost,
   closeAllExcept,
   testHostSpec,
+  resolveIdentityKey,
   getRuntime,
   shutdownHosts,
   setRuntimeForTest,
@@ -48,7 +50,7 @@ test('normalizeHost：合法输入规范化（缺省字段填默认）', () => {
   assert.equal(h.type, 'ssh');
   assert.deepEqual(
     h.ssh,
-    { host: 'devbox', user: '', port: null, remoteAgentLrayPort: 3800, identityFile: '', useAgent: false }
+    { host: 'devbox', user: '', port: null, remoteAgentLrayPort: 3800, identityFile: '', identityKeyEnc: '', useAgent: false }
   );
 });
 
@@ -57,6 +59,27 @@ test('normalizeHost：非法 id 拒绝（含 local 保留、含非法字符、�
   assert.throws(() => normalizeHost({ id: LOCAL_ID, label: 'x', ssh: { host: 'h' } }), /保留给本机/);
   assert.throws(() => normalizeHost({ id: '', label: 'x', ssh: { host: 'h' } }), /id 仅允许/);
   assert.throws(() => normalizeHost({ id: 'a-b_c', label: 'x', ssh: { host: 'h' } }), /id 仅允许/);
+});
+
+test('normalizeHost：identityKeyEnc 保留原文（不 trim）；明文 identityKey 不入对象', () => {
+  const h = normalizeHost({
+    id: 'devbox',
+    label: '开发机A',
+    ssh: {
+      host: 'devbox',
+      identityFile: '/home/u/.ssh/id_ed25519',
+      identityKeyEnc: 'v1:aa:bb:cc',
+    },
+  });
+  assert.equal(h.ssh.identityFile, '/home/u/.ssh/id_ed25519');
+  assert.equal(h.ssh.identityKeyEnc, 'v1:aa:bb:cc');
+  // 明文键不被接受（防误落盘）。
+  const h2 = normalizeHost({
+    id: 'devbox2',
+    label: 'x',
+    ssh: { host: 'h', identityKey: '-----BEGIN OPENSSH PRIVATE KEY-----' },
+  });
+  assert.equal(h2.ssh.identityKeyEnc, '');
 });
 
 test('normalizeHost：label 必填、ssh.host 必填、端口范围校验、dsh 预留', () => {
@@ -158,6 +181,60 @@ test('closeHost：断开指定主机（关隧道 + 清运行时）；local 无�
   closeHost('no-such-host');
 });
 
+test('resolveIdentityKey：identityKeyEnc 非空 → 解密写临时私钥文件（0600）并让 identityFile 指向它；否则原样返回', async () => {
+  const keyEnc = await encryptSecret('-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----');
+  // 有密文：解密为内容写临时文件、identityFile 指向临时路径、identityKey 置解密内容（供 buildSshArgs 走内容）。
+  const { ssh: eff, tempKeyPath } = await resolveIdentityKey({
+    host: 'devbox',
+    identityFile: '/home/u/.ssh/id_ed25519',
+    identityKeyEnc: keyEnc,
+  });
+  assert.ok(tempKeyPath);
+  assert.notEqual(eff.identityFile, '/home/u/.ssh/id_ed25519');
+  assert.equal(eff.identityKey, '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----');
+  // 临时文件内容 = 私钥内容，权限 0600（仅属主可读写）。
+  assert.equal(fs.readFileSync(eff.identityFile, 'utf8'), '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----');
+  const mode = fs.statSync(eff.identityFile).mode & 0o777;
+  assert.equal(mode, 0o600);
+  // 测试清理临时目录，避免残留。
+  fs.rmSync(path.dirname(eff.identityFile), { recursive: true, force: true });
+
+  // 无密文：不产生临时文件，原样返回（沿用 identityFile 文件地址）。
+  const { ssh: eff2, tempKeyPath: t2 } = await resolveIdentityKey({
+    host: 'devbox',
+    identityFile: '/home/u/.ssh/id_ed25519',
+    identityKeyEnc: '',
+  });
+  assert.equal(eff2.identityFile, '/home/u/.ssh/id_ed25519');
+  assert.equal(t2, null);
+});
+
+test('createHost/updateHost：明文 identityKey 加密落盘 identityKeyEnc、不落明文；编辑留空保留原密钥', async () => {
+  const KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----';
+  // 新建：明文 → 加密落盘。
+  await createHost({ id: 'k1', label: 'x', ssh: { host: 'h', identityKey: KEY } });
+  let raw = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  const stored = raw.hosts.find((x) => x.id === 'k1');
+  assert.ok(!('identityKey' in stored.ssh), '磁盘不得落明文 identityKey');
+  assert.ok(stored.ssh.identityKeyEnc && stored.ssh.identityKeyEnc.startsWith('v1:'));
+  assert.equal(await decryptSecret(stored.ssh.identityKeyEnc), KEY);
+
+  // 编辑未带 identityKey（仅改 label）→ 保留既有密文。
+  const updated = await updateHost('k1', { label: 'y', ssh: { host: 'h' } });
+  assert.equal(await decryptSecret(updated.ssh.identityKeyEnc), KEY);
+
+  // 编辑传 identityKey: '' → 显式清除密文。
+  const cleared = await updateHost('k1', { label: 'z', ssh: { host: 'h', identityKey: '' } });
+  assert.equal(cleared.ssh.identityKeyEnc, '');
+
+  // 编辑传新明文 → 替换密文。
+  const replaced = await updateHost('k1', {
+    label: 'w',
+    ssh: { host: 'h', identityKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nnew\n-----END OPENSSH PRIVATE KEY-----' },
+  });
+  assert.equal(await decryptSecret(replaced.ssh.identityKeyEnc), '-----BEGIN OPENSSH PRIVATE KEY-----\nnew\n-----END OPENSSH PRIVATE KEY-----');
+});
+
 test('testHostSpec：成功路径 → 建隧道探测到 version、不残留运行时、不落盘、不向被连接方上报', async () => {
   // 用本地 mock HTTP server 模拟被连接方 AgentLRay：/api/version 与 /api/inbound/hello。
   // 隧道用 test/fixtures/ssh-mock.cjs 转发到该本地 server（经 AGENTLRAY_SSH_BIN 注入，
@@ -206,6 +283,56 @@ test('testHostSpec：成功路径 → 建隧道探测到 version、不残留运�
     assert.ok(!ids.some((h) => h.id === 'probe-ok'));
     // skipReporting=true → 不向被连接方上报身份/心跳。
     assert.equal(helloCount, 0);
+  } finally {
+    delete process.env.AGENTLRAY_SSH_BIN;
+    server.close();
+  }
+});
+
+test('testHostSpec：带明文 identityKey → 临时私钥文件在隧道关闭后自动清理', async () => {
+  // 与成功路径同构，但带 identityKey：验证 resolveIdentityKey 写的临时文件在
+  // testHostSpec 收尾（closeHost）时被删除，无 /tmp/agentlray-key-* 残留。
+  const http = require('node:http');
+  const server = http.createServer((req, res) => {
+    if (req.url === '/api/version') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ bootId: 'boot-key', version: '0.1.0' }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+
+  // 收集清理前/后的 /tmp/agentlray-key-* 目录。
+  const listKeyDirs = () => {
+    try {
+      return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith('agentlray-key-'));
+    } catch {
+      return [];
+    }
+  };
+  const before = listKeyDirs();
+
+  process.env.AGENTLRAY_SSH_BIN = path.join(__dirname, 'fixtures', 'ssh-mock.cjs');
+  try {
+    const result = await testHostSpec({
+      id: 'probe-key',
+      label: '密钥探针',
+      ssh: {
+        host: '127.0.0.1',
+        port,
+        remoteAgentLrayPort: port,
+        identityKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----',
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.status, 'connected');
+    // 运行时无残留。
+    assert.equal(getRuntime('__probe__probe-key'), undefined);
+    // 无新增临时目录残留（清理逻辑生效）。
+    assert.deepEqual(listKeyDirs(), before);
   } finally {
     delete process.env.AGENTLRAY_SSH_BIN;
     server.close();

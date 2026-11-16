@@ -72,6 +72,25 @@ test('buildSshArgs 条件拼装：user/port/identityFile/ForwardAgent', () => {
   ]);
 });
 
+test('buildSshArgs：identityKey 非空 → 临时文件 -i + IdentitiesOnly=yes', () => {
+  const args = buildSshArgs(
+    {
+      host: 'devbox',
+      user: 'luobo',
+      port: null,
+      remoteAgentLrayPort: 3800,
+      identityFile: '/tmp/agentlray-key-x/id',
+      identityKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----',
+      useAgent: false,
+    },
+    50000
+  );
+  const hasIdentitiesOnly = args.indexOf('IdentitiesOnly=yes') !== -1;
+  assert.ok(hasIdentitiesOnly);
+  const iIdx = args.indexOf('-i');
+  assert.equal(args[iIdx + 1], '/tmp/agentlray-key-x/id');
+});
+
 test('findFreePort 返回 1–65535 空闲端口', async () => {
   const port = await findFreePort();
   assert.ok(Number.isInteger(port) && port >= 1 && port <= 65535);
