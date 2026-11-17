@@ -189,12 +189,12 @@ export function HostFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !isWorking && onOpenChange(o)}>
-      <DialogContent className="max-w-lg overflow-y-auto top-[6%] translate-y-0 md:max-h-[85vh]">
+      <DialogContent className="max-w-lg overflow-y-auto top-[6%] translate-y-0 max-h-[85vh] max-sm:w-[calc(100%-1.5rem)] max-sm:max-w-[calc(100%-1.5rem)] max-sm:p-4">
         <DialogHeader>
           <DialogTitle>{editing ? `编辑主机 ${editing.id}` : '添加主机'}</DialogTitle>
         </DialogHeader>
 
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <label className="space-y-1">
             <span className="text-xs text-muted-foreground">
               名称（label）<span className="text-destructive">*</span>
@@ -239,11 +239,11 @@ export function HostFormDialog({
             <span className="text-xs text-muted-foreground">远端 AgentLRay 端口</span>
             <Input type="number" min="1" max="65535" value={form.remoteAgentLrayPort} placeholder="3800" onChange={(e) => setForm({ ...form, remoteAgentLrayPort: e.target.value })} />
           </label>
-          <label className="space-y-1 md:col-span-2">
+          <label className="space-y-1 sm:col-span-2">
             <span className="text-xs text-muted-foreground">私钥文件（identityFile，可空走 ssh-agent）</span>
             <Input value={form.identityFile} placeholder="如：~/.ssh/id_ed25519" onChange={(e) => setForm({ ...form, identityFile: e.target.value })} />
           </label>
-          <div className="space-y-1 md:col-span-2">
+          <div className="space-y-1 sm:col-span-2">
             <span className="flex items-center justify-between text-xs text-muted-foreground">
               <span>
                 私钥内容（identityKey，非空则优先于上方文件；可留空）
@@ -258,7 +258,7 @@ export function HostFormDialog({
                   accept=".pem,.key,id_rsa,id_ed25519"
                   onChange={(e) => onImportKeyFile(e.target.files?.[0])}
                 />
-                选择文件导入
+                文件导入
               </label>
             </span>
             <Textarea
@@ -284,7 +284,7 @@ export function HostFormDialog({
               </label>
             ) : null}
           </div>
-          <label className="flex items-center gap-2 md:col-span-2">
+          <label className="flex items-center gap-2 sm:col-span-2">
             <input
               type="checkbox"
               checked={form.useAgent}
@@ -295,14 +295,14 @@ export function HostFormDialog({
           </label>
         </div>
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" disabled={isWorking} onClick={() => onOpenChange(false)}>
+        <div className="flex flex-col gap-2 pt-2 sm:flex-row sm:justify-end">
+          <Button variant="outline" disabled={isWorking} onClick={() => onOpenChange(false)} className="sm:w-auto">
             取消
           </Button>
-          <Button variant="outline" disabled={isWorking} onClick={onTest}>
+          <Button variant="outline" disabled={isWorking} onClick={onTest} className="sm:w-auto">
             {testMut.isPending ? '测试中…' : '测试连接'}
           </Button>
-          <Button disabled={isWorking} onClick={onSave}>
+          <Button disabled={isWorking} onClick={onSave} className="sm:w-auto">
             {isWorking ? '保存中…' : '保存'}
           </Button>
         </div>

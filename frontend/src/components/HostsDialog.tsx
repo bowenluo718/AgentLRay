@@ -8,6 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { Plus } from 'lucide-react';
 import { getHosts, deleteHost as apiDeleteHost } from '@/api/client';
 import type { HostInfo, HostStatus, InboundPeer } from '@/api/types';
 import { HOST_STATUS_DOT, HOST_STATUS_LABEL } from '@/lib/host-status';
@@ -17,6 +18,36 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { HostFormDialog } from '@/components/HostFormDialog';
+
+// 行内文字按钮（轻按钮：无边框背景，仅文字）：连接/断开/编辑/删除统一走此样式。
+function TextAction({
+  children,
+  className,
+  disabled,
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  disabled?: boolean;
+  title?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-8 shrink-0 items-center rounded-md px-1.5 text-xs font-medium transition-colors hover:bg-accent disabled:pointer-events-none disabled:opacity-50',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
 
 // 主机「当前选中」真实变更后统一收尾（design-host-settings-redesign 追加）：
 // 记忆的当前主机缓存（localStorage）已由 store 的 setSelectedHostId/disconnectHost 更新，
@@ -179,21 +210,28 @@ export function HostsDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-xl overflow-y-auto top-[6%] translate-y-0 md:max-h-[85vh]">
-          <DialogHeader className="flex flex-row items-center justify-between gap-2 pr-10">
+        <DialogContent className="max-w-xl overflow-y-auto top-[6%] translate-y-0 max-h-[85vh] max-sm:w-[calc(100%-1.5rem)] max-sm:max-w-[calc(100%-1.5rem)] max-sm:p-4">
+          <DialogHeader>
             <DialogTitle>主机</DialogTitle>
-            <Button variant="outline" size="sm" onClick={onAdd}>
-              添加主机
-            </Button>
           </DialogHeader>
 
           <div className="flex flex-col gap-2">
+            {/* 空态：无已保存主机时显示提示，仍可通过底部「添加主机」新建 */}
+            {data.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                还没有已保存的主机，点击下方「添加主机」创建。
+              </div>
+            ) : null}
+
             {data.map((h) => {
               const isLocal = h.id === 'local';
               const st = hostStatus[h.id] ?? h.status ?? 'disconnected';
               const isCurrent = h.id === selectedHostId;
               return (
-                <div key={h.id} className="flex items-center justify-between gap-2 rounded-md border border-border px-3 py-2">
+                <div
+                  key={h.id}
+                  className="flex flex-col gap-1.5 rounded-md border border-border px-3 py-2 sm:flex-row sm:items-center sm:justify-between sm:gap-2"
+                >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{isLocal ? '本机' : (h.label || h.id)}</span>
@@ -215,34 +253,40 @@ export function HostsDialog({
                   {isLocal ? (
                     <InboundBadge count={inbound?.count ?? 0} peers={inbound?.peers ?? []} />
                   ) : (
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-0.5 self-start sm:self-center">
                       {isCurrent ? (
-                        <Button
-                          variant="outline"
-                          size="sm"
+                        <TextAction
+                          className="text-amber-600 hover:bg-amber-500/10 dark:text-amber-500"
                           disabled={disconnectMut.isPending && disconnectMut.variables === h.id}
                           onClick={() => disconnectMut.mutate(h.id)}
                           title="关闭隧道并断开连接"
                         >
                           {disconnectMut.isPending && disconnectMut.variables === h.id ? '断开中…' : '断开'}
-                        </Button>
+                        </TextAction>
                       ) : (
-                        <Button variant="outline" size="sm" onClick={() => onConnect(h.id)} title="连接该主机（同顶栏切换）">
+                        <TextAction onClick={() => onConnect(h.id)} title="连接该主机（同顶栏切换）">
                           连接
-                        </Button>
+                        </TextAction>
                       )}
-                      <Button variant="outline" size="sm" onClick={() => onEdit(h)}>
-                        编辑
-                      </Button>
-                      <Button variant="destructive" size="sm" disabled={deleteMut.isPending} onClick={() => deleteMut.mutate(h.id)}>
+                      <TextAction onClick={() => onEdit(h)}>编辑</TextAction>
+                      <TextAction
+                        className="text-destructive hover:bg-destructive/10"
+                        disabled={deleteMut.isPending}
+                        onClick={() => deleteMut.mutate(h.id)}
+                      >
                         删除
-                      </Button>
+                      </TextAction>
                     </div>
                   )}
                 </div>
               );
             })}
           </div>
+
+          <Button variant="ghost" size="sm" className="mt-1 shrink-0 justify-center gap-1.5 text-primary" onClick={onAdd}>
+            <Plus className="h-4 w-4" />
+            添加主机
+          </Button>
         </DialogContent>
       </Dialog>
 

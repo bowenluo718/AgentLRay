@@ -191,9 +191,10 @@ test('resolveIdentityKey：identityKeyEnc 非空 → 解密写临时私钥文件
   });
   assert.ok(tempKeyPath);
   assert.notEqual(eff.identityFile, '/home/u/.ssh/id_ed25519');
-  assert.equal(eff.identityKey, '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----');
-  // 临时文件内容 = 私钥内容，权限 0600（仅属主可读写）。
-  assert.equal(fs.readFileSync(eff.identityFile, 'utf8'), '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----');
+  // 规范化：解密内容 trim + 补结尾 \n（OpenSSH 私钥格式要求，防 invalid format）。
+  assert.equal(eff.identityKey, '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n');
+  // 临时文件内容 = 规范化后内容，权限 0600（仅属主可读写）。
+  assert.equal(fs.readFileSync(eff.identityFile, 'utf8'), '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n');
   const mode = fs.statSync(eff.identityFile).mode & 0o777;
   assert.equal(mode, 0o600);
   // 测试清理临时目录，避免残留。
@@ -207,6 +208,37 @@ test('resolveIdentityKey：identityKeyEnc 非空 → 解密写临时私钥文件
   });
   assert.equal(eff2.identityFile, '/home/u/.ssh/id_ed25519');
   assert.equal(t2, null);
+});
+
+test('resolveIdentityKey：粘贴丢失尾部换行的私钥 → 规范化补 \n，ssh 可读（防 invalid format）', async () => {
+  // 用户经表单粘贴/导入私钥，浏览器复制常丢失末尾换行 → 解密写临时文件后
+  // OpenSSH 报 'Load key ...: invalid format'。修复：写临时文件前规范化。
+  const pemNoNL = '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----'; // 无尾 \n
+  const keyEnc = await encryptSecret(pemNoNL);
+  const { ssh: eff, tempKeyPath } = await resolveIdentityKey({
+    host: 'devbox',
+    identityFile: '',
+    identityKeyEnc: keyEnc,
+  });
+  assert.ok(tempKeyPath);
+  // 规范化后：临时文件内容以换行结尾（保留原内容 + 补 \n）。
+  const written = fs.readFileSync(eff.identityFile, 'utf8');
+  assert.equal(written, '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n');
+  assert.ok(written.endsWith('\n'), '临时私钥文件必须以换行结尾（OpenSSH 格式要求）');
+  fs.rmSync(path.dirname(eff.identityFile), { recursive: true, force: true });
+});
+
+test('resolveIdentityKey：私钥带首尾多余空白 → trim 规范化（防空行破坏格式）', async () => {
+  const keyEnc = await encryptSecret('  \n-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n  \n');
+  const { ssh: eff, tempKeyPath } = await resolveIdentityKey({
+    host: 'devbox',
+    identityFile: '',
+    identityKeyEnc: keyEnc,
+  });
+  assert.ok(tempKeyPath);
+  const written = fs.readFileSync(eff.identityFile, 'utf8');
+  assert.equal(written, '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----\n');
+  fs.rmSync(path.dirname(eff.identityFile), { recursive: true, force: true });
 });
 
 test('createHost/updateHost：明文 identityKey 加密落盘 identityKeyEnc、不落明文；编辑留空保留原密钥', async () => {
