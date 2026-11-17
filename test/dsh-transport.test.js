@@ -1,7 +1,8 @@
 'use strict';
 // dsh 远程主机连接（design-dsh-host-connection）：
 // - hosts.json 的 type=dsh 目标规范化与 CRUD（不含 ssh 凭据字段）。
-// - settings.json 的 dsh section：密码加密落盘、角色/服务器/放行端口校验。
+// - hosts.json 顶层 dsh section：密码加密落盘、角色/服务器/放行端口校验，
+//   以及旧 settings.json dsh section 的一次性迁移（migrateDshSectionOnce）。
 // - inbound peer 的 via 字段（ssh / dsh）。
 // - loopback 通道：请求校验、放行端口闸门、连接方↔被连接方的真实 HTTP 转发往返。
 
@@ -16,7 +17,13 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-test-'));
 process.env.HOME = tmpHome;
 
 const { normalizeHost, listHosts, createHost, updateHost, deleteHost } = require('../lib/hosts');
-const { loadDshSettings, saveDshSettings, loadDshCredentials } = require('../lib/dsh/settings');
+const {
+  loadDshSettings,
+  saveDshSettings,
+  loadDshCredentials,
+  migrateDshSectionOnce,
+} = require('../lib/dsh/settings');
+const { HOSTS_FILE } = require('../lib/hosts');
 const { SETTINGS_FILE } = require('../lib/settings');
 const { registerPeer, snapshot, clear } = require('../lib/inbound');
 const { parseLoopbackRequest } = require('../lib/dsh/loopback');
@@ -28,6 +35,11 @@ beforeEach(async () => {
   clear();
   try {
     fs.rmSync(SETTINGS_FILE);
+  } catch {
+    /* 不存在则忽略 */
+  }
+  try {
+    fs.rmSync(HOSTS_FILE);
   } catch {
     /* 不存在则忽略 */
   }
@@ -77,16 +89,21 @@ test('dsh 主机 CRUD：落盘只有 dsh 字段，编辑不误伤 ssh 凭据分�
   assert.equal((await listHosts()).length, 0);
 });
 
-// ---- settings.json：dsh section ----
+// ---- hosts.json 顶层 dsh section ----
 
-test('dsh 设置：密码加密落盘、GET 视图只给 hasPassword', async () => {
+test('dsh 设置：密码加密落盘到 hosts.json、GET 视图只给 hasPassword', async () => {
   await saveDshSettings({ role: 'host', serverUrl: 'http://127.0.0.1:18123', email: 'a@b.c', password: 's3cret-pw' });
-  const stored = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  const stored = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
   assert.equal(stored.dsh.role, 'host');
   assert.equal(stored.dsh.email, 'a@b.c');
   assert.ok(stored.dsh.passwordEnc.startsWith('v1:'));
   // 明文密码不得落盘。
   assert.equal(JSON.stringify(stored).includes('s3cret-pw'), false);
+  // dsh 配置不再写入 settings.json（文件可能因本用例首次写入而存在——不存在则跳过，
+  // 存在则必须无 dsh）。
+  if (fs.existsSync(SETTINGS_FILE)) {
+    assert.equal(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')).dsh, undefined);
+  }
 
   const view = await loadDshSettings();
   assert.equal(view.hasPassword, true);
@@ -113,6 +130,61 @@ test('dsh 设置：放行端口去重且保序，默认 [3800]', async () => {
   assert.deepEqual((await loadDshSettings()).allowedPorts, [3800]);
   await saveDshSettings({ allowedPorts: [3801, 3801, 8080] });
   assert.deepEqual((await loadDshSettings()).allowedPorts, [3801, 8080]);
+});
+
+test('dsh 迁移：settings.json 旧 dsh 首次读取拷入 hosts.json，且幂等', async () => {
+  // 种旧数据：settings.json 顶层 dsh（含密文）。
+  fs.writeFileSync(
+    SETTINGS_FILE,
+    JSON.stringify({
+      dsh: {
+        role: 'host',
+        serverUrl: 'http://127.0.0.1:18123',
+        email: 'a@b.c',
+        passwordEnc: 'v1:legacycipher',
+        deviceName: 'legacybox',
+        allowedPorts: [3800, 8080],
+      },
+    })
+  );
+  await migrateDshSectionOnce();
+  const file = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  assert.deepEqual(file.dsh, {
+    role: 'host',
+    serverUrl: 'http://127.0.0.1:18123',
+    email: 'a@b.c',
+    passwordEnc: 'v1:legacycipher',
+    deviceName: 'legacybox',
+    allowedPorts: [3800, 8080],
+  });
+  // 幂等：再次迁移不覆盖（改 hosts.json 的 dsh 后再跑一次，保持新值）。
+  file.dsh.serverUrl = 'http://127.0.0.1:19999';
+  fs.writeFileSync(HOSTS_FILE, JSON.stringify(file));
+  await migrateDshSectionOnce();
+  assert.equal(JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8')).dsh.serverUrl, 'http://127.0.0.1:19999');
+  // loadDshSettings 返回迁移后的配置。
+  assert.equal((await loadDshSettings()).deviceName, 'legacybox');
+});
+
+test('dsh 迁移：settings.json 无 dsh 时迁移为 no-op', async () => {
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ ui: {} }));
+  await migrateDshSectionOnce();
+  assert.equal(fs.existsSync(HOSTS_FILE), false);
+});
+
+test('hosts.json 顶层 dsh：主机 CRUD 写盘不冲掉 dsh 配置', async () => {
+  await saveDshSettings({ role: 'both', email: 'a@b.c', password: 'pw' });
+  await createHost({ id: 'remote', label: '远端', type: 'dsh', dsh: { deviceId: 'dev-1' } });
+  let file = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  assert.equal(file.hosts.length, 1);
+  assert.ok(file.dsh); // 顶层 dsh 保留
+  assert.equal(file.dsh.role, 'both');
+
+  await updateHost('remote', { label: '远端2', type: 'dsh', dsh: { deviceId: 'dev-1', remoteAgentLrayPort: 3999 } });
+  file = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  assert.equal(file.hosts[0].label, '远端2');
+  assert.equal(file.dsh.email, 'a@b.c'); // 顶层 dsh 仍保留
+  assert.equal(file.dsh.passwordEnc.startsWith('v1:'), true);
 });
 
 // ---- inbound peer：via 字段 ----

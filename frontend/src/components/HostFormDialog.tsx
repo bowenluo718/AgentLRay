@@ -385,7 +385,7 @@ export function HostFormDialog({
                 ) : null}
                 {deviceOptions.length === 0 && !devices.isError ? (
                   <span className="text-[10px] text-muted-foreground">
-                    暂无设备可选（需先在设置面板配置 dsh 账号，且目标机角色为 host）
+                    暂无设备可选（需先在「主机 → dsh 配置」填写中继服务器账号，且目标机角色为 host）
                   </span>
                 ) : null}
               </label>

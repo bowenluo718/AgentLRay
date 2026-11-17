@@ -8,7 +8,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Plus } from 'lucide-react';
+import { Plus, Settings2 } from 'lucide-react';
 import { getHosts, deleteHost as apiDeleteHost } from '@/api/client';
 import type { HostInfo, HostStatus, InboundPeer } from '@/api/types';
 import { HOST_STATUS_DOT, HOST_STATUS_LABEL } from '@/lib/host-status';
@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { HostFormDialog } from '@/components/HostFormDialog';
+import { DshConfigDialog } from '@/components/DshConfigDialog';
 
 // 行内文字按钮（轻按钮：无边框背景，仅文字）：连接/断开/编辑/删除统一走此样式。
 function TextAction({
@@ -143,6 +144,8 @@ export function HostsDialog({
   // 新建/编辑表单弹框（默认隐藏）。editing 非 null 时编辑该主机。
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<HostInfo | null>(null);
+  // dsh 配置弹框（默认隐藏）：本机 dsh 账号/角色配置（存 hosts.json 顶层 dsh）。
+  const [dshConfigOpen, setDshConfigOpen] = useState(false);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hosts'] });
 
@@ -288,14 +291,27 @@ export function HostsDialog({
             })}
           </div>
 
-          <Button variant="ghost" size="sm" className="mt-1 shrink-0 justify-center gap-1.5 text-primary" onClick={onAdd}>
-            <Plus className="h-4 w-4" />
-            添加主机
-          </Button>
+          <div className="mt-1 flex shrink-0 items-center gap-2">
+            <Button variant="ghost" size="sm" className="flex-1 justify-center gap-1.5 text-primary" onClick={onAdd}>
+              <Plus className="h-4 w-4" />
+              添加主机
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="flex-1 justify-center gap-1.5 text-primary"
+              onClick={() => setDshConfigOpen(true)}
+              title="本机 dsh 账号/角色配置（中继服务器、放行端口）"
+            >
+              <Settings2 className="h-4 w-4" />
+              dsh 配置
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
       <HostFormDialog open={formOpen} onOpenChange={setFormOpen} editing={editing} />
+      <DshConfigDialog open={dshConfigOpen} onOpenChange={setDshConfigOpen} />
     </>
   );
 }

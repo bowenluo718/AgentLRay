@@ -433,8 +433,8 @@ export interface PlatformsMirror {
   replaced: string[];
 }
 
-/** dsh 传输配置（GET /api/settings 的 dsh section）：中继服务器账号与本机角色。 */
-export interface DshSettings {
+/** dsh 传输配置（GET/PUT /api/dsh/config）：中继服务器账号与本机角色。 */
+export interface DshConfig {
   /** 本机角色：host=只被连 / client=只去连 / both=两者皆可。 */
   role: 'host' | 'client' | 'both';
   /** 中继服务器地址（默认官方 https://dsh.r2049.cn，可改自托管）。 */
@@ -457,7 +457,6 @@ export interface AllSettings {
   status: StatusConfig;
   kanban: KanbanConfig;
   llm: LlmSettings;
-  dsh: DshSettings;
   platforms: PlatformsMirror;
 }
 
@@ -487,15 +486,6 @@ export type SettingsPatch = {
   status?: Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', number>>;
   kanban?: { maxPerStatus?: number };
   llm?: { baseUrl: string; model: string; apiKey?: string; analysisTimeoutMs?: number };
-  /** dsh section：password 语义同 llm.apiKey（未传=保留，''=清除，否则替换）。 */
-  dsh?: {
-    role?: 'host' | 'client' | 'both';
-    serverUrl?: string;
-    email?: string;
-    password?: string;
-    deviceName?: string;
-    allowedPorts?: number[];
-  };
 };
 
 /** 空串 = 清除该平台配置（回退默认命令名）。 */
@@ -630,6 +620,23 @@ export interface DshStatus {
   /** 当前连入本机的 dsh 对端设备 id。 */
   peers: string[];
   lastError: string | null;
+}
+
+/** GET /api/dsh/config — 本机 dsh 配置（主机弹框「dsh 配置」表单读）。恒 local。 */
+export function getDshConfig(): Promise<DshConfig> {
+  return fetchJson('/api/dsh/config', { local: true });
+}
+
+/** PUT /api/dsh/config — 保存 dsh 配置（password 语义同 llm.apiKey：未传=保留，''=清除，否则替换）。恒 local。 */
+export function saveDshConfig(body: {
+  role?: 'host' | 'client' | 'both';
+  serverUrl?: string;
+  email?: string;
+  password?: string;
+  deviceName?: string;
+  allowedPorts?: number[];
+}): Promise<DshConfig> {
+  return requestJson('/api/dsh/config', 'PUT', body, { local: true });
 }
 
 /** GET /api/dsh/devices — 中继服务器上当前账号可见的设备（本机已排除）。 */
