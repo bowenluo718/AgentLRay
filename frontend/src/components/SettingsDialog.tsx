@@ -57,7 +57,7 @@ const STATUS_FIELDS: {
 const UNIT_MS = { min: 60_000, hour: 3_600_000 };
 
 type StatusKey = 'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs';
-type SectionKey = 'platforms' | 'llm' | 'status' | 'kanban';
+type SectionKey = 'platforms' | 'llm' | 'dsh' | 'status' | 'kanban';
 
 // 全对话框单一 draft：所有 panel 的待保存输入。服务器 section 的「空串 = 回默认」。
 // 平台按 id 聚合 { mounted, replaced, dir, bin }：mounted/replaced 初始 =
@@ -74,6 +74,18 @@ interface Draft {
   /** 默认平台 id（ui.platform，单选）；null = 未设置（CLI show/resume 缺省需显式 --platform）。 */
   defaultPlatform: string | null;
   llm: { baseUrl: string; model: string; apiKey: string; analysisTimeoutMs: string };
+  /** dsh 远程通道配置：角色 / 中继服务器 / 账号 / 设备名 / 放行端口。 */
+  dsh: {
+    role: 'host' | 'client' | 'both';
+    serverUrl: string;
+    email: string;
+    password: string;
+    /** 编辑态：是否显式清除已保存的密码（password 留空时生效）。 */
+    clearPassword: boolean;
+    deviceName: string;
+    /** 放行端口（逗号分隔文本，保存时解析为数字数组）。 */
+    allowedPorts: string;
+  };
   status: Partial<Record<StatusKey, string>>;
   kanban: string;
 }
@@ -83,6 +95,7 @@ function emptyDraft(): Draft {
     platforms: {},
     defaultPlatform: null,
     llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
+    dsh: { role: 'both', serverUrl: '', email: '', password: '', clearPassword: false, deviceName: '', allowedPorts: '' },
     status: {},
     kanban: '',
   };
@@ -92,6 +105,7 @@ function emptyDraft(): Draft {
 const MENU: { key: SectionKey; label: string }[] = [
   { key: 'platforms', label: '平台' },
   { key: 'llm', label: 'LLM 接口' },
+  { key: 'dsh', label: '远程主机 (dsh)' },
   { key: 'status', label: '状态时间配置' },
   { key: 'kanban', label: '任务看板' },
 ];
@@ -118,6 +132,7 @@ export function SettingsDialog({
   const [touched, setTouched] = useState<Record<SectionKey, boolean>>({
     platforms: false,
     llm: false,
+    dsh: false,
     status: false,
     kanban: false,
   });
@@ -169,10 +184,20 @@ export function SettingsDialog({
           ? String(Math.round(all.data.llm.analysisTimeoutMs / 60_000))
           : '',
       },
+      dsh: {
+        role: all.data?.dsh.role ?? 'both',
+        serverUrl: all.data?.dsh.serverUrl ?? '',
+        email: all.data?.dsh.email ?? '',
+        // 密码只写不读：编辑态不预填（留空 = 保持不变）。
+        password: '',
+        clearPassword: false,
+        deviceName: all.data?.dsh.deviceName ?? '',
+        allowedPorts: (all.data?.dsh.allowedPorts ?? [3800]).join(', '),
+      },
       status: {},
       kanban: '',
     });
-    setTouched({ platforms: false, llm: false, status: false, kanban: false });
+    setTouched({ platforms: false, llm: false, dsh: false, status: false, kanban: false });
   }
 
   function handleOpenChange(next: boolean) {
@@ -305,6 +330,23 @@ export function SettingsDialog({
         analysisTimeoutMs,
       };
     }
+    if (touched.dsh) {
+      // 放行端口：逗号/空格分隔的数字列表；解析不出合法端口时留空数组（服务端按默认处理）。
+      const allowedPorts = draft.dsh.allowedPorts
+        .split(/[\s,]+/)
+        .map((item) => Number(item.trim()))
+        .filter((n) => Number.isInteger(n) && n >= 1 && n <= 65535);
+      patch.dsh = {
+        role: draft.dsh.role,
+        serverUrl: draft.dsh.serverUrl.trim(),
+        email: draft.dsh.email.trim(),
+        // 密码语义同 llm.apiKey：留空 = 保留已存密码（不回显，故无法用留空表达清除）；
+        // 勾选「清除已保存密码」→ 显式传 ''（服务端删除密文）。
+        password: draft.dsh.password !== '' ? draft.dsh.password : draft.dsh.clearPassword ? '' : undefined,
+        deviceName: draft.dsh.deviceName.trim(),
+        allowedPorts,
+      };
+    }
     return patch;
   }
 
@@ -325,11 +367,21 @@ export function SettingsDialog({
         // 默认平台重置回服务端当前值（须再点 Save 才落盘）。
         defaultPlatform: typeof all.data?.ui?.platform === 'string' ? all.data.ui.platform : null,
         llm: { baseUrl: '', model: '', apiKey: '', analysisTimeoutMs: '' },
+        // dsh 重置回服务端当前值（角色/服务器/账号/设备名不重置，避免误清账号配置）。
+        dsh: {
+          role: all.data?.dsh.role ?? 'both',
+          serverUrl: all.data?.dsh.serverUrl ?? '',
+          email: all.data?.dsh.email ?? '',
+          password: '',
+          clearPassword: false,
+          deviceName: all.data?.dsh.deviceName ?? '',
+          allowedPorts: (all.data?.dsh.allowedPorts ?? [3800]).join(', '),
+        },
         status: Object.fromEntries(STATUS_FIELDS.map((f) => [f.key, ''])),
         kanban: '',
       };
     });
-    setTouched({ platforms: true, llm: true, status: true, kanban: true });
+    setTouched({ platforms: true, llm: true, dsh: true, status: true, kanban: true });
   };
 
   const statusFieldBadge = (field: (typeof STATUS_FIELDS)[number]) =>
@@ -621,6 +673,131 @@ export function SettingsDialog({
     </section>
   );
 
+  const renderDsh = () => (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">远程主机（dsh 通道）</h3>
+        <p className="text-xs text-muted-foreground">
+          dsh 通道经中继服务器转发（加密通道 + 端口转发），免 ssh、免公网端口。角色决定本机是否开放被连接：
+          host 只被连、client 只去连、both 两者皆可。账号与远端主机共用一套，保存即生效（角色切换热生效）。
+        </p>
+      </div>
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="dsh-role">
+            本机角色
+          </label>
+          <select
+            id="dsh-role"
+            className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
+            value={draft.dsh.role}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, dsh: { ...d.dsh, role: e.target.value as 'host' | 'client' | 'both' } }));
+              touch('dsh');
+            }}
+          >
+            <option value="both">both（既被连也去连，默认）</option>
+            <option value="host">host（只被别的 AgentLRay 连接）</option>
+            <option value="client">client（只去连别的 AgentLRay）</option>
+          </select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="dsh-server-url">
+            中继服务器地址
+          </label>
+          <Input
+            id="dsh-server-url"
+            placeholder="https://dsh.r2049.cn"
+            value={draft.dsh.serverUrl}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, dsh: { ...d.dsh, serverUrl: e.target.value } }));
+              touch('dsh');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            默认官方公共服务器；内网强控场景可填自托管地址。AgentLRay 不内置中继服务器。
+          </p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="dsh-email">
+            账号邮箱
+          </label>
+          <Input
+            id="dsh-email"
+            placeholder="user@example.com"
+            value={draft.dsh.email}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, dsh: { ...d.dsh, email: e.target.value } }));
+              touch('dsh');
+            }}
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="dsh-password">
+            账号密码
+          </label>
+          <Input
+            id="dsh-password"
+            type="password"
+            placeholder={all.data?.dsh.hasPassword ? '已保存，留空保持不变' : '中继服务器账号密码'}
+            value={draft.dsh.password}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, dsh: { ...d.dsh, password: e.target.value } }));
+              touch('dsh');
+            }}
+          />
+          {all.data?.dsh.hasPassword && draft.dsh.password === '' ? (
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={draft.dsh.clearPassword}
+                onChange={(e) => {
+                  setDraft((d) => ({ ...d, dsh: { ...d.dsh, clearPassword: e.target.checked } }));
+                  touch('dsh');
+                }}
+                className="h-3.5 w-3.5"
+              />
+              清除已保存的密码（重新填密码则覆盖）
+            </label>
+          ) : null}
+          <p className="text-[11px] text-muted-foreground">密码加密落盘，不回显</p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="dsh-device-name">
+            本机设备名
+          </label>
+          <Input
+            id="dsh-device-name"
+            placeholder="如：devbox"
+            value={draft.dsh.deviceName}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, dsh: { ...d.dsh, deviceName: e.target.value } }));
+              touch('dsh');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">在中继服务器上的设备标识（默认本机 hostname 短名）</p>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs text-muted-foreground" htmlFor="dsh-allowed-ports">
+            放行端口（被连接方允许访问本机哪些端口，逗号分隔）
+          </label>
+          <Input
+            id="dsh-allowed-ports"
+            placeholder="3800"
+            value={draft.dsh.allowedPorts}
+            onChange={(e) => {
+              setDraft((d) => ({ ...d, dsh: { ...d.dsh, allowedPorts: e.target.value } }));
+              touch('dsh');
+            }}
+          />
+          <p className="text-[11px] text-muted-foreground">
+            默认 3800（AgentLRay 默认端口）。远端 AgentLRay 跑其它端口时，在此放行并在对端主机里填同一端口。
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+
   const renderStatus = () => (
     <section className="space-y-3">
       <div>
@@ -736,6 +913,7 @@ export function SettingsDialog({
           <div className="min-w-0 border-t border-border pt-3 md:border-t-0 md:pt-0">
             {menu === 'platforms' && renderPlatforms()}
             {menu === 'llm' && renderLlm()}
+            {menu === 'dsh' && renderDsh()}
             {menu === 'status' && renderStatus()}
             {menu === 'kanban' && renderKanban()}
           </div>

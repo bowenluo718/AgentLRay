@@ -433,6 +433,22 @@ export interface PlatformsMirror {
   replaced: string[];
 }
 
+/** dsh 传输配置（GET /api/settings 的 dsh section）：中继服务器账号与本机角色。 */
+export interface DshSettings {
+  /** 本机角色：host=只被连 / client=只去连 / both=两者皆可。 */
+  role: 'host' | 'client' | 'both';
+  /** 中继服务器地址（默认官方 https://dsh.r2049.cn，可改自托管）。 */
+  serverUrl: string;
+  /** 中继服务器账号（邮箱）。 */
+  email: string;
+  /** 本机在中继服务器上的设备名。 */
+  deviceName: string;
+  /** 被连接方放行的本机端口（默认 [3800]）。 */
+  allowedPorts: number[];
+  /** true when a password is stored (the password itself never leaves the server) */
+  hasPassword: boolean;
+}
+
 /** GET /api/settings 全量响应（web 设置面板一次读齐所有 section）。 */
 export interface AllSettings {
   ui: UiSettings;
@@ -441,6 +457,7 @@ export interface AllSettings {
   status: StatusConfig;
   kanban: KanbanConfig;
   llm: LlmSettings;
+  dsh: DshSettings;
   platforms: PlatformsMirror;
 }
 
@@ -470,6 +487,15 @@ export type SettingsPatch = {
   status?: Partial<Record<'recentActivityMs' | 'activeWorkCeilMs' | 'historyCeilMs', number>>;
   kanban?: { maxPerStatus?: number };
   llm?: { baseUrl: string; model: string; apiKey?: string; analysisTimeoutMs?: number };
+  /** dsh section：password 语义同 llm.apiKey（未传=保留，''=清除，否则替换）。 */
+  dsh?: {
+    role?: 'host' | 'client' | 'both';
+    serverUrl?: string;
+    email?: string;
+    password?: string;
+    deviceName?: string;
+    allowedPorts?: number[];
+  };
 };
 
 /** 空串 = 清除该平台配置（回退默认命令名）。 */
@@ -539,12 +565,11 @@ export function getInbound(): Promise<InboundInfo> {
   return fetchJson('/api/inbound', { local: true });
 }
 
-/** POST /api/hosts — 新建主机。 */
-export function createHost(body: {
-  id: string;
+/** 主机连接目标：ssh 规格或 dsh 规格（type 决定用哪一组）。 */
+export interface HostBody {
   label: string;
-  type?: 'ssh';
-  ssh: {
+  type?: 'ssh' | 'dsh';
+  ssh?: {
     host: string;
     user?: string;
     port?: number | null;
@@ -553,27 +578,19 @@ export function createHost(body: {
     identityKey?: string;
     useAgent?: boolean;
   };
-}): Promise<HostInfo> {
+  dsh?: {
+    deviceId: string;
+    remoteAgentLrayPort?: number;
+  };
+}
+
+/** POST /api/hosts — 新建主机。 */
+export function createHost(body: HostBody & { id: string }): Promise<HostInfo> {
   return requestJson('/api/hosts', 'POST', body, { local: true });
 }
 
 /** PUT /api/hosts/:id — 编辑主机（全量替换字段；id 不可改）。 */
-export function updateHost(
-  id: string,
-  body: {
-    label: string;
-    type?: 'ssh';
-    ssh: {
-      host: string;
-      user?: string;
-      port?: number | null;
-      remoteAgentLrayPort?: number;
-      identityFile?: string;
-      identityKey?: string;
-      useAgent?: boolean;
-    };
-  }
-): Promise<HostInfo> {
+export function updateHost(id: string, body: HostBody): Promise<HostInfo> {
   return requestJson(`/api/hosts/${encodeURIComponent(id)}`, 'PUT', body, { local: true });
 }
 
@@ -590,22 +607,55 @@ export interface HostTestResult {
 }
 
 /** POST /api/hosts/test — 测试「未保存」的主机配置（表单「测试连接」）：
- *  按 body 的 ssh 规格建隧道→探测→关，不持久化。 */
-export function testHostSpec(body: {
-  id: string;
-  label: string;
-  type?: 'ssh';
-  ssh: {
-    host: string;
-    user?: string;
-    port?: number | null;
-    remoteAgentLrayPort?: number;
-    identityFile?: string;
-    identityKey?: string;
-    useAgent?: boolean;
-  };
-}): Promise<HostTestResult> {
+ *  按 body 的规格建隧道→探测→关，不持久化。 */
+export function testHostSpec(body: HostBody & { id: string }): Promise<HostTestResult> {
   return requestJson('/api/hosts/test', 'POST', body, { local: true });
+}
+
+// ---------- dsh 传输（ds-harness-remote）----------
+
+/** GET /api/dsh/status — 本机 dsh 状态（角色 / 服务器 / 是否在线 / 被连 peer）。 */
+export interface DshStatus {
+  role: 'host' | 'client' | 'both';
+  serverUrl: string;
+  email: string;
+  hasPassword: boolean;
+  deviceName: string;
+  allowedPorts: number[];
+  /** 被连接方服务是否在运行。 */
+  running: boolean;
+  /** 是否已连上中继服务器。 */
+  connected: boolean;
+  deviceId: string | null;
+  /** 当前连入本机的 dsh 对端设备 id。 */
+  peers: string[];
+  lastError: string | null;
+}
+
+/** GET /api/dsh/devices — 中继服务器上当前账号可见的设备（本机已排除）。 */
+export interface DshDevice {
+  deviceId: string;
+  name: string;
+  platform: string;
+  membershipId: string;
+  online: boolean;
+  lastSeenAt: number | null;
+}
+
+export function getDshStatus(): Promise<DshStatus> {
+  return fetchJson('/api/dsh/status', { local: true });
+}
+
+export function getDshDevices(): Promise<DshDevice[]> {
+  return fetchJson('/api/dsh/devices', { local: true });
+}
+
+/** POST /api/dsh/test — 测试未保存的 dsh 目标（建隧道 → 探测 → 关）。 */
+export function testDshSpec(body: {
+  deviceId: string;
+  remoteAgentLrayPort?: number;
+}): Promise<HostTestResult> {
+  return requestJson('/api/dsh/test', 'POST', body, { local: true });
 }
 
 /** POST /api/hosts/:id/connect — 建立并保持隧道（前端切换当前选中主机用）。 */

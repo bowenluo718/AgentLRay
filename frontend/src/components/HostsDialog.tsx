@@ -91,7 +91,12 @@ function InboundBadge({ count, peers }: { count: number; peers: InboundPeer[] })
           {peers.map((p) => (
             <div key={p.peerId} className="flex items-center justify-between gap-2 text-xs">
               <div className="min-w-0">
-                <div className="truncate font-medium text-foreground">{p.label}</div>
+                <div className="truncate font-medium text-foreground">
+                  {p.label}
+                  <span className="ml-1 rounded bg-muted px-1 text-[10px] font-normal text-muted-foreground">
+                    {p.via === 'dsh' ? 'dsh' : 'ssh'}
+                  </span>
+                </div>
                 <div className="truncate text-muted-foreground">
                   {p.peerId}
                   {p.version ? ` · v${p.version}` : ''}

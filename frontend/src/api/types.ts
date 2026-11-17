@@ -106,12 +106,22 @@ export interface HostSsh {
   useAgent: boolean;
 }
 
+/** dsh 连接目标：中继服务器上的设备 id + 远端 AgentLRay 端口。 */
+export interface HostDsh {
+  /** 中继服务器上的设备 id（连接目标即设备身份，不填网络地址）。 */
+  deviceId: string;
+  /** 远端 AgentLRay 监听端口（默认 3800）。 */
+  remoteAgentLrayPort: number;
+}
+
 /** GET /api/hosts 单条。local 内建恒在（ssh 为 null，status 恒 connected）。 */
 export interface HostInfo {
   id: string;
   label: string;
   type: 'ssh' | 'dsh';
   ssh: HostSsh | null;
+  /** dsh 目标（type=dsh 时非 null；ssh 目标为 null）。 */
+  dsh: HostDsh | null;
   status: HostStatus;
   error: string | null;
   version: { bootId: string; version?: string } | null;
@@ -513,6 +523,8 @@ export interface InboundPeer {
   label: string;
   version: string | null;
   bootId: string | null;
+  /** 连接来源：ssh = ssh 隧道上报；dsh = dsh 加密通道直连。 */
+  via: 'ssh' | 'dsh';
   connectedAt: string;
   lastSeen: string;
 }

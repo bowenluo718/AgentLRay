@@ -82,12 +82,11 @@ test('normalizeHost：identityKeyEnc 保留原文（不 trim）；明文 identit
   assert.equal(h2.ssh.identityKeyEnc, '');
 });
 
-test('normalizeHost：label 必填、ssh.host 必填、端口范围校验、dsh 预留', () => {
+test('normalizeHost：label 必填、ssh.host 必填、端口范围校验', () => {
   assert.throws(() => normalizeHost({ id: 'dev', label: '', ssh: { host: 'h' } }), /label 必填/);
   assert.throws(() => normalizeHost({ id: 'dev', label: 'x', ssh: { host: '' } }), /ssh.host 必填/);
   assert.throws(() => normalizeHost({ id: 'dev', label: 'x', ssh: { host: 'h', port: 0 } }), /1–65535/);
   assert.throws(() => normalizeHost({ id: 'dev', label: 'x', ssh: { host: 'h', port: 70000 } }), /1–65535/);
-  assert.throws(() => normalizeHost({ id: 'dev', label: 'x', type: 'dsh', ssh: { host: 'h' } }), /dsh 传输尚未支持/);
 });
 
 test('createHost / listHosts / getHost：写入 hosts.json 并可读回', async () => {

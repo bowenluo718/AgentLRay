@@ -21,6 +21,8 @@ const { shutdownHosts, setSelfIdentity } = require('./lib/hosts');
 const mountProxyRoutes = require('./lib/routes/proxy');
 const mountHostsRoutes = require('./lib/routes/hosts');
 const mountInboundRoutes = require('./lib/routes/inbound');
+const mountDshRoutes = require('./lib/routes/dsh');
+const { startDshHostService, stopDshHostService } = require('./lib/dsh/host');
 const pkg = require('./package.json');
 
 const app = express();
@@ -79,6 +81,7 @@ mountSettingsRoutes(app, { status: { setStatusConfig } });
 mountPlatformsRoutes(app);
 mountHostsRoutes(app);
 mountInboundRoutes(app);
+mountDshRoutes(app);
 
 // SPA fallback: unknown paths render the React UI shell
 app.get('*', (req, res) => {
@@ -97,6 +100,18 @@ async function boot() {
   } catch {
     // 配置加载异常 → 维持默认时间窗口，不阻塞服务。
   }
+  // dsh 被连接方服务：角色含 host 时随进程常驻（design D7）——独立于「当前选中主机」，
+  // 不占连接槽。启动失败（未配置账号 / 中继服务器不可达）不阻塞本地服务。
+  try {
+    const { started, status } = await startDshHostService();
+    if (started) {
+      console.log(`  dsh 被连接方: ${status.serverUrl}（设备 ${status.deviceName}，放行端口 ${status.allowedPorts.join(',')}）`);
+    } else if (status.reason) {
+      console.log(`  dsh 被连接方未启动: ${status.reason}`);
+    }
+  } catch (error) {
+    console.log(`  dsh 被连接方启动失败: ${error.message}`);
+  }
   app.listen(PORT, HOST, () => {
     console.log(`AgentLRay listening on http://${HOST}:${PORT}`);
     for (const [id, p] of Object.entries(PLATFORMS)) {
@@ -111,11 +126,13 @@ async function boot() {
   });
 }
 
-// 进程退出兜底：kill 所有 ssh 隧道子进程，防孤儿（design R4-Q1）。
+// 进程退出兜底：kill 所有 ssh 隧道子进程，防孤儿（design R4-Q1）；dsh 被连接方服务
+// 随进程关闭（连接与 loopback 端点一并释放）。
 process.on('exit', shutdownHosts);
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     shutdownHosts();
+    void stopDshHostService();
     process.exit(0);
   });
 }
