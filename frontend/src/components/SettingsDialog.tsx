@@ -107,7 +107,7 @@ export function SettingsDialog({
   const selectedHostId = useAppStore((s) => s.selectedHostId);
   const queryClient = useQueryClient();
   // 单一 GET /api/settings：一次读齐 dirs / cliBins / platforms / status / kanban / llm。
-  // 仅在弹窗打开时拉取（SettingsDialog 常驻挂载于 Sidebar，缺省关闭不请求）。
+  // 仅在弹窗打开时拉取（SettingsDialog 常驻挂载于 App，缺省关闭不请求）。
   const all = useQuery({ queryKey: ['settings'], queryFn: getSettings, enabled: open });
   // 平台卡片必须看到含未挂载条目的完整 catalog（含 broken），否则「启用」无从出现。
   // 同样仅在打开时拉取，避免与 App 的 usePlatforms（['platforms']）重复打 /api/platforms。

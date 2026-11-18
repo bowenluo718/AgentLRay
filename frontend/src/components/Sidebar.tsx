@@ -6,31 +6,25 @@ import type { PointerEvent } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { SessionFiltersDialog } from '@/components/SessionFiltersDialog';
-import { SettingsDialog } from '@/components/SettingsDialog';
 import { HostsDialog } from '@/components/HostsDialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useTheme } from '@/hooks/useTheme';
-import { platformLabel, useAppStore, SIDEBAR_MIN_WIDTH } from '@/store';
+import { useAppStore, SIDEBAR_MIN_WIDTH } from '@/store';
 import { CmdkDialog } from '@/views/sessions/CmdkDialog';
 import { SessionList } from '@/views/sessions/SessionList';
 
-export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
-  const platform = useAppStore((s) => s.platform);
-  const selectedPlatforms = useAppStore((s) => s.selectedPlatforms);
-  const platforms = useAppStore((s) => s.platforms);
+export function Sidebar({ onNavigate, onOpenSettings }: { onNavigate?: () => void; onOpenSettings?: () => void }) {
   const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
   const setSidebarWidth = useAppStore((s) => s.setSidebarWidth);
   const { theme, setTheme } = useTheme();
   // 拖拽起点：记录边栏初始宽度与指针起始 x，横向位移换算宽度增量。
   const dragStart = useRef<{ x: number; width: number } | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [hostsOpen, setHostsOpen] = useState(false);
   const [filterTerm, setFilterTerm] = useState('');
   const [cmdkOpen, setCmdkOpen] = useState(false);
   const [cmdkSeed, setCmdkSeed] = useState('');
-  const multi = selectedPlatforms.length > 0;
 
   // 主机入口（侧栏底部固定）：当前使用本地时文本「远程连接」，否则显示当前连接主机名。
   const hosts = useAppStore((s) => s.hosts);
@@ -89,24 +83,13 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       aria-label="会话导航"
       className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-hidden border-r border-border bg-panel-alt/95 p-4 pb-3"
     >
-      <div className="flex items-center justify-between">
+      {/* 顶部栏仅桌面端显示：设置/主题/折叠按钮；移动端设置按钮与主体切换按钮一起放在全页顶栏（App.tsx）。 */}
+      <div className="hidden items-center justify-between md:flex">
         <div>
           <h1 className="text-lg font-semibold tracking-wide">AgentLRay</h1>
-          <div className="text-xs text-muted-foreground">
-            {multi ? `全部平台（${selectedPlatforms.length}）` : platformLabel(platforms, platform)} sessions
-          </div>
         </div>
         <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            title="会话筛选与分组"
-            aria-label="会话筛选与分组"
-            onClick={() => setFiltersOpen(true)}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="icon" title="设置" aria-label="设置" onClick={() => setSettingsOpen(true)}>
+          <Button variant="outline" size="icon" title="设置" aria-label="设置" onClick={onOpenSettings}>
             <Settings className="h-4 w-4" />
           </Button>
           <Button
@@ -131,35 +114,47 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </Button>
         </div>
       </div>
-      <div className="relative">
-        <Input
-          type="search"
-          value={filterTerm}
-          onChange={(e) => setFilterTerm(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              const q = filterTerm.trim();
-              if (!q) return;
-              setCmdkSeed(q);
-              setCmdkOpen(true);
-            }
-          }}
-          placeholder="输入过滤列表 · 回车全文搜索（空格分隔多关键词，全部命中才返回）"
-          title="直接输入：按 ID/文件名/首条消息过滤左侧列表；按回车：打开全平台全文搜索 — 空格分隔多关键词，全部命中才返回"
-          className="pr-10 text-xs"
-        />
-        <button
-          type="button"
-          onClick={() => {
-            setCmdkSeed('');
-            setCmdkOpen(true);
-          }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
-          title="全平台全局搜索（⌘K / Ctrl+K）"
+      <div className="flex items-center gap-2">
+        <Button
+          variant="outline"
+          size="icon"
+          title="会话筛选与分组"
+          aria-label="会话筛选与分组"
+          onClick={() => setFiltersOpen(true)}
+          className="shrink-0"
         >
-          ⌘K
-        </button>
+          <SlidersHorizontal className="h-4 w-4" />
+        </Button>
+        <div className="relative min-w-0 flex-1">
+          <Input
+            type="search"
+            value={filterTerm}
+            onChange={(e) => setFilterTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                const q = filterTerm.trim();
+                if (!q) return;
+                setCmdkSeed(q);
+                setCmdkOpen(true);
+              }
+            }}
+            placeholder="输入过滤列表 · 回车全文搜索（空格分隔多关键词，全部命中才返回）"
+            title="直接输入：按 ID/文件名/首条消息过滤左侧列表；按回车：打开全平台全文搜索 — 空格分隔多关键词，全部命中才返回"
+            className="pr-10 text-xs"
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setCmdkSeed('');
+              setCmdkOpen(true);
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-border px-1 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+            title="全平台全局搜索（⌘K / Ctrl+K）"
+          >
+            ⌘K
+          </button>
+        </div>
       </div>
       <SessionList filterTerm={filterTerm} onNavigate={onNavigate} />
       {/* 主机入口（固定在侧栏底部）：mt-auto 使其无论 SessionList 是否挂载都贴底；
@@ -209,7 +204,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
         ) : null}
       </div>
       <SessionFiltersDialog open={filtersOpen} onOpenChange={setFiltersOpen} />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <HostsDialog open={hostsOpen} onOpenChange={setHostsOpen} />
       <CmdkDialog open={cmdkOpen} onOpenChange={setCmdkOpen} seedQuery={cmdkSeed} onNavigate={onNavigate} />
       {/* 右缘拖拽手柄：横向拖拽调宽，拖到最小宽度以下折叠。 */}

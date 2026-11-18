@@ -1,9 +1,10 @@
-import { ArrowLeft, Copy, Moon, PanelLeft, Sun } from 'lucide-react';
+import { ArrowLeft, Copy, Moon, PanelLeft, Settings, Sun } from 'lucide-react';
 import type { CSSProperties } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from '@/components/Sidebar';
+import { SettingsDialog } from '@/components/SettingsDialog';
 import { HostConnectingView } from '@/components/HostConnectingView';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -49,6 +50,7 @@ export default function App() {
   const applyRemoteSelection = useAppStore((s) => s.applyRemoteSelection);
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // 刷新后重连记忆的远端主机（问题 1/2）。只跑一次：hosts 首帧拉取到位后，
   // 若记忆的是远端，重新 connectHost 以 X-Host-Id 访问其数据。不 reload（防循环）。
   const didRestoreHost = useRef(false);
@@ -235,6 +237,15 @@ export default function App() {
           <div className="flex items-center gap-1">
             <button
               type="button"
+              title="设置"
+              aria-label="设置"
+              className="inline-flex min-h-11 items-center justify-center rounded px-2 text-muted-foreground hover:text-foreground focus-visible:outline"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
               title={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
               aria-label={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
               className="inline-flex min-h-11 items-center justify-center rounded px-2 text-muted-foreground hover:text-foreground focus-visible:outline"
@@ -260,7 +271,7 @@ export default function App() {
               navigationOpen ? 'flex' : 'hidden',
               sidebarCollapsed && 'md:hidden'
             )}>
-            <Sidebar onNavigate={returnToContent} />
+            <Sidebar onNavigate={returnToContent} onOpenSettings={() => setSettingsOpen(true)} />
           </div>
           <main className={cn('min-h-0 min-w-0 flex-col overflow-hidden md:flex', navigationOpen ? 'hidden' : 'flex')}>
             <Tabs
@@ -308,6 +319,7 @@ export default function App() {
             </Tabs>
           </main>
         </div>
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       </div>
     </TooltipProvider>
   );

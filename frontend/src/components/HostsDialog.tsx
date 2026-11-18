@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, Settings2 } from 'lucide-react';
-import { getHosts, deleteHost as apiDeleteHost } from '@/api/client';
+import { getHosts, getDshDevices, deleteHost as apiDeleteHost } from '@/api/client';
 import type { HostInfo, HostStatus, InboundPeer } from '@/api/types';
 import { HOST_STATUS_DOT, HOST_STATUS_LABEL } from '@/lib/host-status';
 import { useAppStore, REMEMBERED_HOST_KEY } from '@/store';
@@ -135,6 +135,8 @@ export function HostsDialog({
 }) {
   const queryClient = useQueryClient();
   const hosts = useQuery({ queryKey: ['hosts'], queryFn: getHosts, enabled: open });
+  // dsh 设备列表（中继服务器上当前账号可见的设备）：用于把主机的 deviceId 渲染成设备名/在线态。
+  const devices = useQuery({ queryKey: ['dsh-devices'], queryFn: getDshDevices, enabled: open, retry: false });
   const selectedHostId = useAppStore((s) => s.selectedHostId);
   const hostStatus = useAppStore((s) => s.hostStatus);
   const hostError = useAppStore((s) => s.hostError);
@@ -215,6 +217,14 @@ export function HostsDialog({
   const data = hosts.data ?? [];
   const selfLabel = inbound?.self?.label;
 
+  // dsh 主机行说明：匹配设备列表渲染为「设备名（在线/离线）· deviceId 前 8 位」。
+  // 匹配不到（设备离线/已移除/账号未配）回退显示原始 deviceId。
+  const dshLabel = (deviceId: string): string => {
+    const d = (devices.data ?? []).find((it) => it.deviceId === deviceId);
+    if (!d) return deviceId;
+    return `${d.name}（${d.online ? '在线' : '离线'}）· ${deviceId.slice(0, 8)}`;
+  };
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -243,8 +253,8 @@ export function HostsDialog({
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{isLocal ? '本机' : (h.label || h.id)}</span>
-                      {!isLocal ? <span className="rounded px-1 text-[10px] text-muted-foreground">{h.id}</span> : null}
-                      <StatusBadge status={st} error={h.error ?? hostError[h.id] ?? null} />
+                      {!isLocal ? <span className="rounded px-1 text-[10px] text-muted-foreground">{h.id}</span> : (selfLabel ?? 'local')}
+                      {!isLocal ? <StatusBadge status={st} error={h.error ?? hostError[h.id] ?? null} />  : null}                      
                     </div>
                     {h.ssh ? (
                       <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
@@ -252,11 +262,11 @@ export function HostsDialog({
                         {h.ssh.host}
                         {h.ssh.port ? `:${h.ssh.port}` : ''} → 127.0.0.1:{h.ssh.remoteAgentLrayPort}
                       </div>
-                    ) : (
+                    ) : h.dsh ? (
                       <div className="mt-0.5 text-[11px] text-muted-foreground">
-                        本机 · {selfLabel ?? 'local'}
+                        {dshLabel(h.dsh.deviceId)}
                       </div>
-                    )}
+                    ) : null }
                   </div>
                   {isLocal ? (
                     <InboundBadge count={inbound?.count ?? 0} peers={inbound?.peers ?? []} />
@@ -272,7 +282,7 @@ export function HostsDialog({
                           {disconnectMut.isPending && disconnectMut.variables === h.id ? '断开中…' : '断开'}
                         </TextAction>
                       ) : (
-                        <TextAction onClick={() => onConnect(h.id)} title="连接该主机（同顶栏切换）">
+                        <TextAction onClick={() => onConnect(h.id)} title="连接该主机（自动断开其他已连接远程主机）">
                           连接
                         </TextAction>
                       )}
