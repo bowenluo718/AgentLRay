@@ -10,7 +10,7 @@ With Node 22.13+ and the project dependencies installed:
 npm test
 npm run build:ui
 npm run lint
-git diff --exit-code -- public/js/pure.js
+git diff --exit-code -- lib/generated/diagnostics.cjs
 node scripts/demo-diagnostics.cjs
 ```
 
@@ -31,7 +31,7 @@ Open the printed URL and select the OMP session marked `[Synthetic]`:
 | Diagnostics/events/OMP/review focused suites | 84 passed |
 | UI build | TypeScript and Vite passed |
 | Lint | Exit 0; existing 91 warnings / 159 informational findings |
-| Legacy generated bundle | No drift |
+| Generated diagnostics bundle | No drift (regenerated from `frontend/src/views/sessions/diagnostics.ts`) |
 | Review persistence | Save, refresh, session isolation and cross-tab updates passed |
 | Review invalidation | New failure/full-result changes reopen review; stale notes remain distinguishable |
 | Storage failure | Read denial, corrupt records and write failure visibly reported; failed save never claims success |
@@ -70,7 +70,9 @@ The demo-only guide is height-limited on short screens. Expanded guide checks le
 
 ## Review portability acceptance
 
-The next increment adds explicit current-session export/import, not whole-history backup. Run `node --test test/review-transfer.test.js` for its 17 cases; the combined focused diagnostic/review suite contains 103 tests and the full suite contains 233 tests. Earlier counts above record earlier releases, not the current suite size.
+The next increment adds explicit current-session export/import, not whole-history backup. Run `node --require ./test/setup-env.cjs --test test/review-transfer.test.js` for its 17 cases.
+
+**Current suite size (2026-11-19):** `npm test` runs 727 tests across 57 files, all passing. The counts recorded in the dated sections above describe earlier releases, not the current suite.
 
 Verified using synthetic notes and isolated browser contexts only:
 

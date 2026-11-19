@@ -10,7 +10,6 @@ Read existing session logs locally. Connect tool calls, background exits and che
 
 [**Try the demo**](https://bowenluo718.github.io/AgentLRay/) · [Quick start](#quick-start) · [Evidence & limits](#evidence--limits) · [Roadmap](docs/ROADMAP.md) · [中文](README.zh-CN.md)
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/bowenluo718/AgentLRay/test.yml?label=tests)](https://github.com/bowenluo718/AgentLRay/actions/workflows/test.yml)
 [![npm](https://img.shields.io/npm/v/@bowenluo718/agent-lray)](https://www.npmjs.com/package/@bowenluo718/agent-lray)
 ![Node.js](https://img.shields.io/badge/Node.js-22.13+-339933)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -102,13 +101,16 @@ There are **8 historical failures**; **7 remain pending in 2 events**, and **1 h
 - **Checks around edits.** Distinguish before, overlapping and later checks. A successful pipeline wrapper does not prove its test fragment passed.
 - **What remains unknown.** Surface missing, running, cancelled and ambiguous results rather than turning an incomplete log green.
 - **The surrounding session.** Browse tool arguments/results, traces and sub-agents; search across platforms; inspect per-turn tokens and cost when reported.
-- **Optional tools, not prerequisites.** Keep review notes, transfer exact evidence-matched reviews, curate prompts or archive sessions. Automatic evidence works without them.
+- **Remote hosts.** Connect to another machine's AgentLRay over an `ssh` tunnel or a dsh encrypted channel; the same UI browses its logs. Host management and inbound peers stay local to each machine.
+- **Optional tools, not prerequisites.** Keep review notes, transfer exact evidence-matched reviews, or curate prompts. Automatic evidence works without them.
 
 [Complete feature catalog and screenshot gallery →](docs/usage.md#features) · [Diagnostic rules and boundaries →](docs/diagnostics.md)
 
 ## Compatibility
 
-**Dashboard:** OpenClaw, Codex, Claude Code, Hermes, OMP, DeepSeek Harness and Gemini CLI. Hermes uses SQLite; the other six adapters read JSONL-backed logs. Compressed DeepSeek Harness logs require Node.js ≥ 22.15.
+**Dashboard:** OpenClaw, Codex, Claude Code, Hermes, OMP, DeepSeek Harness and Gemini CLI. Hermes uses SQLite; the other six adapters read JSONL-backed logs. Compressed DeepSeek Harness logs require Node.js ≥ 22.15. Custom platforms load from a project `platforms/` directory or `~/.agentlray/platforms` at runtime.
+
+**Multi-host:** connect to another machine's AgentLRay over an `ssh` tunnel or a dsh encrypted channel; host management and inbound peers stay local to each machine.
 
 **Offline `inspect`:** Codex, OMP and Claude Code only; one stable UTF-8 JSONL file, up to 64 MiB. Known adapter loss produces incomplete coverage, not a clean result. Dashboard support does not imply equal diagnostic coverage across formats.
 

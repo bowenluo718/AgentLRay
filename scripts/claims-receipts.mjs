@@ -52,6 +52,7 @@ function blockKeys(yaml, anchor) {
   for (let i = start + 1; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim()) continue;
+    if (/^\s*#/.test(line)) continue; // comment
     if (/^ {4}/.test(line)) continue; // nested under the key above
     const match = line.match(/^ {2}([a-z][\w-]*):/);
     if (!match) break; // dedented back out of the block
@@ -111,16 +112,44 @@ const receipts = {
     return `${report.summary.failureRecords} historical failures · ${report.summary.pendingRecords} pending records · ${report.summary.pendingEvents} events · ${report.summary.recoveredRecords} matching recovery · complete=${report.complete} · both README excerpts ${agrees ? 'agree' : 'DISAGREE'}`;
   },
 
-  // README Development: "CI (.github/workflows/test.yml) runs on Node 22 for
-  // every push and pull request to master, in four steps".
-  'ci-test-workflow': () => {
-    const yaml = read('.github/workflows/test.yml');
+  // README/Features: per-turn ledger sums input + output + cache read + cache
+  // write and only shows a cost column when a platform reports cost.
+  // buildTurnLedger lives in frontend/src/lib/pure.ts (TypeScript), so it is
+  // transformed with the frontend's esbuild; run `npm ci` in frontend/ first.
+  'ledger-fields': async () => {
+    const esbuild = require(path.join(ROOT, 'frontend/node_modules/esbuild'));
+    const Module = require('node:module');
+    const source = read('frontend/src/lib/pure.ts');
+    const { code } = esbuild.transformSync(source, { loader: 'ts', format: 'cjs', target: 'node22' });
+    const mod = new Module('pure');
+    mod._compile(code, 'pure.js');
+    const { buildTurnLedger } = mod.exports;
+    const all = platforms();
+    const one = async (id, file) => {
+      const parsed = await all[id].parse(path.join(ROOT, file));
+      const ledger = buildTurnLedger(parsed.messages);
+      const r = ledger.rows[0];
+      const tok = r.inputTokens + r.outputTokens + r.cacheReadTokens + r.cacheWriteTokens;
+      const cost = ledger.hasCost ? `cost $${r.cost} reported` : 'cost not reported';
+      return `${id}: ${ledger.rows.length} row, ${tok} tok = ${r.inputTokens} in + ${r.outputTokens} out + ${r.cacheReadTokens} cache read + ${r.cacheWriteTokens} cache write, ${cost}, ${r.toolCalls} tool call, ${plural(r.toolErrors, 'error')}`;
+    };
+    return [
+      await one('dsh', 'test/fixtures/home/.dsh/sessions/--fixtures-project-delta--/dsh-fixture-session-0001/session.jsonl'),
+      await one('omp', 'test/fixtures/home/.omp/agent/sessions/-fixtures-project-gamma/2026-01-20T08-00-00-000Z_019a0000-0000-7000-8000-00000000aaaa.jsonl'),
+    ].join(' · ');
+  },
+
+  // README/usage Development: the only workflow builds and deploys the demo;
+  // tests and lint run locally (there is no CI test job).
+  'demo-pages-workflow': () => {
+    const workflows = readdirSync(path.join(ROOT, '.github/workflows')).filter((f) => f.endsWith('.yml'));
+    const yaml = read('.github/workflows/pages.yml');
     const jobs = blockKeys(yaml, 'jobs:');
     const triggers = blockKeys(yaml, 'on:');
-    const runs = [...yaml.matchAll(/^\s*- run: (.*)$/gm)].map((match) => match[1].split(' #')[0].trim());
     const node = yaml.match(/node-version: '?([\d.x]+)'?/)[1];
     const branches = [...new Set([...yaml.matchAll(/branches: \[([^\]]*)\]/g)].map((match) => match[1]))];
-    return `${jobs.length} job (${jobs.join(', ')}) on Node ${node} · ${runs.length} steps: ${runs.join(' | ')} · on ${triggers.join(', ')} of ${branches.join('/')}`;
+    const demo = /VITE_DEMO=1/.test(yaml);
+    return `${workflows.length} workflow (${workflows.join(', ')}) · ${jobs.length} job (${jobs.join(', ')}) on Node ${node} · demo build: ${demo ? 'yes' : 'no'} · on ${triggers.join(', ')} of ${branches.join('/')}`;
   },
 
   // README Install: "npx @bowenluo718/agent-lray".
@@ -149,17 +178,20 @@ const receipts = {
   },
 
   // README Supported Log Formats: "Reading compressed dsh logs requires
-  // Node.js ≥ 22.15 (built-in zstd)".
+  // Node.js ≥ 22.15 (built-in zstd)". The zstd handling now lives in the
+  // shared layer (dsh is a project platform).
   'dsh-zstd-floor': () => {
-    const dsh = read('lib/platforms/dsh.js');
-    const floor = dsh.match(/Node\.js >= ?([\d.]+)/)[1];
-    const gated = /HAS_NODE_ZSTD = typeof zlib\.zstdDecompressSync === 'function'/.test(dsh);
+    const zstd = read('lib/platforms/shared/zstd.js');
+    const floor = zstd.match(/Node\.js >= ?([\d.]+)/)[1];
+    const gated = /HAS_NODE_ZSTD = typeof zlib\.zstdDecompressSync === 'function'/.test(zstd);
     const listed = read(README).includes(`≥ ${floor}`);
-    return `${floor} · dsh.js message "Node.js >= ${floor}" + runtime zstd gate: ${gated ? 'yes' : 'no'} · ${README} "≥ ${floor}": ${listed ? 'ok' : 'MISSING'}`;
+    return `${floor} · shared/zstd.js message "Node.js >= ${floor}" + runtime zstd gate: ${gated ? 'yes' : 'no'} · ${README} "≥ ${floor}": ${listed ? 'ok' : 'MISSING'}`;
   },
 
   // README Development: "Tests live in test/ and use Node's built-in test
-  // runner — no extra dependencies."
+  // runner — no extra dependencies." Runtime deps (express, @agentlray/shared)
+  // are reached through ../server.js or the shared alias, so no test-only
+  // dependency exists; any other third-party require would be flagged.
   'tests-node-only': () => {
     const dir = path.join(ROOT, 'test');
     const files = readdirSync(dir).filter((file) => file.endsWith('.js'));
@@ -169,10 +201,18 @@ const receipts = {
       for (const match of source.matchAll(/require\('([^']+)'\)/g)) specifiers.add(match[1]);
     }
     const all = [...specifiers];
-    const builtins = all.filter((specifier) => specifier.startsWith('node:'));
-    const relative = all.filter((specifier) => specifier.startsWith('.'));
-    const thirdParty = all.filter((specifier) => !specifier.startsWith('node:') && !specifier.startsWith('.'));
-    return `${files.length} files in test/ · ${all.length} distinct requires: ${builtins.length} node builtins, ${relative.length} relative, ${thirdParty.length} third-party${thirdParty.length ? ` (${thirdParty.join(', ')})` : ''}`;
+    const builtinNames = new Set(require('node:module').builtinModules);
+    const builtins = all.filter((s) => s.startsWith('node:') || builtinNames.has(s));
+    const relative = all.filter((s) => s.startsWith('.'));
+    const shared = all.filter((s) => s.startsWith('@agentlray/shared'));
+    // Runtime dependencies the tests set up in-process (an Express app for the
+    // proxy/inbound/dsh routes); not test-only packages.
+    const runtimeDeps = new Set(['express']);
+    const testOnly = all.filter(
+      (s) =>
+        !builtins.includes(s) && !relative.includes(s) && !shared.includes(s) && !runtimeDeps.has(s)
+    );
+    return `${files.length} files in test/ · ${all.length} distinct requires: ${builtins.length} node builtins, ${relative.length} relative, ${shared.length} shared alias, ${testOnly.length} test-only third-party${testOnly.length ? ` (${testOnly.join(', ')})` : ''}`;
   },
 
   // Deliberate: the README names no version, so no published number can go

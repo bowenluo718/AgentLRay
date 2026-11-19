@@ -1,9 +1,10 @@
 # AgentLRay Architecture
 
-> This document describes the actual, current implementation (derived from the
-> repository at `9755ec0`). It complements the feature/theme docs in this
-> directory: [usage](usage.md), [execution evidence](diagnostics.md),
+> This document describes the actual, current implementation (baseline
+> `c7fdb8f`). It complements the feature/theme docs in this directory:
+> [usage](usage.md), [execution evidence](diagnostics.md),
 > [offline inspect](offline-inspect.md) and [single-session forensics](session-forensics.md).
+> Accepted design tradeoffs live in [design/](design/README.md).
 > A Chinese translation lives in [architecture.zh-CN.md](architecture.zh-CN.md).
 
 AgentLRay is a local web dashboard for inspecting the execution evidence your
@@ -11,7 +12,9 @@ coding agents already record. It reads the native session logs of OpenClaw,
 Codex, Claude Code, Hermes, OMP, DeepSeek Harness and Gemini CLI, normalizes
 them into one message model, and renders a unified browser. Everything runs on
 your machine against your own log files; the core inspection paths make no
-model calls and upload nothing.
+model calls and upload nothing. Beyond the local process, it can connect to a
+remote AgentLRay instance over an `ssh` tunnel or a dsh encrypted channel
+(multi-host).
 
 ## 1. Design goals
 
@@ -23,63 +26,90 @@ model calls and upload nothing.
   insights, prompts, tool audit, export, OTLP, CLI) are written once against
   that model.
 - **Platform registry as single source of truth.** Adding a platform is one
-  adapter file plus one registration; nothing else changes. Custom platforms
-  plug in at runtime without touching the source.
-- **Frontend logic authored once, shared everywhere.** `pure.ts` and
-  `markdown.ts` are the single source for formatters/trace builder/markdown;
-  they are baked into the frozen legacy UI and reused by the Node test runner.
-- **Diagnostics rules authored once.** `diagnostics.ts` is the single rule
-  source; it is bundled into `lib/generated/diagnostics.cjs` so the offline CLI
-  and the React UI apply exactly the same judgement.
+  adapter directory plus one declaration; nothing else changes. Platforms come
+  from three sources (package / project / user) and custom ones plug in at
+  runtime without touching the source.
+- **Diagnostics rules authored once.** `frontend/src/views/sessions/diagnostics.ts`
+  is the single rule source; `scripts/build-diagnostics.mjs` bundles it into
+  `lib/generated/diagnostics.cjs` so the offline CLI and the React UI apply
+  exactly the same judgement.
+- **One frontend.** `frontend/` is the only feature surface (React 19 SPA);
+  there is no second frozen legacy UI.
+- **A consistent multi-host face.** Remote hosts are proxied transparently
+  through the same routes and frontend; host management and inbound peers are
+  local resources and are never re-forwarded to a remote.
 
 ## 2. High-level layering
 
 ```
                  ┌────────────────────────────────────────────┐
-                 │  React 19 SPA (frontend/)   ── default UI  │
+                 │  React 19 SPA (frontend/)   ── only UI      │
                  │  zustand store + react-query + SSE cache   │
                  └───────────────┬────────────────────────────┘
-                                 │ HTTP (fetch) + SSE (EventSource)
+                                 │ HTTP (fetch, X-Host-Id) + SSE (?host=)
                  ┌───────────────▼────────────────────────────┐
                  │  Express backend (server.js + lib/routes/*) │
-                 │  CSRF guard · JSON · no-store              │
-                 └───────┬──────────────────────┬─────────────┘
-                         │                      │
-              ┌──────────▼──────────┐   ┌───────▼──────────────┐
-              │  lib/* business     │   │  lib/platforms/*     │
-              │  status · settings  │   │  registry + adapters │
-              │  llm · resume ·     │   │  codex/claude/omp/   │
-              │  search · inspect   │   │  dsh/gemini/hermes/  │
-              │  export · otlp ·    │   │  openclaw · loader   │
-              │  backup · insights  │   │  tail-state · shared │
-              └──────────┬──────────┘   └──────────┬──────────┘
-                         │                         │
-              ┌──────────▼─────────────────────────▼──────────┐
-              │  Platform session logs on disk (JSONL/SQLite/ │
-              │  zstd JSONL) + ~/.agentlray/* config & archive│
-              └───────────────────────────────────────────────┘
+                 │  multi-host proxy · CSRF · JSON 256KB · no-store │
+                 └───┬───────────┬──────────────┬─────────────┘
+                     │           │              │
+         ┌───────────▼──┐ ┌──────▼────────┐ ┌───▼───────────────┐
+         │ lib/* business│ │ lib/platforms │ │ lib/hosts.js      │
+         │ status ·     │ │ registry +    │ │ transport.js      │
+         │ settings ·   │ │ adapters,     │ │ (ssh) + lib/dsh/  │
+         │ llm · resume │ │ 3-source      │ │ (encrypted channel│
+         │ search·inspect│ │ catalog +     │ │  / loopback)      │
+         │ export·otlp  │ │ shared/ layer │ │ inbound.js        │
+         └──────┬───────┘ └──────┬────────┘ └───────┬───────────┘
+                └────────┬───────┘                  │
+                 ┌───────▼──────────────────────────┐│
+                 │ disk: platform session logs      ││
+                 │ (JSONL/SQLite/zstd JSONL) +      │◄┘ remote AgentLRay
+                 │ ~/.agentlray/* config            │
+                 └───────────────────────────────────┘
 ```
 
 ## 3. Repository layout
 
 | Path | Role |
 |---|---|
-| `server.js` | Express bootstrap: static serving, CSRF, no-store, route mounting, settings migration + status injection, listen. |
-| `bin/` | CLI entry points: `agentlray.js` (dispatch), `sessions.js` (list/show/resume), `inspect.js` (inspect/evidence), `platform.js` (list/validate). |
-| `lib/config.js` | HOME resolution, platform default directories, session-id/agent sanitizers, the shared metadata cache map, file helpers. |
-| `lib/platforms/` | The platform registry and one adapter per platform; `shared.js` (skeleton helpers), `tail-state.js` (tail evidence state machine), `loader.js` (custom adapter loader). |
-| `lib/` | Platform-independent business: `status.js`, `session-list.js`, `settings.js` + section modules, `llm.js`/`llm-json.js`, `resume.js`, `cli-bins.js`, `ui-settings.js`, `search.js`, `inspect.js`/`inspect-detail.js`, `export.js`, `otlp.js`, `backup.js`, `insights.js`, `tool-audit.js`, `prompts.js`, `library.js`, `watch.js`, `csrf.js`. |
-| `lib/routes/` | Route modules: parameter validation + response shaping only; business logic lives in `lib/`. |
+| `server.js` | Express bootstrap: static serving, multi-host proxy, CSRF, no-store, route mounting, status/dirs config injection, dsh host service, listen. |
+| `bin/` | CLI entry points: `agentlray.js` (dispatch), `sessions.js` (list/show/resume/new), `inspect.js` (inspect/evidence), `platform.js` (list/validate). |
+| `lib/config.js` | HOME resolution, `resolveDir`/path sanitizers, `sessionMetaCache` (mtime-keyed metadata cache), file helpers. |
+| `lib/platforms/` | The registry and adapters: `index.js` (three-source merge + surface projection), `loader.js` (package/project/user loader), `shared-alias.js` (`@agentlray/shared` bare-name alias), `builtin/<id>/` (package adapters), `shared/` (cross-platform shared barrel). |
+| `lib/platforms/shared/` | Platform-independent shared layer: `helpers` (`makeMessage`/`withMetadataCache`), `tail-state`, `contracts` (capability/resume/create/exec-spawn), `status`, `inspect`, `search`, `insights`, `tool-audit`, `watch`, `zstd`, `config`, `text-utils`. Resolved via the bare name `@agentlray/shared/*`. |
+| `platforms/` | Project-source adapters: `dsh/`, `gemini/`, `hermes/` (project-level platforms migrated out of the package), `manifest.json` (may declare `replaces`). |
+| `lib/` | Platform-independent business: `status.js`, `status-config.js`, `session-list.js`, `settings.js` + section modules, `platform-config.js`, `dirs-config.js`, `llm.js`/`llm-json.js`, `resume.js`, `new.js`, `cli-bins.js`, `ui-settings.js`, `search.js`, `inspect.js`/`inspect-detail.js`, `export.js`, `otlp.js`, `insights.js`, `tool-audit.js`, `prompts.js`, `secret.js`, `csrf.js`. |
+| `lib/hosts.js` · `lib/hosts-file.js` · `lib/transport.js` | Multi-host: `hosts.json` CRUD + runtime state machine + tunnel lifecycle; ssh transport (`ssh -L` port forwarding); the `hosts.json` whole-file atomic shared layer (0600). |
+| `lib/inbound.js` | Inbound peer registry (the connected side's "who is connecting to me"). |
+| `lib/dsh/` | dsh transport: `host.js` (resident host-side service), `client.js` (client-side encrypted channel + loopback port forwarding), `loopback*.js`, `auth.js`/`identity.js`, `settings.js`, `vendor/` (borrowed layer). |
+| `lib/routes/` | Route modules: parameter validation + response shaping only; business logic lives in `lib/`. Includes `proxy.js` (the multi-host gateway, the first `/api` handler). |
 | `lib/generated/diagnostics.cjs` | Bundled diagnostic rules (generated; do not hand-edit). |
 | `frontend/` | React 19 + Vite + TypeScript SPA (the only feature surface). |
-| `public/` | The frozen legacy vanilla UI, served at `/legacy`; security fixes only. |
-| `scripts/` | Build/`demo` pipelines (see §11). |
+| `scripts/` | `build-diagnostics.mjs` (diagnostics bundle) + `build-demo-fixtures.mjs`/`build-dsh-fixtures.mjs` + demo generators. |
 | `test/` | Node's built-in test runner, isolated against `test/fixtures/home`. |
 
 ## 4. Platform registry and the normalized model
 
-`lib/platforms/index.js` holds the `PLATFORMS` table — the single source of
-platform truth. Every generic surface resolves a platform through this table.
+`lib/platforms/index.js` **synchronously** merges three sources into a catalog at
+`require` time and derives `PLATFORMS` — the single source of platform truth.
+Every generic surface resolves a platform through this table.
+
+**Three sources** (`lib/platforms/loader.js`):
+
+| Source | Location | origin |
+|---|---|---|
+| package | `lib/platforms/builtin/{openclaw,codex,claude-code,omp}/` | `package` |
+| project | `$AGENTLRAY_PROJECT_PLATFORMS_DIR` or `<repo>/platforms` (`dsh`/`gemini`/`hermes`) | `project` |
+| user | `$AGENTLRAY_PLATFORMS_DIR` or `~/.agentlray/platforms` | `user` |
+
+Synchronous loading is a hard requirement: downstream derivation points
+(`lib/export.js`, `lib/otlp.js`, `lib/session-list.js`, routes, CLI) read
+`PLATFORMS` at `require` time, so any async load would hide custom platforms.
+Same-id rules: project/user override package only when `replaced` is declared;
+an undeclared same-id collision is **broken** (never overrides).
+`AGENTLRAY_NO_PLUGINS=1` skips project+user and keeps only package. The registry
+also tracks `disabled`/`replaced` (the `settings.platforms` section, read
+synchronously by `lib/platform-config.js`).
 
 **Registry entry shape:**
 
@@ -87,8 +117,8 @@ platform truth. Every generic surface resolves a platform through this table.
 |---|---|
 | `id` | Registry key, used in URLs (`/api/<id>/sessions`) and CLI `--platform`. |
 | `label` | Human-readable name (boot log, UI). |
-| `defaultDir()` | Platform's session root (env-overridable via `lib/config`). |
-| `list(dir)` | Session summaries, newest first. |
+| `defaultDir()` | Platform's session root (directory metadata lives in each platform's `dirs.js`, resolved via `@agentlray/shared/config`; `dirs-config` can override). |
+| `list(dir)` | Session summaries, newest first (`null` means per-agent listing, e.g. openclaw). |
 | `find(dir, id, opts?)` | Session file path \| `null` (`null` entry: not file-based, e.g. Hermes). |
 | `parse(file)` | `{ session, messages }` (normalized). |
 | `getSession(dir, id, opts?)` | `{ session, messages } \| null`. |
@@ -97,7 +127,7 @@ platform truth. Every generic surface resolves a platform through this table.
 | `needsAgent` | True when `find`/`getSession` require `opts.agent` (openclaw). |
 
 The **normalized message shape** is a single 11-field literal defined in
-`lib/platforms/shared.js` (`makeMessage`):
+`lib/platforms/shared/helpers.js` (`makeMessage`):
 
 ```
 id, timestamp, role, content[], usage, model, provider,
@@ -106,9 +136,18 @@ toolCallId, toolName, details, isError
 
 Adapters override only the fields their raw record actually carries. Sessions
 that need listing metadata (title, first/last message, counts) are produced by
-each adapter's `list*` function; `withMetadataCache` in `shared.js` wraps raw
-metadata parsers with an mtime-keyed in-memory cache (`sessionMetaCache` in
-`lib/config.js`) so unchanged files are not re-parsed on every list.
+each adapter's `list*` function; `withMetadataCache` in `shared/helpers.js`
+wraps raw metadata parsers with an mtime-keyed in-memory cache
+(`sessionMetaCache` in `lib/config.js`) so unchanged files are not re-parsed on
+every list.
+
+**Capability bits and surface projection.** `shared/contracts.js` derives
+`capabilityBits` (list/find/parse/getSession/collectFiles/watchParse/needsAgent)
+from function presence and adjudicates `hasResumeContract` /
+`hasCreateContract` / `execSpawnCommands`. `index.js`'s `PLATFORM_SURFACES`
+declares a capability predicate once per platform surface
+(`export`/`otlp`/`tool-audit`); `surfacePlatforms(name)` answers for all of them,
+and consumers take the subset instead of re-deriving filters.
 
 ### 4.1 File vs non-file platforms
 
@@ -122,47 +161,48 @@ metadata parsers with an mtime-keyed in-memory cache (`sessionMetaCache` in
 
 ### 4.2 Format specifics handled by adapters
 
-- **dsh** logs may be a concatenation of independent Zstandard frames
-  (`.jsonl.zstd`). `lib/platforms/dsh.js` scans frame boundaries and
-  decompresses each frame, tolerating a torn trailing frame after a crash.
-  Versioned durable logs: a session dir keeps a legacy `session.jsonl[.zstd]`
-  (format 0) next to `session.v3/.v4.jsonl.zstd`; the adapter reads the highest
-  version present. Requires Node ≥ 22.15 for built-in zstd.
-- **Gemini** `$rewindTo`/`$set` checkpoints are folded so rewound history never
-  renders twice (`foldGeminiRecords`); metadata lines and folds carry no new
-  messages to the watcher.
+- **dsh** (project platform `platforms/dsh/`) logs may be a concatenation of
+  independent Zstandard frames (`.jsonl.zstd`). The adapter scans frame
+  boundaries and decompresses each frame, tolerating a torn trailing frame after
+  a crash. Versioned durable logs: a session dir keeps a legacy
+  `session.jsonl[.zstd]` (format 0) next to `session.v3/.v4.jsonl.zstd`; the
+  adapter reads the highest version present. Requires Node ≥ 22.15 for built-in
+  zstd.
+- **Gemini** (project platform `platforms/gemini/`) `$rewindTo`/`$set`
+  checkpoints are folded so rewound history never renders twice
+  (`foldGeminiRecords`); metadata lines and folds carry no new messages to the
+  watcher.
 - **Claude Code** reads `~/.claude/projects/<project-slug>/*.jsonl` plus
   `subagents/agent-*.jsonl`; a `.meta.json` beside a subagent carries
   `agentType`/`description`.
 
 ### 4.3 Custom platform adapters
 
-`lib/platforms/loader.js` synchronously reads `~/.agentlray/platforms/*.js` (in
-alphabetical order) at module-load time and merges validated adapters into the
-registry. The synchronous design is a hard requirement: downstream derivation
-points (`lib/export.js`, `lib/otlp.js`, `lib/session-list.js`, routes, CLI)
-read `PLATFORMS` at `require` time, so any async load would hide custom
-platforms from them.
+`lib/platforms/loader.js` synchronously loads project- and user-source `*.js`
+(in alphabetical order) at module-load time and merges validated adapters into
+the catalog. Validation (shared by the CLI `platform validate`): the module must
+export an object with `id` (`^[a-z0-9][a-z0-9-]*$`), `label` (string), and the
+required functions `defaultDir`, `getSession` (`list`/`parse` may be `null`). A
+single failing file is isolated by try/catch and marked **broken**, never
+breaking startup.
 
-Validation (shared by the CLI `platform validate`): the module must export an
-object with `id` (`^[a-z0-9][a-z0-9-]*$`), `label` (string), and the required
-functions `defaultDir`, `parse`, `getSession` (`list` may be `null`, like
-OpenClaw). An id colliding with a built-in or earlier custom adapter marks the
-file **broken** (never overrides). A single failing file is isolated by
-try/catch and never breaks startup. `AGENTLRAY_NO_PLUGINS=1` skips loading
-entirely. Capability bits are derived from function presence
-(`lib/platforms/index.js` `capabilityBits`).
+A thin adapter may reuse a built-in implementation through the
+`AGENTLRAY_PKG_ROOT` package root (e.g. `co-mind` reuses `builtin/claude-code`,
+the same "thin adapter + package-root resolution" shape as the project-level
+dsh/gemini/hermes). The `@agentlray/shared` bare-name alias is registered globally
+by `shared-alias.js`, so both the server and `platform validate` resolve it.
 
 `listPlatformInfo()` is the single source for both `GET /api/platforms` and the
-CLI `platform list`: built-ins (registry insertion order) → custom (alphabetical
-file load order) → broken (alphabetical), each with `capabilities` and
-`resume` flags.
+CLI `platform list`: it walks the catalog (including disabled) and computes
+`mounted`/`configuredMounted`/`restartRequired`,
+`origin`/`builtin`/`overrides`/`replacementPending` and capability bits per
+entry; broken entries are appended at the end.
 
 ## 5. Session status model
 
 `lib/status.js` implements a unified four-state model derived from **record
 evidence only** — it never queries live processes (a deliberate difference from
-the csm reference; see `docs/.local/session-status-design.zh-CN.md`).
+the csm reference; see [design/session-status-design.zh-CN.md](design/session-status-design.zh-CN.md)).
 
 **Four states (in group order):**
 
@@ -173,15 +213,15 @@ the csm reference; see `docs/.local/session-status-design.zh-CN.md`).
 | `waiting` | Not explicitly closed, still within the forensic closing window. |
 | `stopped` | Explicit end marker, or past the forensic closing window. |
 
-**Evidence tail** (platform-neutral, from `lib/platforms/tail-state.js`
-`finishTail`): `lastAssistantAt`, `lastPromptAt`, `endTurnAt`, `endedAt`,
-`pendingToolAt`, `pendingNewestAt`, `oldestPendingToolName`. Critical semantics:
-`endedAt` comes only from a *session-level* close marker; `endTurnAt` only from
-a *turn-level* end — feeding a turn end into `endedAt` would misclassify every
-normally finished active session as stopped.
+**Evidence tail** (platform-neutral, from
+`lib/platforms/shared/tail-state.js` `finishTail`): `lastAssistantAt`,
+`lastPromptAt`, `endTurnAt`, `endedAt`, `pendingToolAt`, `pendingNewestAt`,
+`oldestPendingToolName`. Critical semantics: `endedAt` comes only from a
+*session-level* close marker; `endTurnAt` only from a *turn-level* end — feeding
+a turn end into `endedAt` would misclassify every normally finished active
+session as stopped.
 
-**`deriveStatus(tail, meta, nowMs, opts)` decision chain** (in
-`lib/status.js`):
+**`deriveStatus(tail, meta, nowMs, opts)` decision chain** (in `lib/status.js`):
 
 1. Explicit close → `stopped` (a session-level end marker wins over any later
    evidence).
@@ -207,32 +247,38 @@ Three time windows (defaults 2 min / 30 min / 12 h) are runtime-injectable via
 then sorts each group by the platform's default key.
 
 `GET /api/status-labels` exposes `{ order, labels }` as the single source of the
-status vocabulary for both React and legacy frontends, so badges/group headers
-never drift.
+status vocabulary, so badges/group headers never drift.
 
-## 6. Settings, unified single file
+## 6. Settings: a single file + hosts.json
 
-All server-side settings aggregate in a single `~/.agentlray/settings.json`
-with five sections: `ui`, `cliBins`, `status`, `kanban`, `llm`. `lib/settings.js`
-owns the whole-file read, atomic write (tmp + rename), and the idempotent
-one-time migration of the five legacy standalone files
-(`ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/
-`llm.json`) — run from both the server and the CLI entry so pure-CLI upgrades
-also pick up old config. Each section has a dedicated module
-(`ui-settings.js`, `cli-bins.js`, `status-config.js`, `kanban-config.js`,
-`lib/llm.js`) that whitelists and validates its keys.
+Server-side **settings** aggregate in a single `~/.agentlray/settings.json` with
+five sections: `ui`, `cliBins`, `status`, `kanban`, `llm` (plus `platforms` with
+`disabled`/`replaced`). `lib/settings.js` owns the whole-file read, atomic write
+(tmp + rename), and the idempotent one-time migration of the five legacy
+standalone files — run from both the server and the CLI entry. Each section has a
+dedicated module (`ui-settings.js`, `cli-bins.js`, `status-config.js`,
+`kanban-config.js`, `lib/llm.js`, `platform-config.js`) that whitelists and
+validates its keys.
 
-A single `GET/PUT /api/settings` (`lib/routes/settings.js`) is the only web
-entry point. GET returns everything (`llm` key is never echoed — only
-`hasApiKey`); PUT saves only the sections supplied. `cliBins` returns
-`bin`/`configured`/`default` reflecting the actually-effective command;
-`status`/`kanban` return `value`/`configured`/`default`.
+A single `GET/PUT /api/settings` (`lib/routes/settings.js`) is the only web entry
+point. GET returns everything (`llm` key is never echoed — only `hasApiKey`); PUT
+saves only the sections supplied. `cliBins` returns `bin`/`configured`/`default`
+reflecting the actually-effective command; `status`/`kanban` return
+`value`/`configured`/`default`. `GET /api/ui-selection` returns the per-host
+selection state.
+
+**Multi-host and dsh config** live in a separate `~/.agentlray/hosts.json`
+(0600): `{ hosts: [], dsh?: { role, serverUrl, deviceName, allowedPorts }, updatedAt }`.
+Read/write goes through the `lib/hosts-file.js` shared layer (used by `hosts.js`
+and `dsh/settings.js`) to avoid a circular dependency. Sensitive values (SSH
+private-key content, dsh password) are encrypted by `lib/secret.js` (AES-256-GCM,
+key `~/.agentlray/secret` 0600) into `xxxEnc` ciphertext; login state is carried
+by a token, and account passwords are not persisted.
 
 ## 7. LLM abstraction
 
 `lib/llm.js` `runLlm()` is the single backend for every LLM-backed feature
-(prompt rewrites, template-cluster suggestions, library name suggestions).
-Backend priority:
+(prompt rewrites, cluster suggestions). Backend priority:
 
 1. An explicit OpenAI-compatible endpoint from the `llm` section
    (`baseUrl` + `model` required, `apiKey` optional for local servers).
@@ -253,31 +299,33 @@ to 15 min, clamped to `[2s, 1h]`, configurable via `llm.analysisTimeoutMs`.
 Error codes: `NO_LLM_BACKEND` / `LLM_TIMEOUT` / `LLM_NETWORK`.
 `lib/llm-json.js` parses/repairs the LLM's JSON (fences, brackets, quotes).
 
-## 8. Session resume
+## 8. Session resume and create
 
 `lib/resume.js` is the single source for the resume command string — both the
-CLI `sessions resume` and the web "copy resume command" button produce the
-exact command the terminal would spawn.
+CLI `sessions resume` and the web "copy resume command" button produce the exact
+command the terminal would spawn. `lib/new.js` is its symmetric counterpart for
+the create command.
 
-**Native resume contracts** (`RESUME_BINS`):
+**Native resume contracts** (`shared/contracts.js` `hasResumeContract`):
 
 | Platform | Args |
 |---|---|
 | codex | `resume <id> --yolo` |
 | claude-code | `--dangerously-skip-permissions --resume <id>` |
 | omp | `--auto-approve --resume=<id>` |
-| dsh | `--profile pi-tui --preset standard --resume <id>` (interactive TUI; `--session-id` does not recognize web-created sessions) |
 | gemini | `-r <id> --approval-mode=yolo` |
 | hermes | `--resume <id> --yolo` |
 
-`hasResumeContract(platform)` is true for these six, or for a custom adapter
-declaring a complete `resume: { bin, args(id, opts) }`. `buildResumeCommand`
-resolves the executable via `resolveCliBin()` (env var
-`AGENTLRAY_<PLATFORM_ID>_BIN` → `~/.agentlray/settings.json` `cliBins` section →
-default command name), and quotes tokens per-shell (PowerShell `Set-Location`
-+ `&` on win32; `cd 'cwd' &&` on POSIX). OMP resume additionally detects a live
-holder process (`/proc` scan) and terminates it (SIGTERM → SIGKILL fallback)
-before re-spawning.
+It is true for these five built-ins (dsh and openclaw declare no `resume`; dsh is an
+interactive TUI and supports neither resume nor create), or for a custom adapter declaring a complete
+`resume: { bin, args(id, opts) }`; create works the same way
+(`hasCreateContract` / `create`). `buildResumeCommand` resolves the executable via
+`resolveCliBin()` (env var `AGENTLRAY_<PLATFORM_ID>_BIN` →
+`~/.agentlray/settings.json` `cliBins` section → default command name), and quotes
+tokens per-shell (PowerShell `Set-Location` + `&` on win32; `cd 'cwd' &&` on
+POSIX). OMP resume additionally detects a live holder process (`/proc` scan) and
+terminates it (SIGTERM → SIGKILL fallback) before re-spawning, degrading to a
+direct resume when it cannot detect/terminate it.
 
 ## 9. Session listing: CLI and API share one data layer
 
@@ -296,43 +344,69 @@ shape.
 
 ## 10. HTTP API
 
-`server.js` mounts route modules; business logic lives in `lib/`. A CSRF guard
-(`lib/csrf.js`) rejects cross-site state-changing requests before the body is
-parsed (browsers always attach `Origin`/`Sec-Fetch-Site`; the boundary is
-same-origin or a non-browser client with no `Origin`). All responses set
+`server.js` mounts route modules; **the multi-host gateway `lib/routes/proxy.js`
+must be the first `/api` handler**, before any body parser (remote forwarding
+needs the raw body stream). It routes by `X-Host-Id` (or `?host=`, for SSE):
+default/`local` → `next()` into the local routes; remote → forward to the tunnel
+`baseUrl`, preserving the original `Host`/`Origin` for the remote's CSRF check.
+Business logic lives in `lib/`. A CSRF guard (`lib/csrf.js`) rejects cross-site
+state-changing requests before the body is parsed. All responses set
 `Cache-Control: no-store`. A 256 KB JSON body limit applies.
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/version` | `{ bootId }` — frontend staleness detection (polled; prompts reload on change). |
+| `GET /api/version` | `{ bootId, version }` — frontend staleness + cross-host version hint. |
 | `GET /api/status-labels` | Unified status vocabulary `{ order, labels }`. |
 | `GET /api/sessions` | Aggregate multi-platform list (see §9). |
-| `GET /api/agents` · `GET /api/agents/:name/sessions[/:id]` | OpenClaw agent/session listing (legacy-compatible). |
+| `GET /api/agents` · `GET /api/agents/:name/sessions[/:id]` | OpenClaw agent/session listing. |
 | `GET /api/spawn-map` · `GET /api/spawn-tree[/:sessionId]` | Agent spawn relationship map / tree. |
 | `GET /api/:platform/sessions` · `/…/:sessionId` | Registry-driven generic list / detail. |
-| `GET /api/:platform/sessions/:id/resume-command` | Resume command string (single source §8). |
-| `GET /api/omp/sessions/:id/children[/:name]` | OMP sub-agents. |
-| `GET /api/claude-code/sessions/:id/children[/:name]` | Claude Code sub-agents. |
-| `GET /api/settings` · `PUT /api/settings` | Unified settings (§6). |
-| `GET /api/settings/cli-bins` | Read-only compat endpoint for the frozen legacy UI. |
-| `GET /api/platforms` | Platform list incl. custom + broken (§4.3). |
-| `GET /api/insights` | Aggregate analytics (tools, error clusters, trends). |
-| `GET /api/tools/audit` | Cross-platform tool health. |
+| `GET /api/:platform/sessions/:id/resume-command` · `POST …/new` | Resume command string / new session (§8). |
+| `GET /api/:platform/sessions/:id/children[/:name]` | Sub-agents (omp / claude-code etc.). |
+| `GET /api/settings` · `PUT /api/settings` · `GET /api/ui-selection` | Unified settings / per-host selection (§6). |
+| `GET /api/settings/cli-bins` | Read-only compat endpoint (`bin`/`configured`/`default`). |
+| `GET /api/platforms` · `PUT|DELETE /api/platforms/:id/mount` · `PUT|DELETE /api/platforms/:id/replace` | Platform list / enable-disable / replace declaration (§4). |
+| `GET /api/insights` · `GET /api/tools/audit` | Aggregate analytics / cross-platform tool health. |
 | `GET /api/prompts` · `/analyze` · `POST /api/prompts/rewrite` · `/hidden…` | Prompt extraction/clustering/rewrite/hide. |
-| `GET /api/library` … `POST /api/library/:name/install` etc. | Prompt library + install as slash commands. |
 | `GET /api/search` | Full-text multi-keyword AND search across all platforms. |
-| `GET /api/:platform/sessions/:id/export` | Markdown/HTML export (`format=md\|html`). |
-| `GET /api/:platform/sessions/:id/otlp` | OTLP/JSON trace export. |
+| `GET /api/:platform/sessions/:id/export` · `GET /api/otlp/:platform/:sessionId` | Markdown/HTML export / OTLP trace. |
 | `GET /api/watch` | SSE real-time tail + status push. |
-| `POST /api/backup` · `GET /api/backup/status` | Incremental backup. |
-| `GET /api/agents/…` | see above. |
+| `GET/POST/PUT/DELETE /api/hosts…` · `POST /api/hosts/:id/connect|disconnect` · `POST /api/hosts/:id/test` | Multi-host CRUD / connect / probe (local resource). |
+| `GET /api/inbound` · `POST /api/inbound/hello` | Inbound peer overview / heartbeat (local resource). |
+| `GET/PUT /api/dsh/config` · `GET /api/dsh/status|devices` · `GET /api/dsh/auth/providers` · `POST /api/dsh/auth/qr/start|qr/poll|logout` · `POST /api/dsh/test` | dsh transport config / login (QR + account password) / probe (local resource). |
 
-A full annotated endpoint table (including parameters and per-platform dir
-overrides) lives in [usage.md](usage.md#api).
+`/api/hosts`, `/api/inbound`, `/api/dsh` are **local gateway resources**: the
+gateway returns 403 for them and never re-forwards to the currently viewed
+remote. A full annotated endpoint table (including parameters and per-platform
+dir overrides) lives in [usage.md](usage.md#api).
 
-## 11. Build pipeline and dual frontend
+### 10.1 Multi-host and remote connections
 
-`npm run build:ui` runs three steps:
+- **Host model** (`lib/hosts.js`): `local` is built in (direct connection to this
+  process's port; not persisted, no tunnel); the rest persist in `hosts.json`
+  with a runtime state machine
+  `disconnected`/`connecting`/`connected`/`error`. The tunnel lifecycle is bound
+  to the currently selected host: switching away closes it, deleting closes and
+  removes it, and process exit kills all ssh children (no orphans).
+- **ssh transport** (`lib/transport.js`): spawn the system `ssh -L` for local
+  port forwarding, keeping the remote AgentLRay bound to `127.0.0.1` (the
+  security boundary is the system ssh layer; zero stored credentials — keys/
+  fingerprints go through `~/.ssh/config`, `ssh-agent`, `known_hosts`). The
+  executable name is overridable via `AGENTLRAY_SSH_BIN`.
+- **dsh transport** (`lib/dsh/`): `host.js` is the resident *connected-side*
+  service (relay server + loopback forwarding; independent of the selected host,
+  not occupying a connection slot); `client.js` is the *connecting side*
+  (ds-harness-remote encrypted channel + loopback port forwarding to this
+  process). Roles are `host`/`client`/`both`. Login supports QR and account
+  password (`auth.js`); the token is carried by a `ServerCredentialStore`.
+- **Inbound peers** (`lib/inbound.js`): the connected side records "who is
+  connecting to me"; the connecting side reports/heartbeats via
+  `POST /api/inbound/hello` (TTL 30 s). dsh connections merge into the same
+  registry with `via='dsh'`.
+
+## 11. Build pipeline
+
+`npm run build:ui` runs two steps:
 
 1. `scripts/build-diagnostics.mjs` — bundles
    `frontend/src/views/sessions/diagnostics.ts` with esbuild (bundle + minify +
@@ -340,17 +414,14 @@ overrides) lives in [usage.md](usage.md#api).
    `module.exports.rulesSha256` (a hash of the TS source). `--check` detects
    drift. `lib/inspect.js` `require`s this artifact, so CLI and UI apply the
    same diagnostic rules (§12).
-2. `scripts/build-legacy-pure.mjs` — bundles `frontend/src/lib/legacy-pure.ts`
-   (which re-exports `pure.ts` + `markdown.ts`) with esbuild into
-   `public/js/pure.js` as an IIFE (`__axrPure`): browser globals on
-   `window.*`, Node `module.exports`. This is how the frozen legacy UI shares
-   the React frontend's single-source formatters/markdown/trace builder.
-3. `cd frontend && npm run build` — `tsc -b && vite build` → `frontend/dist`.
+2. `cd frontend && npm run build` — `tsc -b && vite build` → `frontend/dist`.
 
-At runtime, `server.js` serves the built React UI at `/` when
-`frontend/dist/index.html` exists, and the legacy vanilla UI at `/legacy`
-(a frozen snapshot: security fixes only). Without a build the legacy UI is the
-fallback at `/`. React is the only feature surface.
+At runtime, `server.js` serves the built React UI at `/` only when
+`frontend/dist/index.html` exists; without a build, unknown paths return a 503
+telling you to run `npm run build:ui`. **There is no second legacy UI** — React
+is the only feature surface. `npm run build:demo` builds with `VITE_DEMO=1`, so
+`src/demo/` serves synthetic fixtures without real requests (for the GitHub
+Pages demo).
 
 ## 12. Diagnostics and evidence
 
@@ -398,59 +469,61 @@ parameters plus a single global zustand store (`src/store.ts`, `useAppStore`).
 Server data flows through `@tanstack/react-query` (query-key contracts + SSE
 cache merge + 5 s polling). `src/api/client.ts` is the typed fetcher layer
 (`fetchJson`/`requestJson` throw `Error(body.error)` on non-2xx; `withParams`
-filters empty params; in DEMO mode calls route through `demoJson` fixtures).
+filters empty params; in DEMO mode calls route through `demoJson` fixtures) and
+injects `X-Host-Id` uniformly (the store calls `setActiveHostId` on host switch).
 
 **Routing persistence.** Session detail context (`?session=&sid=&agent=`) and
 the right-pane view tab (`?view=`) are written to/restored from the URL via
-`replaceState` (`syncSessionUrl`/`parseDetailFromUrl`/`parseViewFromUrl`);
-filters/grouping persist in `localStorage`. Both React and legacy UI share the
-same `localStorage` key `agent-xray-settings`.
+`replaceState`; filters/grouping persist **per host**
+(`agent-lray-settings:<hostId>`, with a one-time fallback from the old single
+key). The remembered host lives in `agent-lray-remembered-host`.
 
-**Views** (five tabs in `App.tsx`): `sessions`, `insights`, `prompts`,
-`library`, `kanban`.
+**Views** (four tabs in `App.tsx`): `sessions`, `insights`, `prompts`, `kanban`.
 
 - **sessions** — the most complex. `SessionsView` renders the summary +
-  messages/trace; `useSessionDetail`/`useActiveSessionDetail`
-  (`childAgents.ts` switches to a child transcript when `viewingChildAgent`),
-  `useSessionSse` (EventSource `/api/watch`; new messages append to the same
-  query cache and pushed status merges into the `['sessions',…]` list cache),
-  `usePlatformProbe` (empty-state). `SessionList` is the sidebar: grouping
-  (`platform`/`project`/`none`) + four-state sub-group headers, virtual scrolling
-  (> 200 rows) with `@tanstack/react-virtual`, arrow-key navigation.
-  `queries.ts` defines the query keys/options; `CmdkDialog` reuses the same
-  cache via `queryClient.fetchQuery`. Status labels come from
-  `/api/status-labels` (`statusMeta.ts`).
-- **trace** — `TraceView` renders a Langfuse-style waterfall from
-  `buildTraceTurns` (`pure.ts`); a purple bar loads a spawned sub-agent's
-  transcript (`childAgents.ts`).
+  messages/trace; `TraceView` (`views/trace/`) renders a Langfuse-style waterfall
+  from `buildTraceTurns` (`pure.ts`), and a purple bar loads a spawned
+  sub-agent's transcript (`childAgents.ts`). `useSessionSse` (EventSource
+  `/api/watch`; new messages append to the same query cache and pushed status
+  merges into the `['sessions',…]` list cache), `usePlatformProbe` (empty-state).
+  `SessionList` is the sidebar: grouping (`platform`/`project`/`none`) +
+  four-state sub-group headers, virtual scrolling (> 200 rows) with
+  `@tanstack/react-virtual`, arrow-key navigation. `queries.ts` defines the query
+  keys/options; `CmdkDialog` reuses the same cache via `queryClient.fetchQuery`.
+  Status labels come from `/api/status-labels` (`statusMeta.ts`).
 - **insights** — `GlobalInsights` (server `/api/insights`, tool stats/error
   clusters/trend + `ToolsAuditSection`) vs `SessionInsights` (client-side
   `computeSessionInsights` from the already-loaded session detail cache).
 - **prompts** — extraction grouped by cwd, search, hide-trivial, batch hide,
   JSON export, `分析优化` (cluster + attribution + LLM suggestions via
   `getPromptAnalysis`) and single-prompt `优化` rewrite.
-- **library** — curated prompts with per-target (claude/codex/omp) install
-  toggles, edit/history, Fabric import, LLM name suggestion.
 - **kanban** — reuses `useSessionsList` (same cache/5 s poll/SSE merge) and
   `buildKanbanColumns` (`kanbanLib.ts`) bucketing by the four states;
   `maxPerStatus` (default 20) truncation from `/api/settings`'s `kanban`;
   responsive stacking below 768 px.
 
+**Multi-host UI.** `components/Sidebar.tsx` selects the host;
+`HostsDialog`/`HostFormDialog`/`HostConnectingView` manage ssh/dsh hosts
+(`src/lib/host-status.ts` maps status); `DshConfigDialog` (`components/dsh/`)
+configures the local role and login. On host switch, the tunnel is established
+via `/api/hosts/:id/connect`, with a first-frame "connect before load" gate so no
+request is sent to an unconnected host.
+
 **Shared libs.** `src/lib/pure.ts` — no-DOM pure functions (formatters, trace
 builder, turn ledger); `src/lib/markdown.ts` — escape-then-transform markdown;
-`src/lib/legacy-pure.ts` — the aggregation entry baked to `public/js/pure.js`
-(§11). `src/lib/utils.ts` provides `cn()` (clsx + tailwind-merge).
+`src/lib/utils.ts` provides `cn()` (clsx + tailwind-merge).
 
 **Theme & UI.** `useTheme` syncs `store.theme` (`light`/`dark`) to `<html>`'s
 `.dark` class; the palette lives in `index.css` CSS variables (`:root` light /
 `.dark` dark, mapped to Tailwind colors). Initial theme follows the system once,
-then is fixed by manual toggle and persisted to `agent-xray-settings`. The UI
-component library is shadcn/ui-style on Radix + Tailwind under
-`src/components/ui/` (button/badge/card/dialog/select/tabs/command/…).
+then is fixed by manual toggle and persisted. The UI component library is
+shadcn/ui-style on Radix + Tailwind under `src/components/ui/`
+(button/badge/card/dialog/select/tabs/command/…).
 
 ## 14. Real-time watch (SSE)
 
-`lib/watch.js` + `lib/routes/watch.js` implement `GET /api/watch` (EventSource).
+`lib/routes/watch.js` + `lib/platforms/shared/watch.js` implement
+`GET /api/watch` (EventSource; the host can only be selected via `?host=`).
 `readNewLines` tails a file from a byte offset (plain JSONL advances only past
 the last complete line; dsh zstd decompresses every complete new frame and
 leaves a torn frame for the next read). `parseWatchLines` normalizes raw lines
@@ -461,14 +534,8 @@ session-level `session_exit` records (→ `noteEnded` + `resolveAllPending`, so
 an `ask` interaction is closed). Hermes has a dedicated SQLite WAL-watch branch
 (timestamp-incremental query).
 
-## 15. Backup, export, OTLP
+## 15. Export and OTLP
 
-- **Backup** (`lib/backup.js`): incremental — copies each platform's session
-  logs into `~/.agentlray/archive/<platform>/<relative-path>`; a file is skipped
-  when the archived copy exists with the same size and an mtime no older than
-  the source. Covers codex/claude-code/omp/dsh/gemini; excludes Hermes (live
-  SQLite) and openclaw. Runs on demand and automatically shortly after startup,
-  then daily; failures are logged, never fatal.
 - **Export** (`lib/export.js`): renders a normalized session as shareable
   Markdown or self-contained HTML (inline CSS, no external requests). Tool calls
   render as collapsed `<details>`. A best-effort `redactSecrets` pass strips
@@ -478,8 +545,8 @@ an `ask` interaction is closed). Hermes has a dedicated SQLite WAL-watch branch
 - **OTLP** (`lib/otlp.js`): serializes a session's trace as OTLP/JSON — one
   trace per session, one `invoke_agent` root span per user turn with child
   `chat {model}` and `execute_tool {toolName}` spans, mirroring the frontend's
-  `buildTraceTurns`. Deterministic sha256-derived ids. Excludes openclaw
-  (needs agent) and hermes (no files).
+  `buildTraceTurns`. Deterministic sha256-derived ids. `PLATFORM_SURFACES.otlp`
+  excludes openclaw (find needs agent) and hermes (no files).
 
 ## 16. Security and trust model
 
@@ -489,39 +556,53 @@ an `ask` interaction is closed). Hermes has a dedicated SQLite WAL-watch branch
 - **CSRF:** no cookies → no CSRF token would help. The guard rejects
   cross-site unsafe requests by checking `Origin`/`Sec-Fetch-Site`/`Referer`
   against the request's `Host` (origin-relative, so LAN deployments on any
-  hostname keep working).
+  hostname keep working). The gateway preserves the original `Host`/`Origin`, so
+  both ends validate consistently.
 - **Path sanitization:** `resolveDir` accepts only absolute, `..`-free
   overrides; `sanitizeAgentName`/`sanitizeSessionId` whitelist characters.
+- **Credential encryption:** SSH private-key content and dsh passwords are
+  encrypted by `lib/secret.js` (AES-256-GCM; key `~/.agentlray/secret` 0600) into
+  `xxxEnc`; `hosts.json`/`secret` are 0600. GET endpoints never return plaintext
+  keys/passwords.
 - **Custom platforms are code you trust.** An adapter executes with your full
   user permissions; only place trusted files (`AGENTLRAY_NO_PLUGINS=1` as the
   escape hatch). This is the accepted tradeoff recorded in
-  `docs/.local/adr-0001-custom-platform-adapter.zh-CN.md`.
+  [design/adr-0001-custom-platform-adapter.zh-CN.md](design/adr-0001-custom-platform-adapter.zh-CN.md).
 - **Exports/evidence are shared artifacts.** `redactSecrets` is best-effort;
   the `evidence` command explicitly returns raw source content. Neither is a
   sanitizer, authorization or proof of authenticity.
+- **Remote connections are an explicit egress.** There is no remote by default;
+  ssh/dsh channels are established only after you configure a host and connect.
+  The logs themselves are never uploaded to a model.
 
 ## 17. Testing
 
-Tests use Node's built-in runner (`node --test test/*.test.js`, no extra
-dependencies). They start their own server on a random port with `HOME` and every
-platform directory pointed at a throwaway copy of `test/fixtures/home`, so real
-logs are never touched. CI runs on Node 22: `npm ci` (prepare builds UI +
-regenerates `pure.js`/`diagnostics.cjs`), a drift check
-(`git diff --exit-code public/js/pure.js lib/generated/diagnostics.cjs`),
-`npx biome check .`, then `npm test`. Diagnostic rules are cross-checked between
-the TS source and the generated CJS bundle so CLI and UI agree.
+Tests use Node's built-in runner (`npm test` = `node --require
+./test/setup-env.cjs --test test/*.test.js`, no extra dependencies; currently 57
+`*.test.js` files). `test/setup-env.cjs` injects an empty user-platform directory
+and registers the `@agentlray/shared` alias, but does **not** change
+`HOME`/`AGENTLRAY_HOME` — each test builds its own isolated home (a throwaway copy
+of `test/fixtures/home`), so real logs are never touched. Coverage spans the
+registry/loader, every platform adapter, status, settings/secret, multi-host
+(hosts/transport/proxy/inbound/dsh), diagnostic rules and the generated bundle,
+the CLI, and Windows compatibility.
+
+The repository's `.github/workflows/pages.yml` only builds the GitHub Pages demo
+on push to master (`build-demo-fixtures` + `VITE_DEMO=1`); it does **not** run
+tests. Tests run locally/CI via `npm test`. Diagnostic rules are cross-checked
+between the TS source and the generated CJS bundle so CLI and UI agree.
 
 ## 18. Key architecture decisions (summary)
 
 | Decision | Rationale |
 |---|---|
-| Platform registry single source | One adapter + registration adds a platform; every generic surface resolves through it. |
+| Three-source platform registry single source | One adapter + declaration adds/overrides a platform; every generic surface resolves through it. |
 | Runtime custom adapters | Extend without forking the source; trusted-code tradeoff (ADR-0001). |
 | Synchronous custom-platform load | Derivation points read `PLATFORMS` at `require` time. |
 | Unified 4-state status from record evidence | No process queries; consistent across list + watch + CLI. |
 | Single `settings.json` + one `/api/settings` | One migration, one web entry; per-section whitelists. |
-| Single `lib/resume.js` | CLI and web copy produce the identical command. |
-| `pure.ts`/`markdown.ts` single source | Baked to legacy UI; reused by tests. |
+| `hosts.json` holds hosts/dsh separately | Sensitive credentials and connection targets isolated in a permission-controlled file; settings vs host surfaces decoupled. |
+| Single `lib/resume.js` / `lib/new.js` | CLI and web produce identical commands. |
 | `diagnostics.ts` bundled to CJS | CLI and UI apply identical rules. |
-| Dual frontend (React new, legacy frozen) | Feature velocity without breaking the frozen snapshot. |
+| Front-mounted multi-host gateway | Remote forwarding needs the raw body; data plane is fully forwarded, local resources 403. |
 | CSRF via Origin/Host comparison | Works without cookies/auth; survives LAN hostnames. |

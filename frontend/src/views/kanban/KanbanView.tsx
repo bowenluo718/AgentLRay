@@ -6,7 +6,7 @@
 // - 响应式：宽度 <768（matchMedia，与 App.tsx 同一断点约定）纵向堆叠四列，每列默认
 //   只展示 1 张卡（collapsedLimit=1）、组头整块可点展开/收起、页面级滚动（复用外层
 //   TabsContent 的 overflow-auto）；≥768 维持横向四列 + 独立「展开」按钮 + 列内滚动。
-// - 每列最多条数从 GET /api/settings/kanban（maxPerStatus，加载中/失败回退默认 20）；
+// - 每列最多条数从 GET /api/settings 的 kanban section 切片（maxPerStatus，加载中/失败回退默认 20）；
 //   桌面折叠条数 = maxPerStatus，移动端折叠恒 1（见 design-kanban-mobile.zh-CN.md）。
 // - 状态标签/配色**只**取自 statusMetaFor（statusMeta.ts），无第三处硬编码。
 

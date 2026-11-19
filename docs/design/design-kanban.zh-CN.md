@@ -134,3 +134,19 @@ const KANBAN_DEFAULTS = { maxPerStatus: 20 };
 | R1-Q6 | 看板局部文本搜索 | 按推荐：看板自带局部搜索，不同步侧栏、不持久化 |
 | R2-Q2r | 项目共享方式复核 | 看板无项目下拉；直接共享左侧项目筛选对应数据 |
 | R2-R1 | 平台控件 | 看板不需要平台选择控件 |
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 四态看板视图 | ✅ 已实现 | `frontend/src/views/kanban/KanbanView.tsx` |
+| `maxPerStatus` 配置 | ✅ 已实现 | `lib/kanban-config.js`、`lib/routes/settings.js` |
+| 共享侧栏筛选 | ✅ 已实现 | `frontend/src/views/kanban/KanbanView.tsx` |
+
+> **后续演进**：正文 1.2 所述的独立 `lib/routes/kanban-config.js` 与 `GET/PUT /api/settings/kanban`、`~/.agentlray/kanban-config.json` 已在 settings-merge 后并入统一 `GET/PUT /api/settings` 的 `kanban` section（`settings.json`，见 [design-settings-merge.zh-CN.md](design-settings-merge.zh-CN.md)）；配置基建 `lib/config-store.js` 亦随 settings-merge 移除，由 `lib/settings.js` 取代。
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

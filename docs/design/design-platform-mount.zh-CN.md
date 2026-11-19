@@ -137,3 +137,15 @@ omp/claude-code 的 children 路由（4 个）、openclaw 的 agent/spawn 管理
 ---
 
 *注：本文件为**设计定稿**，实现步骤见 `plan-platform-mount.zh-CN.md`。*
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已被 design-platform-equivalence 取代（历史文档）**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| v1 mount/unmount 设计 | ⛔ 已取代 | 现行实现见 `design-platform-equivalence.zh-CN.md` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

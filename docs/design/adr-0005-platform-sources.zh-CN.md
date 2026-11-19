@@ -124,5 +124,20 @@ module.exports = require(path.join(process.env.AGENTLRAY_PKG_ROOT, 'lib/platform
 ## 与旧决策的关系
 
 - ADR-0001 的加载器、信任边界、能力位缺位语义继续有效；其 **Q11「不做 per-platform 启停开关」被本 ADR 取代**。
-- ADR-0002 的“薄适配器 require AgentLRay 内部模块不可行”被 D10 修订；co-mind 仍保留自包含实现，不强制迁移。
+- ADR-0002 的“薄适配器 require AgentLRay 内部模块不可行”被 D10 修订；co-mind 原保留自包含实现，2026-11-08 起也迁移为薄适配器复用内置 claude-code（见 [adr-0002-co-mind-platform.zh-CN.md](adr-0002-co-mind-platform.zh-CN.md)）。
 - ADR-0004 的 create 契约保留，但内置 `NEW_BINS` 将迁入 adapter 声明（P1）。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：Accepted，已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 三来源 package/project/user | ✅ 已实现 | `lib/platforms/index.js`、`lib/platforms/loader.js` |
+| `disabled` / `replaced` 分离 | ✅ 已实现 | `lib/platform-config.js` |
+| catalog / `listPlatformInfo` / 全表面 hook | ✅ 已实现 | `lib/platforms/index.js`、`lib/routes/platforms.js` |
+| `platform export` + `AGENTLRAY_PKG_ROOT` | ✅ 已实现 | `bin/platform.js` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

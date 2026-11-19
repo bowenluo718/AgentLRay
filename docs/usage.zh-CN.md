@@ -34,8 +34,8 @@
 - **摘要可折叠** — 需要更多阅读空间时可折叠会话摘要
 - **自动刷新** — 会话列表和消息实时更新；状态徽标随日志增长即时变化（SSE 推送）并按 5s 轮询校准
 - **任务看板视图** — 按会话四态（待用户输入 / 工作中 / 等待中 / 已停止）分桶的任务看板，与侧栏共用同一份列表缓存与实时状态；每列按 `maxPerStatus`（默认 20，可在 设置 → 任务看板 调整）截断，窄屏纵向堆叠。点击卡片即可在 Sessions 视图打开该会话
-- **白天 / 黑夜主题** — 顶栏一键切换亮/暗主题（首启跟随系统一次，之后由手动选择固定，持久化在 `agent-xray-settings`）
-- **设置面板** — 在页面上直接配置各平台目录，保存到 localStorage，无需重启
+- **白天 / 黑夜主题** — 顶栏一键切换亮/暗主题（首启跟随系统一次，之后由手动选择固定，按主机持久化在 `agent-lray-settings:<hostId>`）
+- **设置面板** — 在页面上配置各平台目录、CLI 命令、状态窗口、看板条数与 LLM 后端；保存到服务端 `~/.agentlray/settings.json`（按主机的界面选择状态缓存在浏览器）
 - **键盘导航** — 使用方向键在会话之间切换
 
 ## 截图预览
@@ -66,7 +66,7 @@
 
 ### 设置面板
 
-在页面上配置各平台目录，保存到 localStorage，无需重启服务。
+在页面上配置各平台目录等选项，保存到服务端 `~/.agentlray/settings.json`，立即生效（平台的启用/停用需重启后生效）。
 
 ![Settings](../screenshots/settings-panel.png)
 
@@ -174,7 +174,7 @@ npm start
 
 ### 自定义目录
 
-**通过页面设置：** 点击侧边栏的齿轮图标，为每个平台设置自定义路径。保存到 localStorage，无需重启服务。
+**通过页面设置：** 从应用顶栏打开 Settings，为每个平台设置自定义路径。保存到服务端 `~/.agentlray/settings.json`（`dirs` section）并立即生效；当某平台目录的环境变量生效时，该平台配置的路径会被忽略。
 
 **通过环境变量：**
 
@@ -224,6 +224,21 @@ npm start
 | 进行中工作上界 | 30 分钟 | 长工具执行 / 深思考在界内一律 working，超过才降级 |
 | 取证闭口窗口 | 12 小时 | 无结束标记会话证据超过此界判 stopped；awaiting-input / waiting 的上界 |
 
+### 多主机（远端 AgentLRay）
+
+看板可以通过同一个界面浏览另一台机器上的 AgentLRay。主机在顶栏 **Settings → 主机** 弹框中管理，持久化到 `~/.agentlray/hosts.json`（**0600**，与 `settings.json` 分开，可能保存加密的 SSH 密钥材料）。内建的 `local` 主机恒在列表首位且状态恒为 connected。同一时刻只有当前选中的主机保持隧道：切走会关闭上一条隧道，进程退出会兜底杀掉所有活跃的 SSH 子进程。
+
+每个主机支持两种传输：
+
+| 传输方式 | 连接方式 | 凭据 |
+|----------|----------|------|
+| `ssh` | 客户端 spawn 系统 `ssh -L <localPort>:127.0.0.1:<远端 AgentLRay 端口>` 做本地端口转发，远端 AgentLRay 仍只绑定 `127.0.0.1`。可用 `AGENTLRAY_SSH_BIN` 覆盖 ssh 可执行文件。 | 零存储密码——身份与指纹走 `~/.ssh/config`、`ssh-agent`、`known_hosts`。可选的私钥以密文（`identityKeyEnc`）保存，建隧道时落到 `0600` 临时文件。 |
+| `dsh` | 走 `ds-harness-remote` 加密通道 + loopback 端口转发，不依赖 SSH。 | 扫码或账号密码登录；只保存登录得到的 token，不保存密码。 |
+
+全局 dsh 配置（`role` = `host`/`client`/`both`、`serverUrl`、`deviceName`、`allowedPorts` 默认 `[3800]`）位于 `hosts.json` 顶层，通过 **Settings → 主机 → dsh** 编辑；旧版本放在 `settings.json` 的 `dsh` section，首次读取时自动迁移。
+
+请求通过 `X-Host-Id` 请求头路由到选中主机（前端 `src/api/client.ts` 统一注入）；由于 `EventSource` 无法设置请求头，SSE 流 `/api/watch` 用 `?host=` 选择主机。`/api/hosts*`、`/api/inbound*`、`/api/dsh*` 是**本机资源**——带远端 `X-Host-Id` 访问会返回 403，而不是转发。
+
 ## 自定义平台（Custom platforms）
 
 AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配器**放进平台目录，启动时加载器逐文件校验并把合法适配器并入平台注册表；所有 generic 表面（会话路由 / search / prompts / tool-audit / watch / export / CLI）按**能力位**自动接入。校验失败或 id 冲突的文件标记 **broken**（页面与 `agentlray platform list` 可见），绝不拖垮启动。
@@ -271,54 +286,54 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 
 **`platform export`** 把包内置（package）或项目（project）平台迁移为**用户薄适配器**，写入平台目录（默认 `~/.agentlray/platforms`，可用 `--out <dir>` 或 `AGENTLRAY_PLATFORMS_DIR` 指定）：生成 `<id>.js`，并默认把 id 加入 `settings.replaced`（`--no-replace` 关闭）、若在 `settings.disabled` 中则移出。薄适配器通过 `AGENTLRAY_PKG_ROOT`（加载器设置的包根）解析真实实现，包升级自动跟随。选项：`--force` 覆盖已存在文件、`--out <dir>` 指定目录、`--json` 输出 `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`。来源已为 user 时拒绝（`export-user-origin`）；文件冲突报 `export-exists`（用 `--force` 覆盖）。因适配器按用户权限执行任意代码，CLI 输出信任提示——只投递可信的适配器文件。**前提：** 生成的薄适配器依赖加载器注入的 `AGENTLRAY_PKG_ROOT`，只能经 AgentLRay 加载；脱离 AgentLRay 直接 `require` 会以 `AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.` 失败。
 
-**Web 前端：** React 与 legacy 两套 UI 都经 `GET /api/platforms` 展示内置 + 自定义平台；加载失败的自定义平台显示 broken 徽标（含错误），不参与查询。
+**Web 前端：** 内置、项目与自定义平台出现在同一个平台栏；加载失败的自定义平台显示 broken 徽标（含错误），不参与查询。启用/停用与替代声明可在 设置 → 平台 中管理，或经 `platform mount/unmount/replace`。
 
 **resume / create 均保持 opt-in：** 自定义平台仅当适配器声明 `resume = { bin, args(id, opts) }` 时 `sessions resume` 可用（否则报「无原生续跑」）；仅当声明 `create = { bin, args(opts) }` 时 `sessions new` 可用（否则报「该平台不支持新建会话」）。spawn 的可执行名解析：环境变量 `AGENTLRAY_<平台id>_BIN` > `~/.agentlray/settings.json` 的 `cliBins` `<id>` 键 > 适配器默认 `bin`。
 
 **信任边界：** 适配器以你的用户全权限执行任意代码（等同自己手动跑脚本）。只投递可信文件，必要时用 `AGENTLRAY_NO_PLUGINS=1` 逃生。`defaultDir()` 由适配器自行定义、可读自身 env；通用 `?dir=` / `--dir` 覆盖仍然生效。
 
-完整可运行、带注释的样例适配器（扁平 JSONL 平台，含 `find` / `collectFiles` / `watchParse` / `needsAgent` / resume 示例块）见 [docs/.local/custom-platform-example.zh-CN.md](.local/custom-platform-example.zh-CN.md)。
+完整可运行、带注释的样例适配器（扁平 JSONL 平台，含 `find` / `collectFiles` / `watchParse` / `needsAgent` 与 resume 示例块）见 [design/custom-platform-example.zh-CN.md](design/custom-platform-example.zh-CN.md)；分步引导见 [design/guide-custom-platforms.zh-CN.md](design/guide-custom-platforms.zh-CN.md)。
 
 ## API
 
+**多主机网关。** `lib/routes/proxy.js` 是第一个 `/api` 处理器：按 `X-Host-Id` 请求头（SSE 因 `EventSource` 无法设置请求头，改用 `?host=`）路由。默认/`local` 由本进程处理；远端主机则把请求转发到其隧道。`/api/hosts`、`/api/inbound`、`/api/dsh` 是**本机资源**，会返回 403 而不是被转发。下列列表/详情接口均支持 `?dir=` 参数覆盖默认目录。
+
 | 接口 | 说明 |
 |------|------|
-| `GET /api/status-labels` | 会话四态的统一状态词汇 `{ order, labels }`（两套 UI 的状态徽标/组头单一来源） |
-| `GET /api/agents` | 获取 OpenClaw Agent 列表（legacy 兼容端点：仅当 openclaw 已挂载时注册；openclaw 停用/卸载后 404，下同） |
-| `GET /api/agents/:name/sessions` | 获取指定 Agent 的会话列表（legacy 兼容，生命周期同上） |
-| `GET /api/agents/:name/sessions/:id` | 获取会话消息详情（legacy 兼容，生命周期同上） |
-| `GET /api/codex/sessions` | 获取 Codex 会话列表 |
-| `GET /api/codex/sessions/:id` | 获取 Codex 会话消息详情 |
-| `GET /api/claude-code/sessions` | 获取 Claude Code 会话列表 |
-| `GET /api/claude-code/sessions/:id` | 获取 Claude Code 会话消息详情 |
-| `GET /api/hermes/sessions` | 获取 Hermes 会话列表 |
-| `GET /api/hermes/sessions/:id` | 获取 Hermes 会话消息详情 |
-| `GET /api/omp/sessions` | 获取 OMP（oh-my-pi）会话列表 |
-| `GET /api/omp/sessions/:id` | 获取 OMP 会话消息详情 |
-| `GET /api/dsh/sessions` | 获取 DeepSeek Harness 会话列表 |
-| `GET /api/dsh/sessions/:id` | 获取 DeepSeek Harness 会话消息详情 |
-| `GET /api/gemini/sessions` | 获取 Gemini CLI 会话列表 |
-| `GET /api/gemini/sessions/:id` | 获取 Gemini CLI 会话消息详情 |
-| `GET /api/platforms` | 列出全部平台（内置 + 自定义 + broken）：含能力位、label 与加载错误 |
+| `GET /api/version` | `{ bootId, version }`——前端陈旧检测 + 跨主机版本提示 |
+| `GET /api/status-labels` | 会话四态的统一状态词汇 `{ order, labels }` |
+| `GET /api/sessions` | 多平台聚合列表（`?platform=a,b\|all`、`status`/`match`/`since`/`until`、`offset`/`limit`） |
+| `GET /api/:platform/sessions` | 某平台的会话列表（OpenClaw 默认枚举全部 agent） |
+| `GET /api/:platform/sessions/:id` | 获取会话消息详情 |
+| `GET /api/:platform/sessions/:id/resume-command` | 续跑命令串（与 CLI 共用的单一来源） |
 | `POST /api/:platform/sessions/new` | spawn 平台 CLI 开新会话（body `{ "message": "...", "cwd": "..." }`，均可空）。fire-and-forget：触发成功即返回 `{ triggered, platform, bin, args, command }`。404 平台不存在、422 平台无 create 契约（dsh / openclaw）、400 cwd 不存在或不是目录 |
-| `GET /api/spawn-map` | 获取 Agent spawn 关系图（legacy 兼容端点：仅当 openclaw 已挂载时注册；openclaw 停用/卸载后 404，`/api/spawn-tree` 同） |
-| `GET /api/insights` | 聚合分析（工具统计、错误聚类、趋势） |
-| `GET /api/prompts` | 按目录分组的各 session 真人 prompt |
-| `GET /api/prompts/analyze` | 模板聚类 + 效果归因 + Claude 建议（`?refresh=1` 重算，`?skipLlm=1` 仅聚类） |
+| `GET /api/:platform/sessions/:id/children[/:name]` | 会话派生的子 Agent 列表 / 详情（如 omp、claude-code） |
+| `GET /api/:platform/sessions/:id/export` | Markdown/HTML 导出（`format=md\|html`） |
+| `GET /api/otlp/:platform/:sessionId` | OTLP/JSON Trace 导出 |
+| `GET /api/agents` · `/api/agents/:name/sessions[/:id]` | OpenClaw 按 Agent 列举（仅 openclaw 挂载时注册，否则 404） |
+| `GET /api/spawn-map` · `/api/spawn-tree[/:sessionId]` | Agent spawn 关系图 / 关系树（OpenClaw；openclaw 卸载后 404） |
+| `GET /api/platforms` | 列出全部平台（package + project + user + broken）：含能力位、label 与加载错误 |
+| `PUT`/`DELETE /api/platforms/:id/mount` | 启用/停用平台（写 `settings.platforms.disabled`，重启生效） |
+| `PUT`/`DELETE /api/platforms/:id/replace` | 声明/撤销对内置平台的替代（写 `settings.platforms.replaced`） |
+| `GET /api/insights` · `GET /api/tools/audit` | 聚合分析 / 跨平台工具体检 |
+| `GET /api/prompts` · `/api/prompts/analyze` | 按目录分组的真人 prompt；模板聚类 + 效果归因 + LLM 建议（`?refresh=1`、`?skipLlm=1`） |
 | `POST /api/prompts/rewrite` | 通过配置的 LLM 后端改写单条 prompt（`{ "text": "..." }`；无可用后端时返回 503 及配置指引） |
-| `GET/PUT /api/settings` | 统一设置端点：所有服务端设置聚合在 `~/.agentlray/settings.json`（旧 `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` 首启幂等迁移）。PUT 只保存请求体提供的 section（`ui`/`cliBins`/`status`/`kanban`/`llm`），未提供者保持原值。`cliBins` 返回 `bin`/`configured`/`default`，空串 = 清除回退默认；`status`/`kanban` 返回 `value`/`configured`/`default`，保存即生效；`llm` 返回 `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey`（key 不回显） |
-| `GET /api/settings/cli-bins` | 只读兼容端点；与 `/api/settings` 的 `cliBins` 同构 |
+| `GET/POST/DELETE /api/prompts/hidden…` | 隐藏 prompt 哈希的列举 / 新增 / 删除 |
 | `GET /api/search` | 会话全文搜索（`?platform=all` 一次搜索全部平台，多关键词 AND） |
-| `GET /api/omp/sessions/:id/children` | 获取该 OMP 会话派生的子 Agent 列表 |
-| `GET /api/omp/sessions/:id/children/:name` | 获取指定子 Agent 的消息详情 |
-
-所有列表和详情接口均支持 `?dir=` 参数来覆盖默认目录。
+| `GET /api/watch` | SSE 实时尾随 + 状态推送（用 `?host=` 选择主机） |
+| `GET/PUT /api/settings` | 统一设置端点（`~/.agentlray/settings.json`；旧的分文件配置首启幂等迁移）。GET 返回 `ui`/`cliBins`/`dirs`/`status`/`kanban`/`llm`/`platforms`；PUT 只保存请求体提供的 section。`cliBins` → `bin`/`configured`/`default`；`dirs` → 各平台 `value`/`configured`/`envActive`/`default`；`status`/`kanban` → `value`/`configured`/`default`；`llm` → `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey`/`backend`（key 不回显） |
+| `GET /api/ui-selection` | 只读精简 `{ selectedPlatforms }`（仅已挂载平台），供前端初始化选择 |
+| `GET /api/settings/cli-bins` | 只读兼容端点；与 `/api/settings` 的 `cliBins` 同构 |
+| `GET/POST/PUT/DELETE /api/hosts…` · `POST /api/hosts/:id/connect\|disconnect` · `POST /api/hosts/:id/test` | 多主机 CRUD、连接/断开、连通性探测（本机资源） |
+| `GET /api/inbound` · `POST /api/inbound/hello` | 入站 peer 概览 / 心跳（本机资源） |
+| `GET/PUT /api/dsh/config` · `GET /api/dsh/status\|devices` · `GET /api/dsh/auth/providers` · `POST /api/dsh/auth/qr/start\|qr/poll\|logout` · `POST /api/dsh/test` | dsh 传输配置 / 登录（扫码 + 账号密码）/ 探测（本机资源） |
 
 ## 技术栈
 
-- **后端：** Node.js + Express
-- **前端：** `frontend/` 下的 React + Vite + TypeScript（默认 UI，服务自 `frontend/dist`）
-- **数据：** 直接从磁盘读取 JSONL 会话文件 / SQLite 数据库
+- **后端：** Node.js ≥ 22.13 + Express 4
+- **前端：** `frontend/` 下的 React 19 + Vite 6 + TypeScript（唯一 UI，服务自 `frontend/dist`）；状态用 zustand + `@tanstack/react-query`，组件基于 Radix + Tailwind，增量经 SSE 推送
+- **数据：** 直接从磁盘读取会话日志——JSONL、zstd 压缩 JSONL 与 SQLite（Hermes）；自身不落库
+- **工具链：** Biome 负责 lint/format，Node 内置测试运行器
 - **零外部 CDN** — 完全自包含，离线可用
 
 ## 支持的日志格式
@@ -339,9 +354,11 @@ OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳�
 
 ## 开发
 
-测试代码位于 `test/`，使用 Node 内置的测试运行器，无需额外依赖。先执行一次 `npm ci`，然后运行 `npm test`（即 `node --test test/*.test.js`）。测试会在随机端口上启动自己的服务实例，并把 `HOME` 及各平台目录都指向 `test/fixtures/home` 的临时副本，因此不会读取或修改你的真实会话日志。CI（`.github/workflows/test.yml`）在每次向 `master` 的 push 和 pull request 上以 Node 22 执行四个步骤：`npm ci`（其 `prepare` 脚本会构建 Web UI）、漂移检查（`git diff --exit-code lib/generated/diagnostics.cjs`）、`npx biome check .` 和 `npm test`。
+测试代码位于 `test/`，使用 Node 内置的测试运行器，无需额外依赖。先执行一次 `npm ci`，然后运行 `npm test`（即 `node --require ./test/setup-env.cjs --test test/*.test.js`）。setup 文件注入隔离的用户平台目录并注册 `@agentlray/shared` 别名；测试会在随机端口上启动自己的服务实例，并把 `HOME` 及各平台目录都指向 `test/fixtures/home` 的临时副本，因此不会读取或修改你的真实会话日志。`npm run lint` / `format` 运行 Biome。
 
-**新增平台只需两个文件**：在 `lib/platforms/<name>.js` 写一个适配器（针对该日志格式的 list / find / parse / normalize，`lib/platforms/shared.js` 提供元数据缓存、归一化消息工厂和会话排序），再到 `lib/platforms/index.js` 的 `PLATFORMS` 注册表登记一条。通用会话路由、搜索、watch（SSE 实时跟踪）、洞察、Prompt 提取、工具体检、OTLP 与 Markdown/HTML 导出全部通过该注册表解析平台，无需改动其他文件。**自定义平台**则完全不用改源码：把适配器放进 `~/.agentlray/platforms/` 即可（见 [自定义平台（Custom platforms）](#自定义平台custom-platforms)）。
+**没有 CI 测试工作流**。唯一的 GitHub Actions 工作流是 `.github/workflows/pages.yml`：它构建 demo（`npm run build:demo` → `VITE_DEMO=1`）并部署到 GitHub Pages。检查在本地执行：`npm test`、`npm run lint`，以及生成文件漂移检查（先 `npm run build:ui`，再 `git diff --exit-code lib/generated/diagnostics.cjs`）。`lib/generated/diagnostics.cjs` 由 `frontend/src/views/sessions/diagnostics.ts` 生成，**禁止手改**。
+
+**新增平台是新增一个适配器目录，而不是改表**。内置适配器位于 `lib/platforms/builtin/<id>/`（项目平台放在 `platforms/<id>/`），其 `index.js` 导出 `{ id, label, defaultDir, getSession, ... }` 及可选能力字段（`list`/`find`/`parse`、`resume`/`create`/`bin`、`resumeHooks`、`listChildren`/`getChild`、`collectFiles`、`watchParse`、`extractPromptsFromFile`、`inspect`）。注册表（`lib/platforms/index.js`）在 require 期同步合并 package / project / user 三个来源，只要适配器导出 `defaultDir` 与 `getSession` 就会被自动装载，无需改动其他文件。共享工具按裸名从 `@agentlray/shared/*` 引入（如 `@agentlray/shared/helpers`、`/status`、`/search`、`/watch`）。通用会话路由、搜索、watch（SSE 实时跟踪）、洞察、Prompt 提取、工具体检、OTLP 与 Markdown/HTML 导出全部按能力位经该注册表解析平台。**自定义平台**完全不用改源码：把适配器放进 `platforms/`（项目）或 `~/.agentlray/platforms/`（用户）即可（见 [自定义平台（Custom platforms）](#自定义平台custom-platforms)）。
 
 ## 常见问题
 
@@ -358,4 +375,4 @@ OpenClaw 的归档会话（`.jsonl.reset.*`、`.jsonl.deleted.*`）默认不纳�
 可以，打开 <https://bowenluo718.github.io/AgentLRay/>。这个 GitHub Pages 部署就是真实的 React UI，由 `.github/workflows/pages.yml` 构建，跑在 `frontend/src/demo/fixtures.json` 上 —— 这些 API fixture 由 `scripts/build-demo-fixtures.mjs` 从仓库里提交的合成示例日志 `frontend/demo/sample-logs` 生成。它不含任何真实用户会话，所以请把它当作界面导览，而不是数据。
 
 **想支持一个没列出的日志格式怎么办？**
-两个文件：在 `lib/platforms/<name>.js` 写一个适配器，实现该格式的 list / find / parse / normalize，然后在 `lib/platforms/index.js` 的 `PLATFORMS` 表里登记一条。所有通用路由都通过该注册表解析平台，无需改动其他文件。详见 [开发](#开发)。
+写一个适配器目录，至少导出 `defaultDir` 与 `getSession`（另加 `list`/`find`/`parse` 及可选能力字段）。注册表在启动时合并适配器，没有中心表要改：内置的放到 `lib/platforms/builtin/<id>/`，项目平台放到 `platforms/<id>/`（或 `AGENTLRAY_PROJECT_PLATFORMS_DIR`），用户适配器放到 `~/.agentlray/platforms/`。所有通用路由都通过该注册表解析平台。详见 [开发](#开发) 与 [自定义平台（Custom platforms）](#自定义平台custom-platforms)。

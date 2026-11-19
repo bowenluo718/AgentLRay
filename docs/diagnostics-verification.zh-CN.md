@@ -10,7 +10,7 @@
 npm test
 npm run build:ui
 npm run lint
-git diff --exit-code -- public/js/pure.js
+git diff --exit-code -- lib/generated/diagnostics.cjs
 node scripts/demo-diagnostics.cjs
 ```
 
@@ -31,7 +31,7 @@ node scripts/demo-diagnostics.cjs
 | 诊断/事件/OMP/复查专项套件 | 84 通过 |
 | UI 构建 | TypeScript 与 Vite 通过 |
 | Lint | 退出码 0；现有 91 条警告 / 159 条信息性提示 |
-| 遗留生成的 bundle | 无漂移 |
+| 生成的诊断 bundle | 无漂移（由 `frontend/src/views/sessions/diagnostics.ts` 重新生成） |
 | 复查持久化 | 保存、刷新、会话隔离与跨标签页更新通过 |
 | 复查失效 | 新增失败/完整结果变化会重开复查；过期笔记仍可区分 |
 | 存储失败 | 读取被拒、记录损坏与写入失败均被可见地报告；失败的保存从不宣称成功 |
@@ -70,7 +70,9 @@ node scripts/demo-diagnostics.cjs
 
 ## 复查可移植性验收
 
-下一增量加入显式的当前会话导出/导入，而非全历史备份。运行 `node --test test/review-transfer.test.js` 以执行其 17 个用例；合并后的诊断/复查专项套件含 103 个测试，完整套件含 233 个测试。上述较早的计数记录的是早期版本，而非当前套件规模。
+下一增量加入显式的当前会话导出/导入，而非全历史备份。运行 `node --require ./test/setup-env.cjs --test test/review-transfer.test.js` 以执行其 17 个用例。
+
+**当前套件规模（2026-11-19）：** `npm test` 运行 57 个文件共 727 个测试，全部通过。上述带日期的章节记录的是早期版本，而非当前套件规模。
 
 仅使用合成笔记与隔离浏览器上下文验证：
 

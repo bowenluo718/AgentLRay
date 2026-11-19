@@ -20,8 +20,8 @@
 
 ## 既有 CLI 工作流
 
-完整离线报告、`--summary` 以及显式的 `evidence` 命令自
-v1.24.0 起随包提供。下列示例使用源码检出；已安装用户可将
+完整离线报告、`--summary` 以及显式的 `evidence` 命令可通过已安装的
+`agentlray` 启动器使用。下列示例使用源码检出；已安装用户可将
 `node bin/agentlray.js` 替换为 `agentlray`。
 参见 [分层 CLI 契约](offline-inspect.md)。
 

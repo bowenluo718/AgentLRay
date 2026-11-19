@@ -20,7 +20,7 @@ AgentLRay 需要支持用户扩展内置 7 平台之外的新平台。现状注�
 - 发现/加载：`~/.agentlray/platforms/*.js`，`lib/platforms/index.js` 模块初始化末尾并入；**每文件 try/catch 隔离**，坏适配器标记 `broken` 不拖垮启动；`AGENTLRAY_NO_PLUGINS` 全局逃生。
 - id 正则 `^[a-z0-9][a-z0-9-]*$`，与既有 id 冲突即 broken。
 - 能力位缺谁谁缺位：无 `collectFiles` → search/prompts/tool-audit 缺位；无 `watchParse` → 无实时尾随（watch 路由对缺位返回 400）。
-- 明确不做：`inspect` 离线诊断仅内置；`resume` 内置按原生参数出厂（2026-10-30 扩充后覆盖 codex / claude-code / omp / dsh / gemini / hermes，见 [design-resume-more-platforms.zh-CN.md](design-resume-more-platforms.zh-CN.md)）+ 自定义平台 `resume` 字段 opt-in；不做 per-platform 启停开关（文件存在即启用）。
+- 明确不做：`inspect` 离线诊断仅内置（后续 v2 改为适配器 `inspect` hook opt-in）；`resume` 内置按原生参数出厂（2026-10-30 扩充后覆盖 codex / claude-code / omp / dsh / gemini / hermes，见 [design-resume-more-platforms.zh-CN.md](design-resume-more-platforms.zh-CN.md)；2026-11-10 `0c38d61` 起 dsh 移出，现为 codex / claude-code / omp / gemini / hermes）+ 自定义平台 `resume` 字段 opt-in；不做 per-platform 启停开关（文件存在即启用；后续 v2 已支持 mount/unmount）。
 - 信任边界：适配器以用户全权限执行任意 JS，文档明示只放可信代码，不做沙箱。
 - 前端：`GET /api/platforms` 服务端派生列表；React 主前端改服务端驱动，legacy `public/js/app.js` 最小侵入（内置表 + 追加自定义 + 通用分发兜底 + broken 徽标）。
 
@@ -29,3 +29,17 @@ AgentLRay 需要支持用户扩展内置 7 平台之外的新平台。现状注�
 - 正向：任何平台可无损接入全部 surface；契约 = 既有注册表契约的直译，复用成本低；加载器供 server 与 CLI 共享，视图一致。
 - 负向/约束：新平台必须有人会写一点 JS；前端必须从静态枚举迁移到服务端驱动（React 全量、legacy 侵入处多——这是 v1 里最重的两块）；watch 路由必须补 `watchParse` 守卫（现状缺位会炸）。
 - 信任权衡：允许任意 JS = 本机一致信任（等同用户自己跑脚本），换取「无需为每种未来平台预置描述语言」的灵活；此前的 JSON 声明式因表达力不足被否。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：Accepted，已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 运行时 JS 平台适配器加载 | ✅ 已实现 | `lib/platforms/loader.js`、`lib/platforms/shared-alias.js` |
+| 信任边界与 `AGENTLRAY_NO_PLUGINS` | ✅ 已实现 | `lib/platforms/loader.js` |
+| 平台目录/契约/CLI 表面 | ✅ 已实现 | `~/.agentlray/platforms/`、`bin/platform.js` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

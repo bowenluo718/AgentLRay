@@ -10,9 +10,9 @@ AgentLRay 的 UI 对人是友好的，但一个编码 agent、本机脚本或 CI
 
 ## 分层 CLI：先摘要，按需取证
 
-版本 **1.24.0** 新增 `inspect --summary --json`、显式的 `evidence`
+CLI 提供 `inspect --summary --json`、显式的 `evidence`
 命令以及结构化的 JSON 失败。完整成功的 `inspect --json`
-报告与默认文本报告保留原有 schema 与行为；所报告的程序包版本号会递增。下面示例使用源码检出；把
+报告与默认文本报告保留原有 schema 与行为。下面示例使用源码检出；把
 `node bin/agentlray.js` 换成已安装的 `agentlray` 即可使用相同参数。
 
 ```sh
@@ -93,7 +93,7 @@ node bin/agentlray.js evidence --platform omp /path/to/session.jsonl \
 | Code | Meaning |
 | --- | --- |
 | `INVALID_ARGUMENT` | Missing/duplicate/unknown option, invalid range or incompatible mode |
-| `UNSUPPORTED_PLATFORM` | Choose OMP, Codex or Claude Code explicitly |
+| `UNSUPPORTED_PLATFORM` | 所选平台未声明 `inspect` hook；报错信息会列出注册表在 require 期解析出的当前集合（内置 OMP / Codex / Claude Code + opt-in 的自定义适配器） |
 | `INPUT_UNREADABLE`, `NOT_REGULAR_FILE`, `INPUT_TOO_LARGE` | Input could not be read under the single-file contract |
 | `INPUT_CHANGED` | File metadata or readable length changed during the snapshot read |
 | `INVALID_UTF8`, `INVALID_JSON`, `INVALID_RECORD`, `UNSUPPORTED_RECORD` | Invalid encoding, line syntax, object or adapter record shape |
@@ -132,8 +132,10 @@ node bin/agentlray.js inspect --platform omp \
 
 ### 输入契约
 
-- 必填 `--platform`：`codex`、`omp` 或 `claude-code`。这是离线路径校验的格式；看板支持更多平台，
-  但本命令不对它们的容器/数据库声称兼容。
+- 必填 `--platform`：`codex`、`omp` 或 `claude-code`。这是离线路径校验的**内置**格式；看板支持更多平台，
+  但本命令不对它们的容器/数据库声称兼容。平台集在 require 期从平台注册表解析：项目/用户适配器只要声明
+  `inspect` hook（`normalize` + `rawToolEntries`）即可加入 `inspect` 与 `evidence`（例如 `co-mind`），
+  「Unsupported platform」报错会列出当前可用集合。
 - 恰好一个普通的、稳定的 UTF-8 JSONL 文件，最大 **64 MiB**。不接受目录、stdin、压缩流或数据库文件。
   若文件名以 `-` 开头，请在它之前使用 `--`。
 - 读取初始文件长度，读取后再检查一次元数据。若源已变化，等它稳定后重试。输出哈希标识的是实际分析的字节；
@@ -235,7 +237,7 @@ for (const event of report.events) {
 
 ## 中文使用与边界
 
-### 分层 CLI（自 1.24.0 起提供）
+### 分层 CLI
 
 先用 `node bin/agentlray.js inspect --platform omp session.jsonl --summary --json`
 读取摘要，再把报告的 `source.sha256` 与某条引用的 `line` 传给
@@ -257,7 +259,7 @@ JSON 模式失败不再返回空 stdout，而是稳定的 kind=error、error.cod
 agentlray inspect --platform omp session.jsonl --json > evidence.json
 ```
 
-当前只支持明确指定的 Codex、OMP、Claude Code JSONL，单文件上限 64 MiB。读取期间变化、截断坏行、错误格式都会失败；已知标准化丢失会输出 `complete:false` 与问题行号，不会假绿。
+当前内置支持明确指定的 Codex、OMP、Claude Code JSONL（声明 `inspect` hook 的自定义适配器同样可用），单文件上限 64 MiB。读取期间变化、截断坏行、错误格式都会失败；已知标准化丢失会输出 `complete:false` 与问题行号，不会假绿。
 
 报告默认不含日志正文、路径、命令参数、原始 ID 或笔记，只保留计数、状态、关系、输入/规则哈希和原始行号。哈希与活动计数仍可能敏感，不是匿名化保证。原始文件必须自行保留，报告不能重建日志。
 

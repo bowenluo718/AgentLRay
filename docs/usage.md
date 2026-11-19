@@ -33,8 +33,8 @@ Detailed feature catalog, screenshots, installation alternatives, configuration 
 - **Collapsible summary** — Fold the session summary away when you want the full height for messages
 - **Auto-refresh** — Live-updating session list and messages
 - **Kanban board** — A four-state task board view (`awaiting-input` / `working` / `waiting` / `stopped`) built from the same list cache and live status as the sidebar; columns truncate at `maxPerStatus` (default 20, configurable under Settings → 任务看板), stack vertically on narrow screens. Click a card to open that session in the Sessions view.
-- **Light / dark theme** — Toggle between light and dark in the top bar (follows the system once on first launch, then fixed by your manual choice, persisted in `agent-xray-settings`).
-- **Settings panel** — Configure platform directories from the UI, persisted in localStorage
+- **Light / dark theme** — Toggle between light and dark in the top bar (follows the system once on first launch, then fixed by your manual choice; persisted per host in `agent-lray-settings:<hostId>`).
+- **Settings panel** — Configure platform directories, CLI commands, status windows, kanban limits and the LLM backend from the UI; saved server-side in `~/.agentlray/settings.json` (per-host selection state is cached in the browser)
 - **Keyboard navigation** — Arrow keys to move between sessions
 
 ---
@@ -67,7 +67,7 @@ Switch between OpenClaw, Codex, Claude Code, Hermes, OMP, DeepSeek Harness and G
 
 ### Settings
 
-Configure platform directories from the UI. Changes are saved to localStorage — no server restart needed.
+Configure platform directories and other options from the UI. Changes are saved server-side in `~/.agentlray/settings.json` and take effect immediately (platform enable/disable takes effect after a restart).
 
 ![Settings](../screenshots/settings-panel.png)
 
@@ -178,7 +178,7 @@ Click the **Prompts** tab (next to Sessions / Insights) to see every real human 
 
 ### Custom directories
 
-**Via UI:** Click the gear icon in the sidebar to set custom paths per platform. Saved to localStorage, no restart needed.
+**Via UI:** Open Settings from the app top bar to set custom paths per platform. Saved server-side in `~/.agentlray/settings.json` (the `dirs` section) and applied immediately. When a platform's directory environment variable is active, the configured path for that platform is ignored.
 
 **Via environment variables:**
 
@@ -228,6 +228,21 @@ Session status (awaiting-input / working / waiting / stopped) depends on three t
 | Active work ceiling | 30 min | Long tool runs / deep thinking stay working within this bound, then degrade |
 | History ceiling | 12 h | Sessions without an end marker older than this → stopped; upper bound for awaiting-input / waiting |
 
+### Multi-host (remote AgentLRay)
+
+The dashboard can browse another machine's AgentLRay through the same UI. Hosts are managed from the top-bar **Settings → Hosts** dialog and persisted to `~/.agentlray/hosts.json` (**0600**, a separate file from `settings.json`; it may hold encrypted SSH key material). A built-in `local` host always sits first and is always connected. Only the currently selected host keeps an open tunnel — switching away closes the previous one, and process exit kills any active SSH child.
+
+Two transports per host:
+
+| Transport | How it connects | Credentials |
+|-----------|-----------------|-------------|
+| `ssh` | Spawns a system `ssh -L <localPort>:127.0.0.1:<remoteAgentLrayPort>` tunnel from the client; the remote AgentLRay keeps binding `127.0.0.1`. Override the binary with `AGENTLRAY_SSH_BIN`. | Zero stored passwords — identities/fingerprints come from `~/.ssh/config`, `ssh-agent` and `known_hosts`. An optional private key is stored as ciphertext (`identityKeyEnc`) and materialised into a `0600` temporary file for the tunnel. |
+| `dsh` | Uses the `ds-harness-remote` encrypted channel plus loopback port forwarding rather than SSH. | Login by QR or account password; only the resulting token is stored, never the password. |
+
+The global dsh section (`role` = `host`/`client`/`both`, `serverUrl`, `deviceName`, `allowedPorts`, default `[3800]`) lives at the top level of `hosts.json` and is edited via **Settings → Hosts → dsh**; an older `settings.json` `dsh` section migrates in automatically on first read.
+
+Requests are routed to the selected host by the `X-Host-Id` header (the frontend `src/api/client.ts` injects it); because `EventSource` cannot set headers, the SSE stream at `/api/watch` selects the host with `?host=`. The `/api/hosts*`, `/api/inbound*` and `/api/dsh*` endpoints are **local resources** — addressing them with a remote `X-Host-Id` returns 403 instead of forwarding.
+
 ## Custom platforms
 
 AgentLRay lets you plug in extra platforms without changing the source: write a JavaScript **platform adapter** and drop it into a platform directory. On startup the loader validates each file and merges valid adapters into the platform registry; every generic surface (session routes, search, prompts, tool audit, watch, export, CLI) then resolves the new platform by capability bit. Invalid or conflicting files are marked **broken** (visible in the UI and on `platform list`) and never break startup.
@@ -275,56 +290,56 @@ agentlray platform export <id> [--out <dir>] [--force] [--no-replace] [--json]  
 
 **`platform export`** migrates a package (built-in) or project platform to a **user thin adapter** in the platform directory (default `~/.agentlray/platforms`, override with `--out <dir>` or `AGENTLRAY_PLATFORMS_DIR`): it writes `<id>.js` plus, by default, adds the id to `settings.replaced` (`--no-replace` skips that) and removes it from `settings.disabled` if present. The generated adapter is a thin wrapper that resolves the real implementation via `AGENTLRAY_PKG_ROOT` (set by the loader to the package root), so a package upgrade follows automatically. Options: `--force` overwrites an existing file; `--out <dir>` targets a directory; `--json` prints `{schemaVersion:1, kind:"platform-export", id, file, origin, replaced, restart:true, …}`. A source already `user`-origin is refused (`export-user-origin`); conflicts error `export-exists` (use `--force`). Because the adapter runs with your user permissions, the CLI prints a trust note — only deliver trusted adapter files. **Requirement:** the generated thin adapter depends on `AGENTLRAY_PKG_ROOT` injected by the loader and can only be loaded through AgentLRay; requiring it directly fails with `AGENTLRAY_PKG_ROOT is not set; load this adapter through AgentLRay.`
 
-**Web UI:** built-in and custom platforms appear in the same platform bar (both React and legacy UI). A custom platform whose file fails to load shows a broken badge with its error and takes no part in queries.
+**Web UI:** built-in, project and custom platforms appear in the same platform bar. A custom platform whose file fails to load shows a broken badge with its error and takes no part in queries; enable/disable and replace declarations are managed in Settings → Platforms or via `platform mount/unmount/replace`.
 
 **Resume / create stay opt-in:** a custom platform gets CLI `sessions resume` only when the adapter declares `resume = { bin, args(id, opts) }` (otherwise "no native resume command"); it gets CLI `sessions new` only when it declares `create = { bin, args(opts) }` (otherwise "no native create command"). The spawned binary resolves via env var `AGENTLRAY_<PLATFORM_ID>_BIN` > `~/.agentlray/settings.json`'s `cliBins` `<id>` key > the adapter's default `bin`.
 
 **Trust:** an adapter executes with your full user permissions (equivalent to running a script yourself). Only place trusted files; when in doubt use `AGENTLRAY_NO_PLUGINS=1`. Define `defaultDir()` inside the adapter and read your own env if needed — the generic `?dir=` / `--dir` override still applies.
 
-A complete runnable, annotated sample adapter (flat JSONL platform, with `find` / `collectFiles` / `watchParse` / `needsAgent` and a resume snippet) is in [docs/.local/custom-platform-example.zh-CN.md](.local/custom-platform-example.zh-CN.md).
+A complete runnable, annotated sample adapter (flat JSONL platform, with `find` / `collectFiles` / `watchParse` / `needsAgent` and a resume snippet) is in [design/custom-platform-example.zh-CN.md](design/custom-platform-example.zh-CN.md); the guided walkthrough is [design/guide-custom-platforms.zh-CN.md](design/guide-custom-platforms.zh-CN.md).
 
 ## API
 
+**Multi-host gateway.** `lib/routes/proxy.js` is the first `/api` handler: it routes by the `X-Host-Id` header (or `?host=` for SSE, since `EventSource` cannot set headers). Default/`local` serves this process; a remote host forwards the request to its tunnel. `/api/hosts`, `/api/inbound` and `/api/dsh` are **local resources** and return 403 rather than being forwarded. All list/detail endpoints below accept an optional `?dir=` parameter to override the default directory.
+
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/status-labels` | Unified session-status vocabulary `{ order, labels }` for the four states (single source for both UIs) |
-| `GET /api/agents` | List OpenClaw agents (legacy shim: registered only while openclaw is mounted; 404 once openclaw is disabled/removed — same for the two rows below) |
-| `GET /api/agents/:name/sessions` | List sessions for an agent (legacy shim, same lifecycle) |
-| `GET /api/agents/:name/sessions/:id` | Get session messages (legacy shim, same lifecycle) |
-| `GET /api/codex/sessions` | List Codex sessions |
-| `GET /api/codex/sessions/:id` | Get Codex session messages |
-| `GET /api/claude-code/sessions` | List Claude Code sessions |
-| `GET /api/claude-code/sessions/:id` | Get Claude Code session messages |
-| `GET /api/hermes/sessions` | List Hermes sessions |
-| `GET /api/hermes/sessions/:id` | Get Hermes session messages |
-| `GET /api/omp/sessions` | List OMP (oh-my-pi) sessions |
-| `GET /api/omp/sessions/:id` | Get OMP session messages |
-| `GET /api/dsh/sessions` | List DeepSeek Harness sessions |
-| `GET /api/dsh/sessions/:id` | Get DeepSeek Harness session messages |
-| `GET /api/gemini/sessions` | List Gemini CLI sessions |
-| `GET /api/gemini/sessions/:id` | Get Gemini CLI session messages |
-| `GET /api/platforms` | List all platforms (built-in + custom + broken) with capability bits, labels and load errors |
-| `POST /api/:platform/sessions/new` | Spawn the platform CLI to start a new session (`{ "message": "...", "cwd": "..." }`, both optional). Fire-and-forget: answers `{ triggered, platform, bin, args, command }` once the spawn is triggered. 404 unknown platform, 422 platform without a create contract (dsh / openclaw), 400 cwd missing or not a directory |
-| `GET /api/spawn-map` | Build agent spawn relationship map (legacy shim: registered only while openclaw is mounted; 404 once openclaw is disabled/removed — `/api/spawn-tree` likewise) |
-| `GET /api/insights` | Aggregate analytics (tool stats, error clusters, trends) |
-| `GET /api/prompts` | Real human prompts per session, grouped by directory |
-| `GET /api/prompts/analyze` | Template clustering + attribution + Claude suggestions (`?refresh=1` to recompute, `?skipLlm=1` for clustering only) |
+| `GET /api/version` | `{ bootId, version }` — frontend staleness detection + cross-host version hint |
+| `GET /api/status-labels` | Unified session-status vocabulary `{ order, labels }` for the four states |
+| `GET /api/sessions` | Aggregate multi-platform list (`?platform=a,b\|all`, `status`/`match`/`since`/`until`, `offset`/`limit`) |
+| `GET /api/:platform/sessions` | List sessions for a platform (OpenClaw enumerates all agents by default) |
+| `GET /api/:platform/sessions/:id` | Get a session's messages |
+| `GET /api/:platform/sessions/:id/resume-command` | Resume command string (single source shared with the CLI) |
+| `POST /api/:platform/sessions/new` | Spawn the platform CLI to start a new session (`{ "message": "...", "cwd": "..." }`, both optional). Fire-and-forget: answers `{ triggered, platform, bin, args, command }`. 404 unknown platform, 422 platform without a create contract (dsh / openclaw), 400 cwd missing or not a directory |
+| `GET /api/:platform/sessions/:id/children[/:name]` | Sub-agents spawned by a session (e.g. omp, claude-code) |
+| `GET /api/:platform/sessions/:id/export` | Markdown/HTML export (`format=md\|html`) |
+| `GET /api/otlp/:platform/:sessionId` | OTLP/JSON trace export |
+| `GET /api/agents` · `/api/agents/:name/sessions[/:id]` | OpenClaw per-agent listing (registered only while openclaw is mounted; 404 otherwise) |
+| `GET /api/spawn-map` · `/api/spawn-tree[/:sessionId]` | Agent spawn relationship map / tree (OpenClaw; 404 once openclaw is unmounted) |
+| `GET /api/platforms` | List all platforms (package + project + user + broken) with capability bits, labels and load errors |
+| `PUT`/`DELETE /api/platforms/:id/mount` | Enable/disable a platform (writes `settings.platforms.disabled`, restart to take effect) |
+| `PUT`/`DELETE /api/platforms/:id/replace` | Declare/undo a built-in replacement (writes `settings.platforms.replaced`) |
+| `GET /api/insights` · `GET /api/tools/audit` | Aggregate analytics / cross-platform tool health |
+| `GET /api/prompts` · `/api/prompts/analyze` | Real human prompts grouped by directory; clustering + attribution + LLM suggestions (`?refresh=1`, `?skipLlm=1`) |
 | `POST /api/prompts/rewrite` | Rewrite a single prompt via the configured LLM backend (`{ "text": "..." }`; 503 with guidance when no backend is available) |
-| `GET/PUT /api/settings` | Unified settings endpoint: all server-side settings aggregated in `~/.agentlray/settings.json` (legacy `ui-settings.json`/`cli-bins.json`/`status-config.json`/`kanban-config.json`/`llm.json` migrate in on first start). PUT saves only the sections supplied (`ui`/`cliBins`/`status`/`kanban`/`llm`), others untouched. `cliBins` returns `bin`/`configured`/`default`, empty string clears (fall back to default); `status`/`kanban` return `value`/`configured`/`default`, saving takes effect immediately; `llm` `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey` (key never echoed back) |
+| `GET/POST/DELETE /api/prompts/hidden…` | List/add/remove hidden prompt hashes |
+| `GET /api/search` | Full-text search across sessions (`?platform=all` searches every platform, multi-keyword AND) |
+| `GET /api/watch` | SSE real-time tail + status push (select the host via `?host=`) |
+| `GET/PUT /api/settings` | Unified settings (`~/.agentlray/settings.json`; legacy per-file configs migrate in on first start). GET returns `ui`/`cliBins`/`dirs`/`status`/`kanban`/`llm`/`platforms`; PUT saves only the supplied sections. `cliBins` → `bin`/`configured`/`default`; `dirs` → per-platform `value`/`configured`/`envActive`/`default`; `status`/`kanban` → `value`/`configured`/`default`; `llm` → `baseUrl`/`model`/`analysisTimeoutMs`/`hasApiKey`/`backend` (key never echoed) |
+| `GET /api/ui-selection` | Narrow read-only `{ selectedPlatforms }` (mounted only) for the frontend's initial selection |
 | `GET /api/settings/cli-bins` | Read-only compat endpoint; same `bin`/`configured`/`default` shape as `/api/settings`'s `cliBins` |
-| `GET /api/search` | Full-text search across sessions (`?platform=all` searches every platform at once, multi-keyword AND) |
-| `GET /api/omp/sessions/:id/children` | List sub-agents spawned by an OMP session |
-| `GET /api/omp/sessions/:id/children/:name` | Get a spawned sub-agent's messages |
-
-All list/detail endpoints accept an optional `?dir=` parameter to override the default directory.
+| `GET/POST/PUT/DELETE /api/hosts…` · `POST /api/hosts/:id/connect\|disconnect` · `POST /api/hosts/:id/test` | Multi-host CRUD, connect/disconnect, connectivity probe (local resource) |
+| `GET /api/inbound` · `POST /api/inbound/hello` | Inbound peer overview / heartbeat (local resource) |
+| `GET/PUT /api/dsh/config` · `GET /api/dsh/status\|devices` · `GET /api/dsh/auth/providers` · `POST /api/dsh/auth/qr/start\|qr/poll\|logout` · `POST /api/dsh/test` | dsh transport config / login (QR + account password) / probe (local resource) |
 
 ---
 
 ## Tech Stack
 
-- **Backend:** Node.js + Express
-- **Frontend:** React + Vite + TypeScript under `frontend/` (default UI, served from `frontend/dist`)
-- **Data:** Reads JSONL session files directly from disk
+- **Backend:** Node.js ≥ 22.13 + Express 4
+- **Frontend:** React 19 + Vite 6 + TypeScript under `frontend/` (the only UI, served from `frontend/dist`); state via zustand + `@tanstack/react-query`, components on Radix + Tailwind, updates over SSE
+- **Data:** Reads session logs directly from disk — JSONL, zstd-compressed JSONL and SQLite (Hermes); no database of its own
+- **Tooling:** Biome for lint/format, Node's built-in test runner
 - **Zero external CDN** — Everything is self-contained, works offline
 
 ---
@@ -349,9 +364,11 @@ Archived OpenClaw sessions (`.jsonl.reset.*`, `.jsonl.deleted.*`) are excluded f
 
 ## Development
 
-Tests live in `test/` and use Node's built-in test runner — no extra dependencies. Run `npm ci` once, then `npm test` (`node --test test/*.test.js`). The tests start their own server on a random port with `HOME` and every platform directory pointed at a throwaway copy of `test/fixtures/home`, so your real session logs are never read or modified. CI (`.github/workflows/test.yml`) runs on Node 22 for every push and pull request to `master`, in four steps: `npm ci` (whose `prepare` script builds the web UI), a drift check (`git diff --exit-code lib/generated/diagnostics.cjs`), `npx biome check .`, and `npm test`.
+Tests live in `test/` and use Node's built-in test runner — no extra dependencies. Run `npm ci` once, then `npm test` (`node --require ./test/setup-env.cjs --test test/*.test.js`). The setup file injects an isolated user-platform directory and registers the `@agentlray/shared` alias; the tests start their own server on a random port with `HOME` and every platform directory pointed at a throwaway copy of `test/fixtures/home`, so your real session logs are never read or modified. `npm run lint` / `format` run Biome.
 
-**Adding a platform** takes two files: write one adapter in `lib/platforms/<name>.js` (list / find / parse / normalize for that log format — `lib/platforms/shared.js` provides the metadata cache, the normalized-message factory and the session sort), then register it in the `PLATFORMS` table in `lib/platforms/index.js`. The generic session routes, search, watch (SSE tail), insights, prompts, tool audit, OTLP and Markdown/HTML export all resolve platforms through that registry — no other file needs to change. For a **custom** platform you do not touch the source at all: drop an adapter into `~/.agentlray/platforms/` (see [Custom platforms](#custom-platforms)).
+There is **no CI test workflow**. The only GitHub Actions workflow is `.github/workflows/pages.yml`, which builds the demo (`npm run build:demo` → `VITE_DEMO=1`) and deploys it to GitHub Pages. Run the checks locally: `npm test`, `npm run lint`, and a drift check for the generated diagnostics bundle (`npm run build:ui` then `git diff --exit-code lib/generated/diagnostics.cjs`) — `lib/generated/diagnostics.cjs` is generated from `frontend/src/views/sessions/diagnostics.ts` and must never be hand-edited.
+
+**Adding a platform** means writing one adapter directory, not editing a table. Built-ins live in `lib/platforms/builtin/<id>/` (with a `platforms/<id>/` directory for project platforms); each `index.js` exports `{ id, label, defaultDir, getSession, ... }` plus optional capability fields (`list`/`find`/`parse`, `resume`/`create`/`bin`, `resumeHooks`, `listChildren`/`getChild`, `collectFiles`, `watchParse`, `extractPromptsFromFile`, `inspect`). The registry (`lib/platforms/index.js`) merges package, project and user sources synchronously at require time, so a new adapter is picked up automatically as long as it exports `defaultDir` and `getSession` — no other file changes. Shared helpers are imported by bare name from `@agentlray/shared/*` (e.g. `@agentlray/shared/helpers`, `/status`, `/search`, `/watch`). The generic session routes, search, watch (SSE tail), insights, prompts, tool audit, OTLP and Markdown/HTML export all resolve platforms through that registry by capability bit. For a **custom** platform you do not touch the source at all: drop an adapter into `platforms/` (project) or `~/.agentlray/platforms/` (user) — see [Custom platforms](#custom-platforms).
 
 ---
 
@@ -370,4 +387,4 @@ No. CLI coding agents already write complete session logs to disk, and AgentLRay
 Open <https://bowenluo718.github.io/AgentLRay/>. That GitHub Pages deployment is the real React UI, built by `.github/workflows/pages.yml`, running against `frontend/src/demo/fixtures.json` — API fixtures generated from the synthetic sample logs committed under `frontend/demo/sample-logs` by `scripts/build-demo-fixtures.mjs`. It contains no real user sessions, so treat it as a UI tour rather than as data.
 
 **How do I add support for a log format that is not listed?**
-Two files: write an adapter at `lib/platforms/<name>.js` implementing list / find / parse / normalize for that format, then register it in the `PLATFORMS` table in `lib/platforms/index.js`. Every generic route resolves platforms through that registry, so no other file needs to change. See [Development](#development).
+Write an adapter directory exporting at least `defaultDir` and `getSession` (plus `list`/`find`/`parse` and any optional capability fields). The registry merges adapters at startup, so there is no central table to edit: put it in `lib/platforms/builtin/<id>/` for a built-in, a project `platforms/<id>/` directory (or `AGENTLRAY_PROJECT_PLATFORMS_DIR`), or `~/.agentlray/platforms/` for a user adapter. Every generic route resolves platforms through that registry. See [Development](#development) and [Custom platforms](#custom-platforms).

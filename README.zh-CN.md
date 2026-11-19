@@ -10,7 +10,6 @@
 
 [**在线体验**](https://bowenluo718.github.io/AgentLRay/) · [快速开始](#快速开始) · [证据与边界](#证据与边界) · [路线图](docs/ROADMAP.md) · [English](README.md)
 
-[![测试](https://img.shields.io/github/actions/workflow/status/bowenluo718/AgentLRay/test.yml?label=tests)](https://github.com/bowenluo718/AgentLRay/actions/workflows/test.yml)
 [![npm](https://img.shields.io/npm/v/@bowenluo718/agent-lray)](https://www.npmjs.com/package/@bowenluo718/agent-lray)
 ![Node.js](https://img.shields.io/badge/Node.js-22.13+-339933)
 [![MIT 协议](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -102,13 +101,16 @@ node bin/agentlray.js inspect --platform omp \
 - **修改前后的验证。**区分先前、重叠和后续检查；管道整体成功，不等于其中测试片段通过。
 - **哪些情况仍未知。**显式展示缺失、执行中、取消和有歧义的结果，不把不完整日志涂成绿色。
 - **完整会话上下文。**浏览工具参数、返回值、Trace 和子 Agent；跨平台搜索，按轮次查看 token 及日志已报告的费用。
-- **可选工具，不是使用门槛。**添加复核笔记、迁移精确匹配的复核、整理 prompt 或归档会话；不使用这些功能也能查看自动证据。
+- **远端主机。**通过 `ssh` 隧道或 dsh 加密通道连接另一台机器上的 AgentLRay，同一界面查看其日志；主机管理与入站 peer 保留在各本机。
+- **可选工具，不是使用门槛。**添加复核笔记、迁移精确匹配的复核，或整理 prompt；不使用这些功能也能查看自动证据。
 
 [完整功能与截图集 →](docs/usage.zh-CN.md#功能特性) · [诊断规则及适用边界 →](docs/diagnostics.md)
 
 ## 兼容范围
 
-**看板支持：**OpenClaw、Codex、Claude Code、Hermes、OMP、DeepSeek Harness、Gemini CLI。Hermes 使用 SQLite，其余六个适配器读取 JSONL 类日志。DeepSeek Harness 压缩日志需要 Node.js ≥ 22.15。
+**看板支持：**OpenClaw、Codex、Claude Code、Hermes、OMP、DeepSeek Harness、Gemini CLI。Hermes 使用 SQLite，其余六个适配器读取 JSONL 类日志。DeepSeek Harness 压缩日志需要 Node.js ≥ 22.15。自定义平台在运行时从项目 `platforms/` 目录或 `~/.agentlray/platforms` 加载。
+
+**多主机：**通过 `ssh` 隧道或 dsh 加密通道连接另一台机器上的 AgentLRay；主机管理与入站 peer 保留在各本机。
 
 **离线 `inspect`：**仅支持 Codex、OMP、Claude Code；一次读取一个稳定的 UTF-8 JSONL 文件，上限 64 MiB。已知适配器信息丢失会报告覆盖不完整，不会假装结果干净。看板支持某种格式，不等于所有格式拥有同等诊断覆盖。
 

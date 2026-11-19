@@ -32,3 +32,17 @@ AgentLRay 现状只有「观察 + 续跑」能力：看板/CLI 能列会话、�
 - 正向：全部内置 + 自定义平台获得统一「新建会话」能力；create 与 resume 完全对称，命令串单一真源、适配器最简；dsh 如实降级不误报。
 - 负向/约束：web 真实 spawn 长驻 agent 且不展示输出——用户需在终端/平台侧自行观察结果（fire-and-forget 取舍）；内置新建命令需逐平台 `--help` 实测定格（codex/claude/gemini/hermes 当前为推断形态）；dsh 用户无法从 web/CLI 一键新建，只能在 TUI 手动开。
 - 范围取舍：dsh 交互式、进程生命周期管理（查询/终止）、web 展示 spawn 输出，均明确不做，留待未来按需扩展。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：Accepted，已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 内置平台 `create` 契约（codex / claude-code / omp / gemini / hermes；dsh / openclaw 不可建） | ✅ 已实现（`NEW_BINS` 模块级表已删除，改为适配器内联 `create` 声明） | `lib/new.js`、`lib/platforms/shared/contracts.js`、各平台 `index.js` 的 `create` |
+| CLI `sessions new` | ✅ 已实现 | `bin/sessions.js` |
+| Web「新建任务」+ POST 路由 | ✅ 已实现 | `lib/routes/sessions.js`、`frontend/src/views/kanban` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

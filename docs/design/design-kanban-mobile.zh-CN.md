@@ -133,3 +133,17 @@ useEffect(() => {
 
 - 5s 轮询 + SSE 的弱网流量成本：用户明确接受，不再议。
 - 平板 768–900 视口下侧栏挤压列宽（~140px/列）：用户明确不处理，按现状桌面布局交付。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已实现（文档内「待实现」为历史状态）**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| <768 纵向堆叠、每列默认 1 卡 | ✅ 已实现 | `frontend/src/views/kanban/KanbanView.tsx:94,131` |
+| 单列展开（`expandedStatus`） | ✅ 已实现 | `frontend/src/views/kanban/KanbanView.tsx:89` |
+| `kanbanLib` 单测（§5 表中「新增（建议）」） | ➖ 未实现 | 前端无测试运行器（`frontend/package.json` 只有 `dev`/`build`/`preview`），纯函数靠 `tsc -b` + 冒烟验证 |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

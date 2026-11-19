@@ -132,3 +132,17 @@ agentlray sessions new [message...] --platform <id> [--dir <cwd>] [--run]
 - **P4 收尾**：内置 `--help` 实测校正、`docs/usage*` 章节、词表/ADR/本文档登记核对。
 
 > 与既有约定一致：中间文档入 `docs/.local/` 并按 `README.md` 登记；`frontend/` 是唯一功能开发面，legacy `public/` 冻结快照只接安全修复，**新功能不落 legacy**。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 内置平台 `create` 契约（codex / claude-code / omp / gemini / hermes；dsh / openclaw 不可建） | ✅ 已实现（`NEW_BINS` 模块级表已删除，改为适配器内联 `create` 声明） | `lib/new.js`、`lib/platforms/shared/contracts.js`、各平台 `index.js` |
+| CLI `sessions new` | ✅ 已实现 | `bin/sessions.js` |
+| Web 新建任务弹窗 + POST 路由 | ✅ 已实现 | `frontend/src/views/kanban`、`lib/routes/sessions.js` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

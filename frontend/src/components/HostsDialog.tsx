@@ -112,16 +112,11 @@ function InboundBadge({ count, peers }: { count: number; peers: InboundPeer[] })
   );
 }
 
-function StatusBadge({ status, error }: { status: HostStatus; error: string | null }) {
+function StatusBadge({ status }: { status: HostStatus }) {
   return (
     <span className="flex items-center gap-1.5">
       <span className={cn('h-2 w-2 rounded-full', HOST_STATUS_DOT[status] ?? HOST_STATUS_DOT.disconnected)} />
       <span className="text-[11px] text-muted-foreground">{HOST_STATUS_LABEL[status] ?? status}</span>
-      {status === 'error' && error ? (
-        <span className="max-w-[12rem] truncate text-[10px] text-destructive" title={error}>
-          {error}
-        </span>
-      ) : null}
     </span>
   );
 }
@@ -245,6 +240,7 @@ export function HostsDialog({
               const isLocal = h.id === 'local';
               const st = hostStatus[h.id] ?? h.status ?? 'disconnected';
               const isCurrent = h.id === selectedHostId;
+              const error = h.error ?? hostError[h.id] ?? null
               return (
                 <div
                   key={h.id}
@@ -254,8 +250,13 @@ export function HostsDialog({
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium">{isLocal ? '本机' : (h.label || h.id)}</span>
                       {!isLocal ? <span className="rounded px-1 text-[10px] text-muted-foreground">{h.id}</span> : (selfLabel ?? 'local')}
-                      {!isLocal ? <StatusBadge status={st} error={h.error ?? hostError[h.id] ?? null} />  : null}                      
+                      {!isLocal ? <StatusBadge status={st} />  : null}                      
                     </div>
+                    {st === 'error' && error ? (
+                      <span className="max-w-[12rem] truncate text-[10px] text-destructive" title={error}>
+                        {error}
+                      </span>
+                    ) : null}
                     {h.ssh ? (
                       <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                         {h.ssh.user ? `${h.ssh.user}@` : ''}

@@ -221,7 +221,7 @@ Validated in Chromium at 360×640, 390×844, 740×360, 768×1024 and 1440×1000.
 
 ![Narrow-screen synthetic review](../screenshots/diagnostic-mobile.png)
 
-These checks cover navigation, session messages and the review workflow—not complete mobile certification of Trace, analytics, prompts, library or every settings control. No physical iOS/Android device or on-screen keyboard was tested. This UI change does not alter server network binding or expose your logs for remote access. Review storage still requires a suitable browser origin (localhost or HTTPS for fingerprints). [Verification receipt](diagnostics-verification.md).
+These checks cover navigation, session messages and the review workflow—not complete mobile certification of Trace, analytics, prompts or every settings control. No physical iOS/Android device or on-screen keyboard was tested. This UI change does not alter server network binding or expose your logs for remote access. Review storage still requires a suitable browser origin (localhost or HTTPS for fingerprints). [Verification receipt](diagnostics-verification.md).
 
 ## Reproducible checks
 
@@ -342,4 +342,4 @@ The local frozen regression set contained 30 sessions and 9,076 tool results. Gr
 - 摘要在窄屏/短横屏限制高度，展开详情后可内部滚动，不再把消息区挤没。证据跳转只滚动消息区，顶部导航保持可用。
 - 360px 下诊断区由 **44px → 340px**；360×640、390×844、740×360、768×1024、1440×1000 布局及 Chromium 触屏模拟通过。另验证了 240 个合成会话的虚拟列表、长会话 ID/路径和新增失败使复核过期。
 
-这是浏览器窄屏与触屏模拟验收，不是 iPhone/Android 真机或软键盘兼容性认证；Trace、统计、Prompts、资产库及完整设置流程不在本轮全面适配范围。没有改变服务监听地址或自动向网络暴露日志。[本轮证据](diagnostics-verification.md)。
+这是浏览器窄屏与触屏模拟验收，不是 iPhone/Android 真机或软键盘兼容性认证；Trace、统计、Prompts 及完整设置流程不在本轮全面适配范围。没有改变服务监听地址或自动向网络暴露日志。[本轮证据](diagnostics-verification.md)。

@@ -21,7 +21,7 @@ and no matching nonzero process is not proof that the session had no errors.
 ## Existing CLI workflow
 
 The full offline report, `--summary` and the explicit `evidence` command are
-available in the package starting with v1.24.0. Examples below use a source
+available through the installed `agentlray` launcher. Examples below use a source
 checkout; installed users can replace `node bin/agentlray.js` with `agentlray`.
 See [the layered CLI contract](offline-inspect.md).
 

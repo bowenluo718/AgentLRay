@@ -16,7 +16,6 @@ AgentLRay 在 Windows 上因 HOME 硬编码、POSIX 命令串、裸命令 spawn�
 - **为何**：`process.env.HOME` 在 Windows 不存在（应为 `USERPROFILE`），回退 `/root` 导致所有默认目录/配置指向不存在的路径。`os.homedir()` 是 Node 跨平台权威 API（Win/macOS/Linux 全对），顺带修 macOS 无 HOME 隐患。
 - **为何保留 `AGENTLRAY_HOME`**：支持便携部署与测试隔离。
 - **为何散点（~/.claude.json 等）不用 config.js 的 HOME**：`~/.claude/*` 是 claude CLI 自身文件，与 agentlray 数据目录（`~/.agentlray/`）语义不同，各自独立 `os.homedir()` 更符合各自语义，避免把不同归属的路径混在一个「agentlray 家目录」下。
-  - **修订（design-platform-dir-decl，2026-11-08）**：平台目录/名词已解耦到各平台文件的 `dirs.js` 分段声明（root `home` 即本条的 `os.homedir()` 语义，root `agentlray` 即 `AGENTLRAY_HOME`），经 `@agentlray/shared/config` 的 `resolveDirs` 统一解析；`lib/config.js` 不再持有平台目录。本条"D1 散点独立于 agentlray home"保留为正式规则（root `home`），claude 的散点同时收进平台目录声明。
 
 ### D2：平台默认目录不建 Windows 映射表
 
@@ -70,3 +69,18 @@ Windows 上跳过 omp 持有检测/自动终止，`--run` 时打印明确提示�
 - **Q5-B**：Windows 完整实现 omp 检测（tasklist）—— 投入大、omp 小众。
 - **Q8-B/C**：前端 UA 检测本地拼 / 前端同时展示两种 —— 未解决单一真源或增加复杂度。
 - **Q12-B/C**：`?shell=` 参数 / 双命令串 —— 本机场景无必要，增加契约。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：Accepted，已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| `os.homedir()` + `AGENTLRAY_HOME` | ✅ 已实现 | `lib/config.js:5` |
+| resume/create 命令串按 `process.platform` | ✅ 已实现 | `lib/resume.js:43`、`lib/new.js` |
+| spawn `shell: win32` | ✅ 已实现 | `lib/transport.js:19` |
+| LLM 调用 Windows 分支 | ✅ 已实现 | `lib/llm.js:114` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

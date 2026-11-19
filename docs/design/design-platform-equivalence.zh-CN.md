@@ -4,7 +4,7 @@
 > [design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)。
 >
 > 关联：
-> - 旧方案：[design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)（历史记录）、[plan-platform-mount.zh-CN.md](plan-platform-mount.zh-CN.md)（历史记录）
+> - 旧方案：[design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)（历史记录）、`docs/.local/plan-platform-mount.zh-CN.md`（未迁移）（历史记录）
 > - 自定义平台：[design-custom-platforms.zh-CN.md](design-custom-platforms.zh-CN.md)、[adr-0001-custom-platform-adapter.zh-CN.md](adr-0001-custom-platform-adapter.zh-CN.md)
 > - 既有决策：[adr-0002-co-mind-platform.zh-CN.md](adr-0002-co-mind-platform.zh-CN.md)（薄适配器 require 内部模块问题）
 >
@@ -34,7 +34,7 @@
 
 - **热生效**：mount/unmount 仍为重启生效（CLI 每次新进程自然即时）。
 - **legacy 前端新功能**：`public/` 是冻结快照，仅接受安全修复；禁用平台在 legacy 中仍显示（既定降级）。
-- **提示词库安装目标**（`lib/routes/library.js` 的 `claude|codex|omp`）是独立的产品枚举，不属于本次平台注册/挂载模型；如需平台化，单独立项。
+- **提示词库安装目标**（原 `lib/routes/library.js` 的 `claude|codex|omp`；该资产库功能已于 2026-11-08 移除）是独立的产品枚举，不属于本次平台注册/挂载模型；如需平台化，单独立项。
 - **消息渲染风格**（如 `MessageList` 的 codex 分组）属于归一化消息的展示细节，不纳入“平台表面”范围；自定义平台使用通用渲染。
 - 认证/信任模型不变：适配器仍以用户权限执行任意 JS，只投递可信文件。
 
@@ -236,7 +236,7 @@ package builtins  →  project/*.js（字母序）  →  user/*.js（字母序�
 | tool audit | `collectFiles` 过滤 | `computeToolAudit` / `scanToolAuditFile` | `lib/tool-audit.js` |
 | export | registry getSession（已通用） | 无新 hook | `lib/export.js` |
 | OTLP | `find && parse && !needsAgent` | `otlpSession` 优先；否则同上 | `lib/otlp.js` |
-| backup | 固定 5 个内置备份函数 | `backupFiles`（capability `backup`） | `lib/backup.js` |
+| backup | 固定 5 个内置备份函数 | （已随功能移除，2026-11-08） | — |
 | inspect | 固定 `['omp','codex','claude-code']` | `inspect` hook；`lib/inspect.js` 从 registry 解析 | `lib/inspect.js`、`lib/inspect-detail.js` |
 | resume/create | `RESUME_BINS` / `NEW_BINS` | `resume` / `create` | `lib/resume.js`、`lib/new.js` |
 | resume 守卫 | `platform.id === 'omp'` | `resumeHooks.prepare/after` | `bin/sessions.js` |
@@ -265,7 +265,7 @@ lib/platforms/
 ├── index.js                 # 组装：package builtins → project → user → disabled 过滤
 ├── loader.js                # 来源加载/校验/覆盖规则；注入 AGENTLRAY_PKG_ROOT
 ├── contracts.js             # hasResumeContract/hasCreateContract/capabilityBits（纯函数）
-├── shared.js                # 归一化消息/缓存等共享 helper（既有）
+├── shared.js                # 归一化消息/缓存等共享 helper（当时；现为 shared/ 目录 + @agentlray/shared 别名）
 ├── builtin/
 │   ├── openclaw.js
 │   ├── codex.js
@@ -521,3 +521,19 @@ module.exports = require(path.join(root, 'lib/platforms/builtin', '<id>.js'));
 | D8 | 守卫 | `catalog − (disabled ∪ {id})`，至少 1 个可查询平台 |
 | D9 | 单一写入口 | `platforms` 只由 mount/replace 端点/CLI 写；`PUT /api/settings` 忽略 |
 | D10 | legacy | 冻结；仅保留 openclaw 兼容别名，不新增功能 |
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已实现（文档内「待评审」为历史状态）**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 三来源注册与同 id 规则 | ✅ 已实现 | `lib/platforms/index.js`、`lib/platforms/loader.js` |
+| `disabled` / `replaced` | ✅ 已实现 | `lib/platform-config.js` |
+| 全表面 hook + 前端能力驱动 | ✅ 已实现 | `lib/platforms/*`、`frontend/src/components/Sidebar.tsx` |
+
+> **D10 后续变化（2026-11-08，`f7c446f`）**：legacy vanilla UI（`public/`、`/legacy` 路由）已整体移除，D10 的「legacy 冻结/降级」条款随之失效；前端只有 `frontend/` 一个面，openclaw 兼容别名（顶层 `/api/agents*`、`/api/spawn-*`）仍保留。
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

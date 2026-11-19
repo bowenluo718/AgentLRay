@@ -37,7 +37,7 @@ AgentLRay 聚合 7 个内置平台（openclaw / codex / claude-code / hermes / o
 
 - 位置：`~/.agentlray/platforms/*.js`；文件名即无序，加载顺序按字母序确定。
 - 格式：CommonJS，`module.exports = <adapter>`；单文件单适配器。
-- 依赖约束：仅 Node 内置模块 + `lib/platforms/shared.js` 导出（`withMetadataCache / makeMessage / sortSessionsByTimestampDesc / topToolsOf / captureLastMessage`），**零第三方依赖**（不引包，保证无安装步骤、无版本冲突）。
+- 依赖约束：仅 Node 内置模块 + `@agentlray/shared/*` 共享层（裸名由 `lib/platforms/shared-alias.js` 注册并解析到 `lib/platforms/shared/`；如 `@agentlray/shared/helpers` 的 `withMetadataCache / makeMessage / fileBasedGetSession / sortSessionsByTimestampDesc / topToolsOf / captureLastMessage`），**零第三方依赖**（不引包，保证无安装步骤、无版本冲突）。
 - 信任：适配器以用户自身权限执行任意 JS（等同手动跑脚本）；文档明示「只放可信代码」。
 
 ### 3.2 字段与能力位
@@ -64,7 +64,7 @@ AgentLRay 聚合 7 个内置平台（openclaw / codex / claude-code / hermes / o
 | `resume` | CLI `sessions resume`，见 §6 |
 | `version` | 契约版本（v1 起始，为将来演进预留） |
 
-> 推荐：状态精确性需要 `list` 摘要携带 `tail`（用 `shared.js` / `tail-state.js` 的 `createTailState→finishTail` 维护）。不携带也能工作——`deriveStatus` 对无 tail 会话退化为按 `lastActivity/mtimeMs` 时间窗判定（更粗糙）。
+> 推荐：状态精确性需要 `list` 摘要携带 `tail`（用 `@agentlray/shared/tail-state` 的 `createTailState→finishTail` 维护）。不携带也能工作——`deriveStatus` 对无 tail 会话退化为按 `lastActivity/mtimeMs` 时间窗判定（更粗糙）。
 
 ### 3.3 能力位 → 表面映射（服务端，全经注册表）
 
@@ -79,7 +79,7 @@ AgentLRay 聚合 7 个内置平台（openclaw / codex / claude-code / hermes / o
 | Markdown/HTML export | `getSession` | `lib/export.js`（`EXPORT_PLATFORMS`） |
 | OTLP export | `find` + `parse` 且 `!needsAgent` | `lib/otlp.js`（`OTLP_PLATFORMS`） |
 | SSE `GET /api/watch` | `find` + `watchParse`（缺任一应 400，见 §5.3） | `lib/routes/watch.js` |
-| 设置白名单 `PUT /api/settings/ui` | 注册表存在即入白名单 | `lib/routes/ui-settings.js` |
+| 设置白名单 `PUT /api/settings` 的 `ui` section | 注册表存在即入白名单 | `lib/ui-settings.js`、`lib/routes/settings.js` |
 | CLI `sessions list/show` | `list` / `getSession` | `bin/sessions.js` |
 | CLI `sessions resume` | `resume`（opt-in，见 §6） | `bin/sessions.js` |
 | 状态推导 | 平台中立（`tail` 证据 + 时间窗） | `lib/status.js` |
@@ -195,3 +195,24 @@ resume: {
 - **P6 收尾**：样例适配器文档（模板）+ `docs/usage*` 章节 + 词表/ADR/本文档登记核对。
 
 > 与既有约定一致：中间文档入 `docs/.local/` 并按 `README.md` 登记；破坏性变更（前端静态枚举移除）在 PR 说明中标注。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 加载器与注册表 | ✅ 已实现 | `lib/platforms/loader.js`、`lib/platforms/index.js` |
+| `GET/PUT /api/platforms*` | ✅ 已实现 | `lib/routes/platforms.js` |
+| CLI `platform list/validate` | ✅ 已实现 | `bin/platform.js` |
+| 前端动态平台目录 | ✅ 已实现 | `frontend/src/components/Sidebar.tsx`、`SettingsDialog.tsx` |
+
+**后续演进（与本文档 §决策/§实现清单的差异）**：
+
+- `RESUME_BINS` 模块级表已删除（`0c38d61` 等）：resume/create 支持平台改为各适配器内联 `resume` / `create` 声明，`bin/sessions.js` 的 `RESUME_PLATFORMS` / `CREATE_PLATFORMS` 在 require 期从注册表动态收敛。
+- `~/.agentlray/cli-bins.json` 已并入 `~/.agentlray/settings.json` 的 `cliBins` section（见 [design-settings-merge.zh-CN.md](design-settings-merge.zh-CN.md)）。
+- `inspect` 离线诊断由「仅内置」改为适配器 `inspect` hook opt-in（内置 omp/codex/claude-code + 自定义，如 `co-mind`）。
+- `PUT /api/settings/ui` 已并入统一 `PUT /api/settings`（`ui` section）。
+- legacy 前端（`public/`）已于 2026-11-08（`f7c446f`）移除，P5「legacy 前端」随之失去意义。

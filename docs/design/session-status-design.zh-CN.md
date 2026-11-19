@@ -23,7 +23,7 @@
 | 会话列表默认排序 | 各平台 `list*` 按 `timestamp` 降序（`sortSessionsByTimestampDesc`）；hermes 内联按 `lastActivity` 降序 | lib/platforms/{claude,codex,dsh,gemini,omp,openclaw}.js；hermes.js:163-170 |
 | `status` 字段 | 仅 openclaw（`archived`/`active`）、hermes（`archived`/`active`）写了**归档标记** | openclaw.js:136、hermes.js:148 |
 | 状态徽标渲染 | React `SessionCard` 与 legacy `sessionCardHtml` 渲染 `session.status` 徽标 | frontend/src/views/sessions/SessionList.tsx、public/js/app.js:2812 |
-| 元数据缓存 | `withMetadataCache` 按文件 `mtimeMs` 缓存平台解析结果 | lib/platforms/shared.js |
+| 元数据缓存 | `withMetadataCache` 按文件 `mtimeMs` 缓存平台解析结果 | `@agentlray/shared/helpers`（`lib/platforms/shared/helpers.js`） |
 | 会话列表刷新 | React 5s 轮询（`useSessionsList`）+ SSE tail；legacy 类似 | frontend/src/views/sessions/queries.ts、routes/watch.js |
 | 测试 | `node --test test/*.test.js`；lint = biome | package.json |
 
@@ -157,7 +157,7 @@ tail = {
 | 文件 | 改动 |
 |---|---|
 | `lib/status.js`（新） | 四态枚举、`STATUS_ORDER`、`STATUS_LABELS`、`RECENT_ACTIVITY_MS`/`HISTORY_CEIL_MS`、`deriveStatus`、`sortSessionsByStatusGroups` |
-| `lib/platforms/shared.js` | 不动 `sortSessionsByTimestampDesc` 语义（组内默认仍用它） |
+| `lib/platforms/shared/helpers.js`（原 `lib/platforms/shared.js`） | 不动 `sortSessionsByTimestampDesc` 语义（组内默认仍用它） |
 | `lib/platforms/omp.js` | 精确 tail + `listOmpSessions` 换分组排序 |
 | `lib/platforms/claude.js` | 精确 tail + `listClaudeCodeSessions` 换分组排序 |
 | `lib/platforms/codex.js` | 精确 tail（call_id 匹配）+ `listCodexSessions` 换分组排序 |
@@ -287,7 +287,7 @@ reviewer agent 结论：**需修订**（0 阻断 + 3 重要 + 4 建议）。均�
 
 **修复**（grill 决策：全局改，非仅 omp）：
 - `lib/status.js`：删除 `USER_AWAIT_TOOLS`（原仅 `ask`），把 `ask` 并入 `IMMEDIATE_AWAIT_TOOLS = ['AskUserQuestion', 'ask']`——pending 分支**发起即判 `awaiting-input`**，不进入 working 上界判断，不受 `HISTORY_CEIL_MS` 取证上界约束（用户可能很久才回复）。`isUserAwaitTool` 及相关死代码分支删除。
-- 同步 co-mind 适配器内联副本（`~/.agentlray/platforms/co-mind.js` 与规范源 `docs/.local/platforms/co-mind.js`）同一套 `IMMEDIATE_AWAIT_TOOLS` 语义。
+- co-mind 适配器同步：2026-11-08 前为「同步内联副本（`~/.agentlray/platforms/co-mind.js` 与规范源）同一套 `IMMEDIATE_AWAIT_TOOLS`」。co-mind 改薄适配器复用内置 claude-code 后，其状态推导（含 `IMMEDIATE_AWAIT_TOOLS`）直接随内置 `lib/status.js`，**无需再手工同步**（见 [adr-0002-co-mind-platform.zh-CN.md](adr-0002-co-mind-platform.zh-CN.md)）。
 
 **验证**：`test/status.test.js` 将「ask 进行中工作上界内 → working」改为「ask 发起即待输入：30s/12min 前发起 → awaiting-input」。目标 omp 会话经真实 parser 推导为 `工作中`→`待用户输入`（pending ask 主导）。全量 `node --test test/*.test.js` 503/503 绿。
 
@@ -303,3 +303,18 @@ reviewer agent 结论：**需修订**（0 阻断 + 3 重要 + 4 建议）。均�
 5. 实现质量抽查通过：deriveStatus 顺序、/api/status-labels 单源 + 前端回退、无旧 archived/active 消费者残留。全量 `node --test test/*.test.js` 376/376 绿。
 
 已确认的中低风险（best-effort，不遮蔽验收）：SSE 为即时预览以 5s 轮询为准（显式结束即时置 stopped 仅 OMP）；gemini 锚点差异已知；hermes pending 只查最后一条 assistant；空消息会话在 SSE 端恒 stopped；平台记录形态差异的取证精度分级属 §2.3 设计。
+
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：已实现**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 统一四态 `status` | ✅ 已实现 | `lib/status.js`、`lib/routes/sessions.js:65` |
+| 证据契约 `tail` / `deriveStatus` | ✅ 已实现 | `lib/status.js` |
+| 状态窗口配置 | ✅ 已实现 | `lib/status-config.js` |
+| SSE 即时刷状态 | ✅ 已实现 | `lib/routes/watch.js`、`frontend/src/views/sessions/useSessionSse.ts` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

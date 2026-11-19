@@ -79,8 +79,9 @@ agentlray sessions new    [message...] [--platform <p>] [--dir PATH] [--run] [--
 | `new` | 生成并（可选）执行「新建会话」命令（`codex exec --full-auto` / `claude --dangerously-skip-permissions -p` / `omp --auto-approve` / `gemini -p --approval-mode=yolo` / `hermes --yolo -z`）。内置 codex / claude-code / omp / gemini / hermes 可建；**dsh 是交互式 TUI、无法 headless 传提示词 → 不支持新建**（明确报错）。自定义平台需适配器声明 `create`（bin + args(opts)），缺省则 new 报错。提示词 = `new` 后剩余位置参数 `join(' ')`，可空（空 = 无提示词裸启/开交互式）。默认只打印命令不执行；加 `--run` 才真正 **fire-and-forget** spawn（输出丢弃、不跟踪进程、不等待退出，进程生命周期管理明确不做——需在平台 CLI 侧自行观察结果）。 |
 
 > `--platform` **非必填**：缺省使用**页面持久化的平台数据**——web 看板把平台选择同步到后端
-> `GET/PUT /api/settings/ui`，落盘 `~/.agentlray/ui-settings.json`，CLI 读取同一文件，保证终端与
-> 页面视角一致。`list` 用持久化的多选集合（单平台模式用 `platform`；未持久化或全选时 = `all`）；
+> 单一设置端点 `PUT /api/settings` 的 `ui` section（落盘 `~/.agentlray/settings.json`；
+> 独立的 `GET/PUT /api/settings/ui` 与 `ui-settings.json` 已在 settings-merge 后移除），
+> CLI 经 `loadUiSettings()` 读取同一 `ui` section，保证终端与页面视角一致。`list` 用持久化的多选集合（单平台模式用 `platform`；未持久化或全选时 = `all`）；
 > `show`/`resume`/`new` 用持久化的单平台，无该数据则报错要求显式指定 `--platform`。
 
 ### 3.3 参数说明
@@ -231,3 +232,16 @@ node bin/agentlray.js sessions new --platform dsh --json   # 退出 1：dsh 不�
 - 前端多平台视图（PlatformBar 可勾选多个平台 +「全部」一次全选）即此端点：`GET /api/sessions?platform=<逗号子集|all>`，列表按平台分组渲染，点击某平台会话自动切到该平台加载详情。
 - `agentlray sessions list --platform all --json` 与 `GET /api/sessions?platform=all` 数据同源、shape 对齐。
 
+---
+
+## 实现进度（代码核对：2026-11-19，基线 `c7fdb8f`）
+
+**状态：参考文档，与当前 CLI 实现一致**
+
+| 能力/阶段 | 状态 | 代码证据 |
+| --- | --- | --- |
+| 主入口与 `inspect`/`evidence` | ✅ 已实现 | `bin/agentlray.js`、`bin/inspect.js` |
+| `sessions list/show/resume/new` | ✅ 已实现 | `bin/sessions.js` |
+| `platform list/validate/mount/unmount/replace/unreplace/export` | ✅ 已实现 | `bin/platform.js` |
+
+> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

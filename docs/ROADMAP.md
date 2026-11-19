@@ -8,10 +8,10 @@
 - **Session browser** with tool-call inspection, trace/waterfall view, spawn tracking and message timeline
 - **Prompt tooling** — extraction (noise filtered), template clustering with outcome attribution, Claude-powered rewrites
 - **Global search** across all platforms, insights dashboard
-- **React + Vite frontend** served by an Express backend; 400+ tests on Node's built-in runner (`npm test`, 2026-11-01), CI on Node 22
+- **React 19 + Vite frontend** served by an Express backend; 727 tests on Node's built-in runner (`npm test`, 2026-11-19). CI only builds and deploys the demo (`.github/workflows/pages.yml`); the checks run locally
 - **Unified session status** — a four-state model (`awaiting-input` / `working` / `waiting` / `stopped`) derived from record evidence, shared by the sidebar, a kanban board view, the SSE live tail and the terminal CLI; time windows are configurable
-- **Custom platform adapters** — drop a JavaScript adapter into `~/.agentlray/platforms/` to add a platform without touching the source; validated at startup, broken files never block boot
-- **Resume for all built-in platforms** — `codex`/`claude-code`/`omp`/`dsh`/`gemini`/`hermes` native resume from the CLI or a copy-button, with configurable executable resolution; Windows support (PowerShell quoting, `%USERPROFILE%` home) throughout
+- **Custom platform adapters** — drop a JavaScript adapter into a project `platforms/` directory or `~/.agentlray/platforms/` to add a platform without touching the source; merged at startup, broken files never block boot
+- **Resume for built-in platforms** — `codex`/`claude-code`/`omp`/`gemini`/`hermes` native resume from the CLI or a copy-button, with configurable executable resolution; dsh is an interactive TUI and supports neither resume nor create. Windows support (PowerShell quoting, `%USERPROFILE%` home) throughout
 - **Light/dark theme, unified settings file** — day/night theme toggle; all server-side settings aggregate in a single `~/.agentlray/settings.json` behind one `GET/PUT /api/settings`
 - **Evidence-backed failure events and local review** with full-result invalidation, evidence navigation and narrow-screen session layout
 
@@ -30,13 +30,13 @@ External grounding: official guidance emphasizes [executable verification](https
 
 ### Machine-consumable evidence
 
-The integration surface is a read-only offline CLI, not MCP, a new agent runtime or a hosted service. `inspect` emits versioned facts and source references using the same generated rules as the UI. Version 1.24.0 provides `--summary --json`, explicit hash-checked and byte-bounded `evidence`, and structured JSON failures. Full successful reports stay compatible; consumers must account for the new error envelope. Explicit exit policies and coverage failures must never become a generic "task passed" claim. Current scope is one stable Codex/OMP/Claude Code JSONL file; no automatic discovery or command execution. Raw evidence expansion is opt-in and may reveal sensitive content. [Layered contract](offline-inspect.md#layered-cli-summary-first-evidence-on-demand).
+The integration surface is a read-only offline CLI, not MCP, a new agent runtime or a hosted service. `inspect` emits versioned facts and source references using the same generated rules as the UI. The CLI provides `--summary --json`, explicit hash-checked and byte-bounded `evidence`, and structured JSON failures. Full successful reports stay compatible; consumers must account for the new error envelope. Explicit exit policies and coverage failures must never become a generic "task passed" claim. Current scope is one stable Codex/OMP/Claude Code JSONL file; no automatic discovery or command execution. Raw evidence expansion is opt-in and may reveal sensitive content. [Layered contract](offline-inspect.md#layered-cli-summary-first-evidence-on-demand).
 
 No launch dates or star-count targets are promised. Progress is gated on these observable outcomes. Physical-device/keyboard coverage and complex Trace/analytics layouts remain separate work, not implied by the session-screen checks.
 
 ## Existing backlog
 
-- [x] **Publish to npm** so `npx agent-xray` works without cloning — automated from GitHub releases (v1.14.0+)
+- [x] **Publish to npm** so `npx @bowenluo718/agent-lray` works without cloning — automated from GitHub releases
 - [x] **Hosted live demo** on GitHub Pages with clearly-labeled synthetic session data, so people can try the UI before installing
 - [x] **Gemini CLI adapter** (`~/.gemini/tmp`) — shipped (#5)
 - [ ] **More platform adapters** — opencode and Aider are candidates, not a measured demand ranking. Require representative logs and parser acceptance tests before prioritizing them over the review workflow.
@@ -48,7 +48,7 @@ No launch dates or star-count targets are promised. Progress is gated on these o
 
 From a product review (2026-08-21) — funnel and retention fixes around the npm release:
 
-- [x] Demo must showcase the differentiators (search, spawn navigation, prompt library), not the thinnest layer (#12)
+- [x] Demo must showcase the differentiators (search, spawn navigation, prompt view), not the thinnest layer (#12)
 - [x] First launch: auto-pick the first platform that actually has sessions (#13)
 - [x] Prompt optimization: drop the hard dependency on a local claude CLI (#14)
 

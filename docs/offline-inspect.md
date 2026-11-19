@@ -10,10 +10,10 @@ case study, source-line verification and the actual retrieval costs/limitations.
 
 ## Layered CLI: summary first, evidence on demand
 
-Version **1.24.0** adds `inspect --summary --json`, an explicit `evidence`
-command and structured JSON failures. The full successful `inspect --json`
-report and default text report retain their schema and behavior; the reported
-package version advances. Examples below use a source checkout; replace
+The CLI provides `inspect --summary --json`, an explicit `evidence` command
+and structured JSON failures. The full successful `inspect --json` report and
+default text report retain their schema and behavior. Examples below use a
+source checkout; replace
 `node bin/agentlray.js` with installed `agentlray` to use the same arguments.
 
 ```sh
@@ -113,7 +113,7 @@ assume every valid JSON object is a report or that exit 0 proves task success.
 | Code | Meaning |
 | --- | --- |
 | `INVALID_ARGUMENT` | Missing/duplicate/unknown option, invalid range or incompatible mode |
-| `UNSUPPORTED_PLATFORM` | Choose OMP, Codex or Claude Code explicitly |
+| `UNSUPPORTED_PLATFORM` | Requested platform has no `inspect` hook; the message lists the live registry-derived set (built-ins OMP, Codex, Claude Code plus opted-in custom adapters) |
 | `INPUT_UNREADABLE`, `NOT_REGULAR_FILE`, `INPUT_TOO_LARGE` | Input could not be read under the single-file contract |
 | `INPUT_CHANGED` | File metadata or readable length changed during the snapshot read |
 | `INVALID_UTF8`, `INVALID_JSON`, `INVALID_RECORD`, `UNSUPPORTED_RECORD` | Invalid encoding, line syntax, object or adapter record shape |
@@ -151,7 +151,7 @@ This synthetic sample reports 8 historical failures, 7 pending records in 2 even
 
 ### Input contract
 
-- Required `--platform`: `codex`, `omp` or `claude-code`. These are the formats validated for the offline path; the dashboard supports additional platforms, but this command does not claim parity for their containers/databases.
+- Required `--platform`: `codex`, `omp` or `claude-code`. These are the built-in formats validated for the offline path; the dashboard supports additional platforms, but this command does not claim parity for their containers/databases. The set is resolved from the platform registry at require time: a project/user adapter that declares an `inspect` hook (`normalize` + `rawToolEntries`) opts into `inspect` and `evidence` (for example `co-mind`), and the "Unsupported platform" message lists the live set.
 - Exactly one regular, stable UTF-8 JSONL file, at most **64 MiB**. No directories, stdin, compressed streams or database files. Use `--` before a filename beginning with `-`.
 - Reads the initial file length and checks metadata again after reading. If the source changed, retry when it is stable. The output hash identifies the bytes actually analyzed; this is not a filesystem transaction or tamper-proof archive.
 - Invalid UTF-8, malformed/truncated JSON, non-object records, incompatible shape, empty/metadata-only input and wrong selected format fail rather than being silently treated as clean sessions. Valid last lines need not end with a newline; blank lines are counted in physical line positions.
@@ -235,7 +235,7 @@ Tests compare actual CLI output with the TypeScript UI functions and validate ev
 
 ## 中文使用与边界
 
-### 分层 CLI（自 1.24.0 起提供）
+### 分层 CLI
 
 先用 `node bin/agentlray.js inspect --platform omp session.jsonl --summary --json`
 读取摘要，再把报告的 `source.sha256` 与某条引用的 `line` 传给
@@ -257,7 +257,7 @@ JSON 模式失败不再返回空 stdout，而是稳定的 kind=error、error.cod
 agentlray inspect --platform omp session.jsonl --json > evidence.json
 ```
 
-当前只支持明确指定的 Codex、OMP、Claude Code JSONL，单文件上限 64 MiB。读取期间变化、截断坏行、错误格式都会失败；已知标准化丢失会输出 `complete:false` 与问题行号，不会假绿。
+当前内置支持明确指定的 Codex、OMP、Claude Code JSONL（声明 `inspect` hook 的自定义适配器同样可用），单文件上限 64 MiB。读取期间变化、截断坏行、错误格式都会失败；已知标准化丢失会输出 `complete:false` 与问题行号，不会假绿。
 
 报告默认不含日志正文、路径、命令参数、原始 ID 或笔记，只保留计数、状态、关系、输入/规则哈希和原始行号。哈希与活动计数仍可能敏感，不是匿名化保证。原始文件必须自行保留，报告不能重建日志。
 

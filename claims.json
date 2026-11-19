@@ -1,8 +1,8 @@
 {
-  "$comment": "Receipts for every number AgentLRay publishes in prose: the README first screen, the hero figure caption, the FAQ, the roadmap and the CI description. Each claim carries the command that recomputes it from committed artifacts (scripts/claims-receipts.mjs derives the figures from the platform registry, lib/config.js, package.json, the workflow, the demo sample log and the test fixtures) or check.manual with the reason no command can. The readme-no-version receipt keeps version-specific installation details in release notes rather than the README. .github/workflows/claims.yml runs the lot weekly and on every push.",
+  "$comment": "Receipts for every number AgentLRay publishes in prose: the README first screen, the hero figure caption, the FAQ and the roadmap. Each claim carries the command that recomputes it from committed artifacts (scripts/claims-receipts.mjs derives the figures from the platform registry, lib/config.js, package.json, the pages workflow, the demo sample log and the test fixtures) or check.manual with the reason no command can. The readme-no-version receipt keeps version-specific installation details in release notes rather than the README. There is no CI claims job: run `node scripts/claims-receipts.mjs <id>` locally for each entry.",
   "project": "AgentLRay",
   "repository": "https://github.com/bowenluo718/AgentLRay",
-  "updated": "2026-09-27",
+  "updated": "2026-11-19",
   "claims": [
     {
       "id": "platform-registry",
@@ -32,7 +32,9 @@
       "as_of": "2026-09-13",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs platform-storage",
-        "expect": { "equals": "6 JSONL-backed, 1 SQLite-only (hermes)" },
+        "expect": {
+          "equals": "6 JSONL-backed, 1 SQLite-only (hermes)"
+        },
         "timeout": 60
       }
     },
@@ -88,82 +90,56 @@
       }
     },
     {
+      "id": "test-count",
+      "claim": "727 tests pass on Node's built-in test runner, the count docs/ROADMAP.md records for `npm test`.",
+      "value": "727",
+      "metric": "passing node:test cases (# tests 727 / # pass 727 / # fail 0)",
+      "method": "npm test → node --require ./test/setup-env.cjs --test test/*.test.js, and the TAP summary is asserted. The roadmap sentence ('727 tests on Node's built-in runner (`npm test`, 2026-11-19)') is verified by the run, not read back from the prose.",
+      "repro": "npm test 2>&1 | grep -E '^[#ℹ] (tests|pass|fail)'",
+      "evidence": "docs/ROADMAP.md",
+      "as_of": "2026-11-19",
+      "check": {
+        "cmd": "npm test 2>&1 | grep -E '^[#ℹ] (tests|pass|fail)'",
+        "expect": {
+          "contains": [
+            "tests 727",
+            "pass 727",
+            "fail 0"
+          ]
+        },
+        "timeout": 180
+      }
+    },
+    {
+      "id": "demo-pages-workflow",
+      "claim": "The only GitHub Actions workflow (.github/workflows/pages.yml) builds the demo (VITE_DEMO=1) and deploys it to GitHub Pages; there is no CI test job, so tests, lint and the generated-bundle drift check run locally.",
+      "value": "1 workflow · 2 jobs (build, deploy) · Node 22",
+      "metric": "workflow files present, jobs, node-version and whether the demo build runs",
+      "method": "The workflow directory is listed and pages.yml is parsed: jobs under jobs:, triggers under on:, the branches, node-version and whether a VITE_DEMO=1 demo build is present. The README and usage reference must not claim a test workflow.",
+      "repro": "node scripts/claims-receipts.mjs demo-pages-workflow",
+      "evidence": ".github/workflows/pages.yml",
+      "as_of": "2026-11-19",
+      "check": {
+        "cmd": "node scripts/claims-receipts.mjs demo-pages-workflow",
+        "expect": {
+          "equals": "1 workflow (pages.yml) · 2 job (build, deploy) on Node 22 · demo build: yes · on push, workflow_dispatch of master"
+        },
+        "timeout": 60
+      }
+    },
+    {
       "id": "per-turn-ledger-fields",
       "claim": "A per-turn ledger row carries wall-clock time, tokens summed as input + output + cache read + cache write, cost when the platform reports it, and tool-call and error counts; the strip only appears from two turns on.",
       "value": "240 tok = 120 in + 40 out + 80 cache read; cost shown only when reported",
       "metric": "the row fields built from two committed fixtures that differ in exactly those columns",
-      "method": "buildTurnLedger over the dsh fixture (test/fixtures/home/.dsh/sessions/--fixtures-project-delta--/dsh-fixture-session-0001/session.jsonl) and the omp fixture: the dsh turn totals 240 tokens only when its 80 cache-read tokens are counted, and its cost column stays hidden because no cost is reported, while the omp turn reports $0.0054 and one tool error. The two-turn display gate and the sort keys live in frontend/src/views/sessions/TurnLedger.tsx.",
+      "method": "buildTurnLedger (frontend/src/lib/pure.ts, transformed with the frontend's esbuild) over the dsh fixture (test/fixtures/home/.dsh/sessions/--fixtures-project-delta--/dsh-fixture-session-0001/session.jsonl) and the omp fixture: the dsh turn totals 240 tokens only when its 80 cache-read tokens are counted, and its cost column stays hidden because no cost is reported, while the omp turn reports $0.0054 and one tool error. The two-turn display gate and the sort keys live in frontend/src/views/sessions/TurnLedger.tsx.",
       "repro": "node scripts/claims-receipts.mjs ledger-fields",
-      "evidence": "frontend/src/views/sessions/TurnLedger.tsx",
-      "as_of": "2026-09-13",
+      "evidence": "frontend/src/lib/pure.ts",
+      "as_of": "2026-11-19",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs ledger-fields",
         "expect": {
           "equals": "dsh: 1 row, 240 tok = 120 in + 40 out + 80 cache read + 0 cache write, cost not reported, 1 tool call, 0 errors · omp: 1 row, 300 tok = 220 in + 80 out + 0 cache read + 0 cache write, cost $0.0054 reported, 1 tool call, 1 error"
-        },
-        "timeout": 60
-      }
-    },
-    {
-      "id": "test-count",
-      "claim": "348 tests pass on Node's built-in test runner, the count docs/ROADMAP.md records for `npm test`.",
-      "value": "348",
-      "metric": "passing node:test cases (# tests 348 / # pass 348 / # fail 0)",
-      "method": "npm test → node --test test/*.test.js, run in the claims job after npm ci, and the TAP summary is asserted. The roadmap sentence ('348 tests on Node's built-in runner (`npm test`, 2026-09-27)') is verified by the run, not read back from the prose.",
-      "repro": "npm test 2>&1 | grep -E '^# (tests|pass|fail)'",
-      "evidence": "docs/ROADMAP.md",
-      "as_of": "2026-09-27",
-      "check": {
-        "cmd": "npm test 2>&1 | grep -E '^# (tests|pass|fail)'",
-        "expect": { "contains": ["# tests 348", "# pass 348", "# fail 0"] },
-        "timeout": 120
-      }
-    },
-    {
-      "id": "ci-test-workflow",
-      "claim": "CI (.github/workflows/test.yml) runs one `test` job on Node 22 for every push and pull request to master, in four steps: npm ci (whose prepare script builds the web UI and regenerates public/js/pure.js), the pure.js drift check, biome, and npm test.",
-      "value": "1 job (test) · Node 22 · 4 steps",
-      "metric": "jobs, node-version and `- run:` steps parsed out of the workflow",
-      "method": "The workflow is parsed in the receipt: the job keys under jobs:, the triggers under on:, the branches, node-version and every `- run:` step in order. Four run steps means the README's 'in four steps' list is still the whole job.",
-      "repro": "node scripts/claims-receipts.mjs ci-test-workflow",
-      "evidence": ".github/workflows/test.yml",
-      "as_of": "2026-09-13",
-      "check": {
-        "cmd": "node scripts/claims-receipts.mjs ci-test-workflow",
-        "expect": {
-          "equals": "1 job (test) on Node 22 · 4 steps: npm ci | git diff --exit-code public/js/pure.js lib/generated/diagnostics.cjs | npx biome check . | npm test · on push, pull_request of master"
-        },
-        "timeout": 60
-      }
-    },
-    {
-      "id": "legacy-pure-drift",
-      "claim": "public/js/pure.js is generated from frontend/src/lib/{pure,markdown}.ts, and the committed copy must not drift from those sources — CI fails on drift.",
-      "value": "regenerate then diff clean",
-      "metric": "exit code of the regenerate-and-diff gate",
-      "method": "node scripts/build-legacy-pure.mjs rebuilds public/js/pure.js from the TypeScript sources with esbuild (resolved from frontend/node_modules, hence the npm ci step in the claims job), then git diff --exit-code public/js/pure.js must be clean. This is step 2 of the test job, re-run here so the claim carries its own receipt.",
-      "repro": "node scripts/build-legacy-pure.mjs && git diff --exit-code public/js/pure.js",
-      "evidence": "public/js/pure.js",
-      "as_of": "2026-09-13",
-      "check": {
-        "cmd": ["node scripts/build-legacy-pure.mjs", "git diff --exit-code public/js/pure.js"],
-        "expect": { "exit_code": 0 },
-        "timeout": 60
-      }
-    },
-    {
-      "id": "backup-platforms",
-      "claim": "Session backup incrementally archives Codex, Claude Code, OMP, DeepSeek Harness and Gemini CLI logs into ~/.agentlray/archive; Hermes and OpenClaw are not archived, and unchanged files are skipped.",
-      "value": "5 archived / 2 excluded; second run copies 0",
-      "metric": "platforms present in runFullBackup()'s summary, and copied/skipped counts across two runs",
-      "method": "runFullBackup() is called twice against a throwaway copy of test/fixtures/home with HOME and AGENTLRAY_ARCHIVE_DIR pointed into a temp dir — the isolation test/helpers.js uses — and the archive keys are compared with the platform registry, so 'Hermes and OpenClaw are not archived' is recomputed rather than quoted. The second run copies 0 files because every archived copy is already current, which is the documented skip.",
-      "repro": "node scripts/claims-receipts.mjs backup-platforms",
-      "evidence": "lib/backup.js",
-      "as_of": "2026-09-13",
-      "check": {
-        "cmd": "node scripts/claims-receipts.mjs backup-platforms",
-        "expect": {
-          "equals": "archive: 5 platforms (codex, claude-code, omp, dsh, gemini) · excluded: openclaw, hermes · first run 12 copied / 0 skipped of 12 · re-run 0 copied / 12 skipped"
         },
         "timeout": 60
       }
@@ -179,7 +155,9 @@
       "as_of": "2026-09-13",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs install-command",
-        "expect": { "equals": "@bowenluo718/agent-lray · bins: agentlray, agent-lray · README.md npx line present" },
+        "expect": {
+          "equals": "@bowenluo718/agent-lray · bins: agentlray, agent-lray · README.md npx line present"
+        },
         "timeout": 60
       }
     },
@@ -194,7 +172,9 @@
       "as_of": "2026-09-13",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs default-port",
-        "expect": { "equals": "3800 · README.md states http://localhost:3800: yes · launcher --port/--host: yes" },
+        "expect": {
+          "equals": "3800 · README.md states http://localhost:3800: yes · launcher --port/--host: yes"
+        },
         "timeout": 60
       }
     },
@@ -209,7 +189,9 @@
       "as_of": "2026-09-13",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs node-engine-floor",
-        "expect": { "equals": ">=22.13 · badge ok · README \"≥ 22.13\": ok" },
+        "expect": {
+          "equals": ">=22.13 · badge ok · README \"≥ 22.13\": ok"
+        },
         "timeout": 60
       }
     },
@@ -217,32 +199,32 @@
       "id": "dsh-zstd-floor",
       "claim": "Reading compressed DeepSeek Harness logs requires Node.js ≥ 22.15, because the adapter only decompresses frames when node:zlib exposes zstdDecompressSync.",
       "value": ">=22.15",
-      "metric": "the Node floor in dsh.js's upgrade message and in the README",
-      "method": "The floor is parsed out of the message lib/platforms/dsh.js raises for a compressed log, the runtime gate (HAS_NODE_ZSTD = typeof zlib.zstdDecompressSync === 'function') must still guard the decompression path, and README.md must state ≥ 22.15.",
+      "metric": "the Node floor in the shared zstd upgrade message and in the README",
+      "method": "The floor is parsed out of the message lib/platforms/shared/zstd.js raises for a compressed log, the runtime gate (HAS_NODE_ZSTD = typeof zlib.zstdDecompressSync === 'function') must still guard the decompression path, and README.md must state ≥ 22.15.",
       "repro": "node scripts/claims-receipts.mjs dsh-zstd-floor",
-      "evidence": "lib/platforms/dsh.js",
-      "as_of": "2026-09-13",
+      "evidence": "lib/platforms/shared/zstd.js",
+      "as_of": "2026-11-19",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs dsh-zstd-floor",
         "expect": {
-          "equals": "22.15 · dsh.js message \"Node.js >= 22.15\" + runtime zstd gate: yes · README.md \"≥ 22.15\": ok"
+          "equals": "22.15 · shared/zstd.js message \"Node.js >= 22.15\" + runtime zstd gate: yes · README.md \"≥ 22.15\": ok"
         },
         "timeout": 60
       }
     },
     {
       "id": "tests-node-only",
-      "claim": "The test suite uses Node's built-in test runner with no extra dependencies: every require in test/ is a node: builtin or a relative path.",
-      "value": "0 third-party requires",
+      "claim": "The test suite uses Node's built-in test runner with no test-only dependencies: every require in test/ is a Node builtin, a relative path, the @agentlray/shared alias, or the express runtime dependency used to mount routes in-process.",
+      "value": "0 test-only third-party requires",
       "metric": "distinct require() specifiers across test/ by kind",
-      "method": "Every require('…') in test/*.js is classified; a specifier that is neither node:* nor relative fails the receipt. express and the other runtime dependencies are reached through ../server.js, which is why the tests need no test-only dependency.",
+      "method": "Every require('…') in test/*.js is classified; Node builtins (with or without the node: prefix), relative paths, the @agentlray/shared alias and express are accepted, and any other third-party specifier fails the receipt.",
       "repro": "node scripts/claims-receipts.mjs tests-node-only",
-      "evidence": "test/helpers.js",
-      "as_of": "2026-09-13",
+      "evidence": "test/setup-env.cjs",
+      "as_of": "2026-11-19",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs tests-node-only",
         "expect": {
-          "equals": "22 files in test/ · 17 distinct requires: 12 node builtins, 5 relative, 0 third-party"
+          "equals": "58 files in test/ · 69 distinct requires: 16 node builtins, 50 relative, 2 shared alias, 0 test-only third-party"
         },
         "timeout": 60
       }
@@ -258,21 +240,10 @@
       "as_of": "2026-09-13",
       "check": {
         "cmd": "node scripts/claims-receipts.mjs readme-no-version",
-        "expect": { "equals": "0 version strings in README.md" },
+        "expect": {
+          "equals": "0 version strings in README.md"
+        },
         "timeout": 60
-      }
-    },
-    {
-      "id": "branch-protection-requires-test",
-      "claim": "master requires the `test` check to pass before a pull request can merge, so the workflow above is a gate and not just a notification.",
-      "value": "required check: test",
-      "metric": "the required status checks on the master branch",
-      "method": "Branch protection and rulesets are GitHub repository state, not committed files; inspect them with an authenticated GitHub API request. The committed half — that test.yml defines exactly one job, named test — is machine-checked by ci-test-workflow.",
-      "repro": "gh api repos/bowenluo718/AgentLRay/rulesets (then inspect the active default-branch ruleset by ID)",
-      "evidence": ".github/workflows/test.yml",
-      "as_of": "2026-09-13",
-      "check": {
-        "manual": "branch protection lives in GitHub's settings, not in the repository, and reading it needs an authenticated API call (network) which the claims job does not make — deliberately, since every other check here runs offline."
       }
     },
     {

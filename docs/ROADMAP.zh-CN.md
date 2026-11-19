@@ -8,10 +8,10 @@
 - **会话浏览器**，支持工具调用检查、trace/瀑布视图、spawn 追踪与消息时间线
 - **Prompt 工具链** — 提取（已过滤噪音）、带结果归因的模板聚类、由 Claude 驱动的改写
 - **跨全部平台的全局搜索**、洞察面板
-- **React + Vite 前端**，由 Express 后端服务；基于 Node 内置运行器的 400+ 测试（`npm test`，2026-11-01），CI 运行于 Node 22
+- **React 19 + Vite 前端**，由 Express 后端服务；基于 Node 内置运行器的 727 个测试（`npm test`，2026-11-19）。CI 仅构建并部署 demo（`.github/workflows/pages.yml`）；检查在本地执行
 - **统一会话状态** — 由记录证据推导的四态模型（`awaiting-input` / `working` / `waiting` / `stopped`），被侧栏、任务看板视图、SSE 实时尾随与终端 CLI 共享；时间窗口可配置
-- **自定义平台适配器** — 把一个 JavaScript 适配器放进 `~/.agentlray/platforms/` 即可接入平台，无需触碰源码；启动时校验，坏文件绝不阻塞启动
-- **全部内置平台均可续跑** — `codex` / `claude-code` / `omp` / `dsh` / `gemini` / `hermes` 可从 CLI 或复制按钮原生续跑，可配置可执行文件解析；全程支持 Windows（PowerShell 引用、`%USERPROFILE%` 家目录）
+- **自定义平台适配器** — 把一个 JavaScript 适配器放进项目 `platforms/` 目录或 `~/.agentlray/platforms/` 即可接入平台，无需触碰源码；启动时合并，坏文件绝不阻塞启动
+- **内置平台可续跑** — `codex` / `claude-code` / `omp` / `gemini` / `hermes` 可从 CLI 或复制按钮原生续跑，可配置可执行文件解析；dsh 是交互式 TUI，既不支持续跑也不支持新建。全程支持 Windows（PowerShell 引用、`%USERPROFILE%` 家目录）
 - **白天/黑夜主题、统一设置文件** — 日/夜主题切换；所有服务端设置聚合在单个 `~/.agentlray/settings.json`，位于一个 `GET/PUT /api/settings` 之后
 - **有证据支撑的失败事件与本地复核**，支持完整结果失效、证据导航与窄屏会话布局
 
@@ -30,13 +30,13 @@
 
 ### 机器可消费的证据
 
-集成表面是一个只读的离线 CLI，而非 MCP、一个新的 agent 运行时或托管服务。`inspect` 使用与 UI 相同的生成规则输出带版本的 facts 与源引用。版本 1.24.0 提供 `--summary --json`、显式哈希校验且字节有界的 `evidence`，以及结构化 JSON 失败。完整成功的报告保持兼容；消费者必须处理新的错误信封。显式退出策略与覆盖率失败绝不可变成一个泛化的“任务通过”声明。当前范围是一个稳定的 Codex/OMP/Claude Code JSONL 文件；无自动发现或命令执行。原始证据扩展为选择加入，可能暴露敏感内容。[分层契约](offline-inspect.md#layered-cli-summary-first-evidence-on-demand)。
+集成表面是一个只读的离线 CLI，而非 MCP、一个新的 agent 运行时或托管服务。`inspect` 使用与 UI 相同的生成规则输出带版本的 facts 与源引用。CLI 提供 `--summary --json`、显式哈希校验且字节有界的 `evidence`，以及结构化 JSON 失败。完整成功的报告保持兼容；消费者必须处理新的错误信封。显式退出策略与覆盖率失败绝不可变成一个泛化的“任务通过”声明。当前范围是一个稳定的 Codex/OMP/Claude Code JSONL 文件；无自动发现或命令执行。原始证据扩展为选择加入，可能暴露敏感内容。[分层契约](offline-inspect.md#layered-cli-summary-first-evidence-on-demand)。
 
 不承诺任何发布日期或 star 数目标。进度以这些可观察结果为准。物理设备/键盘覆盖率与复杂的 Trace/分析布局仍是独立工作，不由会话屏检查所隐含。
 
 ## 既有 backlog
 
-- [x] **发布到 npm**，使 `npx agent-xray` 无需克隆即可使用 — 从 GitHub releases 自动化（v1.14.0+）
+- [x] **发布到 npm**，使 `npx @bowenluo718/agent-lray` 无需克隆即可使用 — 从 GitHub releases 自动化
 - [x] **托管实时演示** 于 GitHub Pages，使用清晰标注的合成会话数据，让人们能在安装前试用 UI
 - [x] **Gemini CLI 适配器**（`~/.gemini/tmp`）— 已发布（#5）
 - [ ] **更多平台适配器** — opencode 与 Aider 是候选，而非经测量的需求排序。在优先于复核工作流之前，需要代表性日志与解析器验收测试。
@@ -48,7 +48,7 @@
 
 来自一次产品评审（2026-08-21）— 围绕 npm 发布的漏斗与留存修复：
 
-- [x] 演示必须展示差异点（搜索、spawn 导航、prompt 资产库），而非最薄的一层（#12）
+- [x] 演示必须展示差异点（搜索、spawn 导航、Prompt 视图），而非最薄的一层（#12）
 - [x] 首次启动：自动选择第一个实际拥有会话的平台（#13）
 - [x] Prompt 优化：去掉对本机 claude CLI 的硬依赖（#14）
 
