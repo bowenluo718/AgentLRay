@@ -57,4 +57,3 @@ web 看板 persistState() ──PUT /api/settings/ui──▶ ~/.agentlray/ui-se
 | 前端持久化 → 服务端设置 | ✅ 已实现 | `lib/ui-settings.js`、`lib/routes/settings.js` |
 | CLI 缺省 `--platform` 读取页面持久化 | ✅ 已实现 | `bin/sessions.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

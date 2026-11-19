@@ -29,7 +29,7 @@ AgentLRay 聚合 7 个内置平台（openclaw / codex / claude-code / hermes / o
 | Q9 | DX | 新增 `agentlray platform list` / `agentlray platform validate <file>`，共用同一加载器 |
 | Q10 | 前端范围 | `GET /api/platforms` + React 主前端改服务端驱动 + legacy 最小侵入（内置表 + 追加自定义）；不加交互启停 |
 | Q11 | 启停语义 | 不做 per-platform 开关：文件存在 = 启用，卸载 = 删/移走文件；broken 可见带错误 |
-| Q12 | 文档 | 本文 + 一份 ADR + 词表增补，登记 `docs/.local/README.md` |
+| Q12 | 文档 | 本文 + 一份 ADR + 词表增补，登记 `docs/design/README.md` |
 
 ## 3. 适配器契约（Platform adapter contract）
 
@@ -194,7 +194,7 @@ resume: {
 - **P5 legacy 前端**：`app.js` 追加自定义 + 通用分发兜底 + broken 徽标 + watch 能力判断。
 - **P6 收尾**：样例适配器文档（模板）+ `docs/usage*` 章节 + 词表/ADR/本文档登记核对。
 
-> 与既有约定一致：中间文档入 `docs/.local/` 并按 `README.md` 登记；破坏性变更（前端静态枚举移除）在 PR 说明中标注。
+> 与既有约定一致：中间过程文档按 [本目录 README](README.md) 登记；破坏性变更（前端静态枚举移除）在 PR 说明中标注。
 
 ---
 

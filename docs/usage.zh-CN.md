@@ -20,7 +20,7 @@
 
 - **多平台支持** — 一个界面统一查看 OpenClaw、Codex、Claude Code、Hermes、OMP、DeepSeek Harness、Gemini CLI 的会话日志（dsh 的多帧 zstd 压缩日志透明解压；Gemini CLI 的 `/rewind` 回滚记录会先折叠，回滚掉的历史不会重复渲染）
 - **会话浏览** — 浏览 Agent 列表，搜索/过滤会话，查看消息历史
-- **会话状态与分组** — 每个会话带统一状态徽标（待用户输入 / 工作中 / 等待中 / 已停止），列表默认按该顺序分组，组内按各平台默认排序（多数按开始时间新→旧）；状态由日志记录 + 时间窗口推断（取证口径，非进程级实时），详见[设计文档](.local/session-status-design.zh-CN.md)
+- **会话状态与分组** — 每个会话带统一状态徽标（待用户输入 / 工作中 / 等待中 / 已停止），列表默认按该顺序分组，组内按各平台默认排序（多数按开始时间新→旧）；状态由日志记录 + 时间窗口推断（取证口径，非进程级实时），详见[设计文档](design/session-status-design.zh-CN.md)
 - **工具调用检查** — 可展开的工具调用详情，包含参数和返回结果
 - **Trace 视图** — 每轮对话的耗时瀑布图：模型推理（蓝）与工具执行（绿，出错为红）一目了然，点击色条在侧栏查看该 span 详情（紫色条则加载派生出的子 Agent 对话）
 - **Prompt 提取** — 按 session 提取全部真人 prompt（自动过滤工具结果、斜杠命令、系统注入等噪音），按工作目录分组，支持搜索 / JSON 导出 / 复制
@@ -116,7 +116,7 @@ npm start
 
 ### 任务看板与新建任务
 
-**任务看板**标签页按会话四态分列展示（待用户输入 / 工作中 / 等待中 / 已停止），顶部有文本筛选框；看板头部有 **「新建任务」** 按钮，弹窗可 spawn 平台 CLI 开一个全新会话。
+**任务看板**标签页按会话四态分列展示（待用户输入 / 工作中 / 等待中 / 已停止），顶部有文本筛选框；看板头部有 **「新建任务」** 按钮，弹窗可 spawn 平台 CLI 开一个全新会话。设计说明见 [看板设计](design/design-kanban.zh-CN.md) 与 [看板移动端设计](design/design-kanban-mobile.zh-CN.md)。
 
 **弹窗三个字段：**
 
@@ -238,6 +238,10 @@ npm start
 全局 dsh 配置（`role` = `host`/`client`/`both`、`serverUrl`、`deviceName`、`allowedPorts` 默认 `[3800]`）位于 `hosts.json` 顶层，通过 **Settings → 主机 → dsh** 编辑；旧版本放在 `settings.json` 的 `dsh` section，首次读取时自动迁移。
 
 请求通过 `X-Host-Id` 请求头路由到选中主机（前端 `src/api/client.ts` 统一注入）；由于 `EventSource` 无法设置请求头，SSE 流 `/api/watch` 用 `?host=` 选择主机。`/api/hosts*`、`/api/inbound*`、`/api/dsh*` 是**本机资源**——带远端 `X-Host-Id` 访问会返回 403，而不是转发。
+
+**入站连接（谁在连我）。** 作为被连接方时，主机弹框的 `local` 行会显示 **inbound 徽标**，列出当前有哪些主机连到了本机（可展开查看各连接方的 `peerId`）。连接方经 `POST /api/inbound/hello` 上报心跳（TTL 30 秒），dsh 连接以 `via='dsh'` 并入同一注册表；该信息只在被连接的本机可见，不随远端请求转发。
+
+> 详细设计：[多主机](design/design-multi-host.zh-CN.md)、[dsh 远程连接](design/design-dsh-host-connection.zh-CN.md)、[dsh 登录方式](design/design-dsh-login-methods.zh-CN.md)、[入站 peer](design/design-inbound-peers.zh-CN.md)。
 
 ## 自定义平台（Custom platforms）
 

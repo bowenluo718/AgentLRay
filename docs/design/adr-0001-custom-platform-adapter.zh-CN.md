@@ -42,4 +42,3 @@ AgentLRay 需要支持用户扩展内置 7 平台之外的新平台。现状注�
 | 信任边界与 `AGENTLRAY_NO_PLUGINS` | ✅ 已实现 | `lib/platforms/loader.js` |
 | 平台目录/契约/CLI 表面 | ✅ 已实现 | `~/.agentlray/platforms/`、`bin/platform.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

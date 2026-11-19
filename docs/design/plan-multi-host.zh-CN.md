@@ -313,4 +313,3 @@ function hostHeader(): Record<string, string> { return { 'X-Host-Id': activeHost
 | P1 ③ CLI `--host` | ❌ 未实现 | `bin/sessions.js` |
 | P1 ④ 多隧道池 | ❌ 未实现 | `lib/routes/hosts.js:149` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

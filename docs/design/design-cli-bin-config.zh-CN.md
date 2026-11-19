@@ -63,4 +63,3 @@
 - 独立 `GET/PUT /api/settings/cli-bins` 已并入统一 `/api/settings`（`cliBins` section）；`~/.agentlray/cli-bins.json` 已迁移进 `~/.agentlray/settings.json`。仅保留 `GET /api/settings/cli-bins` 只读兼容端点。
 - legacy 前端（`public/js/app.js`）已于 2026-11-08（`f7c446f`）移除。
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

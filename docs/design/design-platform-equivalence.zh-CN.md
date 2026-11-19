@@ -4,7 +4,7 @@
 > [design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)。
 >
 > 关联：
-> - 旧方案：[design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)（历史记录）、`docs/.local/plan-platform-mount.zh-CN.md`（未迁移）（历史记录）
+> - 旧方案：[design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)（历史记录）、`plan-platform-mount.zh-CN.md`（未随仓库分发）（历史记录）
 > - 自定义平台：[design-custom-platforms.zh-CN.md](design-custom-platforms.zh-CN.md)、[adr-0001-custom-platform-adapter.zh-CN.md](adr-0001-custom-platform-adapter.zh-CN.md)
 > - 既有决策：[adr-0002-co-mind-platform.zh-CN.md](adr-0002-co-mind-platform.zh-CN.md)（薄适配器 require 内部模块问题）
 >
@@ -536,4 +536,3 @@ module.exports = require(path.join(root, 'lib/platforms/builtin', '<id>.js'));
 
 > **D10 后续变化（2026-11-08，`f7c446f`）**：legacy vanilla UI（`public/`、`/legacy` 路由）已整体移除，D10 的「legacy 冻结/降级」条款随之失效；前端只有 `frontend/` 一个面，openclaw 兼容别名（顶层 `/api/agents*`、`/api/spawn-*`）仍保留。
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

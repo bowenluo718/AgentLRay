@@ -32,7 +32,7 @@ co-mind 平台要能用 AgentLRay 看会话/续跑。它数据格式与内置 cl
 
 ## 决策（Decision）
 
-- 适配器 = 薄适配器单文件 `docs/.local/platforms/co-mind.js`（规范源）＋安装副本
+- 适配器 = 薄适配器单文件 `co-mind.js`（规范源）＋安装副本
   `~/.agentlray/platforms/co-mind.js`；`id=co-mind`，`defaultDir = env CO_MIND_DIR 缺省
   ~/.icodemate/cli/projects`；经 `AGENTLRAY_PKG_ROOT` require 内置 claude-code 适配器本体，
   展开后覆写 `id/label/defaultDir/dirSettingKey/dirParam/color/resume/create/bin`，
@@ -42,7 +42,7 @@ co-mind 平台要能用 AgentLRay 看会话/续跑。它数据格式与内置 cl
   四态推导、tail 证据、title 回退、状态窗口（同源 `statusConfig`）、subagents、prompts、inspect。
 - **auto-follow**：薄适配器随包升级自动跟随 claude-code 新实现，零镜像漂移；这是相对自包含
   版（需手工同步内联逻辑，如 IMMEDIATE_AWAIT_TOOLS 语义）的最大收益。
-- **不随仓库分发**：适配器留在 gitignored 的 `docs/.local/`；仓库零改动。
+- **不随仓库分发**：适配器只留在本地工作区（gitignored）；仓库零改动。
 
 ## 后果（Consequences）
 
@@ -64,8 +64,7 @@ co-mind 平台要能用 AgentLRay 看会话/续跑。它数据格式与内置 cl
 
 | 能力/阶段 | 状态 | 代码证据 |
 | --- | --- | --- |
-| 薄适配器复用内置 claude-code | ✅ 已实现 | `docs/.local/platforms/co-mind.js`（安装副本 `~/.agentlray/platforms/co-mind.js`） |
+| 薄适配器复用内置 claude-code | ✅ 已实现 | `co-mind.js`（安装副本 `~/.agentlray/platforms/co-mind.js`） |
 | `AGENTLRAY_PKG_ROOT` 包根解析 | ✅ 已实现 | `lib/platforms/loader.js:23` |
-| 全表面等价（list/show/resume/prompts/inspect） | ✅ 已实现 | `docs/.local/platforms/co-mind.js` |
+| 全表面等价（list/show/resume/prompts/inspect） | ✅ 已实现 | `co-mind.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

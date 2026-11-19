@@ -279,7 +279,7 @@ curl /api/insights?platform=all
    - `test/platform-project.test.js`：临时项目目录加载、默认挂载、可禁用、manifest replaces。
    - `test/platform-migration.api.test.js`：export codex → 重启 → `/api/platforms` origin=user、`/api/codex/sessions` 可用、`/api/platforms` 显示 overrides=package；删除导出文件 → 回退包内置。
 6. **文档**
-   - `docs/usage.md` / `docs/usage.zh-CN.md` / `docs/.local/cli-usage.md` 增加 `platform mount/unmount/export/replace`。
+   - `docs/usage.md` / `docs/usage.zh-CN.md` / `docs/design/cli-usage.md` 增加 `platform mount/unmount/export/replace`。
 
 ### 验证
 
@@ -357,11 +357,11 @@ npm run lint
 
 1. **ADR-0005**：记录三来源、replaced、全表面 hook、单一写入口、重启生效；声明取代 ADR-0001 的 Q11“不做启停开关”。
 2. **文档更新**
-   - `docs/.local/README.md` 登记新设计/计划/评审；
+   - `docs/design/README.md` 登记新设计/计划/评审；
    - `docs/usage.md` / `docs/usage.zh-CN.md` / `cli-usage.md`：`platform mount/unmount/export/replace`、`AGENTLRAY_PKG_ROOT`、项目目录；
-   - `docs/.local/guide-custom-platforms.zh-CN.md`：新增 hook 契约表与薄包装示例；
-   - `docs/.local/custom-platform-example.zh-CN.md`：补 `AGENTLRAY_PKG_ROOT` 包装示例；
-   - `docs/.local/glossary.zh-CN.md`：平台来源、项目平台、替代（replaced）、薄适配器、能力 hook。
+   - `docs/design/guide-custom-platforms.zh-CN.md`：新增 hook 契约表与薄包装示例；
+   - `docs/design/custom-platform-example.zh-CN.md`：补 `AGENTLRAY_PKG_ROOT` 包装示例；
+   - `docs/design/glossary.zh-CN.md`：平台来源、项目平台、替代（replaced）、薄适配器、能力 hook。
 3. **旧文档标注**：`design-platform-mount.zh-CN.md` / `plan-platform-mount.zh-CN.md` 顶部加“已被 v2 取代”链接。
 4. **全量回归**
    - `npm test`；
@@ -414,4 +414,3 @@ npm run lint
 | P2–P4 会话/分析/导出面泛化 | ✅ 已实现 | `lib/platforms/shared/*`、`bin/platform.js` |
 | P5–P6 前端与文档/回归 | ✅ 已实现 | `frontend/src/components/Sidebar.tsx`、`SettingsDialog.tsx` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

@@ -1,10 +1,10 @@
 # docs/design —— 设计与决策文档索引
 
 > 本目录存放 **AgentLRay 已实现或部分实现的设计、计划、决策与参考文档**，随代码提交，是这些能力的正式文档真源。
-> 中间过程文档（评审意见、执行进度、交接、外部系统研究、草图等）仍在 `docs/.local/`，索引见 [../.local/README.md](../.local/README.md)。
+> 中间过程文档（评审意见、执行进度、交接、外部系统研究、草图等）属于本地开发材料，不随仓库分发。
 > 语言约定：默认**简体中文**；代码标识符、命令、配置键、错误信息保持原文。
 >
-> **进度维护规则**：每篇文档末尾的「实现进度（代码核对）」是其状态真源；实现有变更时必须同步更新该节、本索引的「实现进度」列，以及 `docs/.local/README.md` 的进度索引。
+> **进度维护规则**：每篇文档末尾的「实现进度（代码核对）」是其状态真源；实现有变更时必须同步更新该节与本索引的「实现进度」列。
 > 最近一次全量代码核对：**2026-11-19**（基线 `c7fdb8f`）。
 >
 > **历史术语**：2026-11-08（`f7c446f`）起，legacy vanilla UI（`public/`、`/legacy` 路由）、会话备份（`lib/backup.js`）与提示词资产库（`lib/library.js`）已整体移除。早于该日期的设计文档中关于 `public/js/app.js`、`public/css/app.css`、`/legacy`、「legacy 冻结快照」的表述属于当时的历史记录，**不代表当前实现**；当前前端只有 `frontend/` 一个面。
@@ -96,17 +96,17 @@
 
 ---
 
-## 未迁移文档（仍在 `docs/.local/`）
+## 未随仓库分发的文档
 
 以下文档**对应能力尚未实现**，或属于过程性材料，暂不随代码提交：
 
-| 文档 | 类型 | 未迁移原因 |
+| 文档 | 类型 | 未随仓库分发的原因 |
 | --- | --- | --- |
 | `design-ssh-password.zh-CN.md` | 方案设计 | ❌ 未实现：无 `SSH_ASKPASS`/`SSHPASS`/`passwordEnc`（SSH）代码；`lib/secret.js` 当前仅用于私钥与 LLM key 加密 |
 | `design-multi-host-tunnel-pool.zh-CN.md` | 方案设计 | ❌ 未实现：`lib/routes/hosts.js` 连接成功后仍 `closeAllExcept(id)`，无后台常驻隧道池 |
 | `implementation.md` / `architecture.md` | 方案设计 | v1.24.0 历史快照，已被 `docs/architecture*.md` 与现行设计取代 |
 | `csm-analysis.zh-CN.md` / `orca-worker-diagnosis.zh-CN.md` | 参考分析 | 外部系统研究与一次性排障记录 |
-| `review-*.zh-CN.md` / `progress-*.md` / `handoff-*.md` / `plan-platform-mount.zh-CN.md` | 过程材料 | 评审意见、执行进度、交接记录、已取代的历史计划，按规则留在 `docs/.local/` |
+| `review-*.zh-CN.md` / `progress-*.md` / `handoff-*.md` / `plan-platform-mount.zh-CN.md` | 过程材料 | 评审意见、执行进度、交接记录、已取代的历史计划，属于本地过程材料 |
 | `image-dsh-kanban.zh-CN.json` | 图像提取数据 | 一次性视觉识别结果 |
 
-> 索引与进度以 `docs/.local/README.md` 为准；本目录仅收录已迁移文档。
+> 本目录仅收录随仓库分发的正式文档。

@@ -14,6 +14,7 @@
 - **Resume for built-in platforms** — `codex`/`claude-code`/`omp`/`gemini`/`hermes` native resume from the CLI or a copy-button, with configurable executable resolution; dsh is an interactive TUI and supports neither resume nor create. Windows support (PowerShell quoting, `%USERPROFILE%` home) throughout
 - **Light/dark theme, unified settings file** — day/night theme toggle; all server-side settings aggregate in a single `~/.agentlray/settings.json` behind one `GET/PUT /api/settings`
 - **Evidence-backed failure events and local review** with full-result invalidation, evidence navigation and narrow-screen session layout
+- **Multi-host and remote connection** — browse another machine's AgentLRay over an `ssh -L` tunnel or a `ds-harness-remote` encrypted channel (dsh); hosts are managed in Settings → Hosts and persisted to `~/.agentlray/hosts.json`, and the Hosts dialog shows the local machine's inbound peers
 
 ## Current priorities
 

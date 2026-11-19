@@ -1,6 +1,6 @@
 # AgentLRay dsh 多登录方式（扫码 + 账号密码）
 
-> 状态：**已实现**（2026-11-18 grill 收敛 → 实现；**2026-11-19 评审修复 P1/P2/P4/P5**，见 `docs/.local/review-dsh-login-methods.zh-CN.md`（未迁移）；**2026-11-19 评审 Q1–Q4：发现/扫码 serverUrl 参数化**，见下方「serverUrl 参数化」）。关联：[design-dsh-host-connection.zh-CN.md](design-dsh-host-connection.zh-CN.md)（dsh 传输基础）、[adr-0006-dsh-host-connection.zh-CN.md](adr-0006-dsh-host-connection.zh-CN.md)（决策）。
+> 状态：**已实现**（2026-11-18 grill 收敛 → 实现；**2026-11-19 评审修复 P1/P2/P4/P5**，见 `review-dsh-login-methods.zh-CN.md`（未随仓库分发）；**2026-11-19 评审 Q1–Q4：发现/扫码 serverUrl 参数化**，见下方「serverUrl 参数化」）。关联：[design-dsh-host-connection.zh-CN.md](design-dsh-host-connection.zh-CN.md)（dsh 传输基础）、[adr-0006-dsh-host-connection.zh-CN.md](adr-0006-dsh-host-connection.zh-CN.md)（决策）。
 
 ## 背景与目标
 
@@ -170,4 +170,3 @@
 | 账号密码不落盘、token 为登录态 | ✅ 已实现 | `lib/dsh/settings.js`、`lib/dsh/auth.js` |
 | `serverUrl` 参数化（发现/扫码） | ✅ 已实现 | `lib/routes/dsh.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

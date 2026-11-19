@@ -58,4 +58,3 @@
 | 看板移动端状态组头吸顶 | ✅ 已实现 | `frontend/src/views/kanban/KanbanView.tsx:206` |
 | 左侧分组折叠头吸顶 | ✅ 已实现 | `frontend/src/views/sessions/SessionList.tsx:542` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

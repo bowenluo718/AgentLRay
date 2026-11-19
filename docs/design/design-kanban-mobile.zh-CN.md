@@ -146,4 +146,3 @@ useEffect(() => {
 | 单列展开（`expandedStatus`） | ✅ 已实现 | `frontend/src/views/kanban/KanbanView.tsx:89` |
 | `kanbanLib` 单测（§5 表中「新增（建议）」） | ➖ 未实现 | 前端无测试运行器（`frontend/package.json` 只有 `dev`/`build`/`preview`），纯函数靠 `tsc -b` + 冒烟验证 |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

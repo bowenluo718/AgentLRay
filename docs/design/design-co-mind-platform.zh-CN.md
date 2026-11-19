@@ -51,11 +51,11 @@ claude-code 基本一致。运行元数据：
 | R1-Q4 | 能力面 | **全开**：复用 claude-code 的 `list/find/parse/getSession/collectFiles/watchParse/subagents（listChildren/getChild）/prompts/extractPromptsFromFile/inspect` + `resume/create`；不开 `needsAgent`（非按 agent 平台）。`searchSupplement` 显式置 null（co-mind 无 `~/.claude/history.jsonl` 来源） |
 | R1-Q5 | resume | `{ bin: 'co-mind', args: (id) => ['--dangerously-skip-permissions', '--resume', id] }`——带免确认 flag，与内置 claude-code resume 对齐（该 fork 缺省 `bypassPermissions`） |
 | R2-Q1 | 子会话 | 保留 `subagents/` 扫描（复用 claude-code `listChildren/getChild`，与之一致） |
-| R2-Q2 | 归置 | 规范源 `docs/.local/platforms/co-mind.js` + 安装副本 `~/.agentlray/platforms/co-mind.js`；仓库零改动（含不新增已追踪源码） |
+| R2-Q2 | 归置 | 规范源 `co-mind.js` + 安装副本 `~/.agentlray/platforms/co-mind.js`；仓库零改动（含不新增已追踪源码） |
 
 ## 4. 适配器实现
 
-`docs/.local/platforms/co-mind.js`（~80 行薄适配器，零第三方依赖，仅 Node 内置模块
+`co-mind.js`（~80 行薄适配器，零第三方依赖，仅 Node 内置模块
 `path`/`os` + `AGENTLRAY_PKG_ROOT` 注入）。
 
 **薄适配器复用**：co-mind 与 claude-code 逐字段同构，因此不复制任何解析逻辑，直接：
@@ -120,7 +120,7 @@ collectFiles 24 文件。
   `CO_MIND_DIR` 或通用 `?dir=` / `--dir` / 设置面板 `coMindDir` 覆盖。
 - **回滚**：删除/移走该文件即卸载；全局逃生 `AGENTLRAY_NO_PLUGINS=1`。
 - **升级适配器**：薄适配器随包升级自动跟随内置 claude-code；仅当需改身份/目录/命令时
-  编辑 `docs/.local/platforms/co-mind.js` 后重新 `cp` 到 `~/.agentlray/platforms/`，重启
+  编辑 `co-mind.js` 后重新 `cp` 到 `~/.agentlray/platforms/`，重启
   服务/重跑 CLI 生效。
 - **校验**：`node bin/agentlray.js platform validate ~/.agentlray/platforms/co-mind.js --json`。
 
@@ -132,8 +132,7 @@ collectFiles 24 文件。
 
 | 能力/阶段 | 状态 | 代码证据 |
 | --- | --- | --- |
-| 薄适配器接入 | ✅ 已实现 | `docs/.local/platforms/co-mind.js` |
+| 薄适配器接入 | ✅ 已实现 | `co-mind.js` |
 | 安装副本 | ✅ 已实现 | `~/.agentlray/platforms/co-mind.js`（运行环境，不入库） |
 | 全表面等价 + resume | ✅ 已实现 | 适配器 `resume` 声明复用内置 claude-code |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

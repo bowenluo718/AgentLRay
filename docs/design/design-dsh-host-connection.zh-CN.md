@@ -280,4 +280,3 @@ ds-harness-remote 是一个 pnpm workspace 单仓（GitHub `liguobao/ds-harness-
 | 配置落 `hosts.json` 顶层 `dsh` | ✅ 已实现 | `lib/hosts-file.js`、`lib/dsh/settings.js` |
 | inbound `via` / loopback | ✅ 已实现 | `lib/inbound.js`、`lib/dsh/loopback*.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

@@ -163,7 +163,7 @@ flowchart TB
 | 前端 | `store.ts` | `inbound` + `setInbound` |
 | 前端 | `HostSelector.tsx` | 被连接徽标 + 明细弹窗 |
 | 前端 | 新 `useInboundPoller.ts` | ~10s 轮询 + focus 刷新 |
-| 文档 | `docs/.local/README.md` | 登记本文档 |
+| 文档 | `docs/design/README.md` | 登记本文档 |
 
 ## 9. 验证
 
@@ -188,4 +188,3 @@ flowchart TB
 | `GET/POST /api/inbound` | ✅ 已实现 | `lib/routes/inbound.js` |
 | 前端徽标/明细/轮询 | ✅ 已实现 | `frontend/src/hooks/useInboundPoller.ts`、`frontend/src/components/HostsDialog.tsx` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

@@ -1,7 +1,7 @@
 # 设计：任务看板页面（会话四态看板视图）
 
-> 需求：新增「任务看板」页面，参考 `docs/.local/image-dsh-kanban.zh-CN.json` 的页面实现效果；让用户直观查看会话的执行状态；筛选条件与原页面共享；按四种状态分列；每列按最后更新时间默认最多显示 20 条、条数可配置。
-> 状态：与用户经 grill-with-docs（grilling + domain-modeling）两轮问答达成共享理解后定稿。领域词见 `docs/.local/glossary.zh-CN.md`。
+> 需求：新增「任务看板」页面，参考任务看板的视觉实现效果；让用户直观查看会话的执行状态；筛选条件与原页面共享；按四种状态分列；每列按最后更新时间默认最多显示 20 条、条数可配置。
+> 状态：与用户经 grill-with-docs（grilling + domain-modeling）两轮问答达成共享理解后定稿。领域词见 [glossary.zh-CN.md](glossary.zh-CN.md)。
 
 ## 0. 定稿决策（共享理解）
 
@@ -149,4 +149,3 @@ const KANBAN_DEFAULTS = { maxPerStatus: 20 };
 
 > **后续演进**：正文 1.2 所述的独立 `lib/routes/kanban-config.js` 与 `GET/PUT /api/settings/kanban`、`~/.agentlray/kanban-config.json` 已在 settings-merge 后并入统一 `GET/PUT /api/settings` 的 `kanban` section（`settings.json`，见 [design-settings-merge.zh-CN.md](design-settings-merge.zh-CN.md)）；配置基建 `lib/config-store.js` 亦随 settings-merge 移除，由 `lib/settings.js` 取代。
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

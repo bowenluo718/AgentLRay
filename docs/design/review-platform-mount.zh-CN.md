@@ -2,7 +2,7 @@
 
 > 评审对象：
 > - [design-platform-mount.zh-CN.md](design-platform-mount.zh-CN.md)（下称“设计”）
-> - `docs/.local/plan-platform-mount.zh-CN.md`（未迁移）（下称“计划”）
+> - `plan-platform-mount.zh-CN.md`（未随仓库分发）（下称“计划”）
 >
 > 评审基线：当前工作区（含自定义平台 P0–P5、会话状态、openclaw 全 agent、新建会话等已合入改动）。
 > 评审要求（用户原话）：**内置平台与自定义平台等价；自定义平台可放在项目内作为内置平台；内置平台也能迁移到用户目录内作为自定义平台；现有全部能力保持完全兼容。**
@@ -280,7 +280,7 @@ ADR-0001 的 Q11 明确“**不做 per-platform 启停开关**：文件存在 = 
 - 其他表面：`lib/search.js:226-313`；`lib/routes/insights.js:17,53-68`；`lib/insights.js:431,500`；`lib/prompts.js:363-382`；`lib/backup.js:127-142`；`lib/routes/watch.js:232-246`；`lib/inspect.js:12`
 - 设置：`lib/routes/settings.js:12,31,67-80`；`lib/settings.js:29-58`；`lib/config.js:5`
 - 前端：`frontend/src/store.ts:22-30,146-166,520-545`；`frontend/src/api/client.ts:96-121,140-152`；`frontend/src/components/SettingsDialog.tsx:26-44`；`frontend/src/hooks/usePlatformProbe.ts:27`
-- 既有决策：`docs/.local/adr-0001-custom-platform-adapter.zh-CN.md`（Q11）；`docs/.local/adr-0002-co-mind-platform.zh-CN.md:20-25`；`docs/.local/design-custom-platforms.zh-CN.md:31,40,87-90`
+- 既有决策：`docs/design/adr-0001-custom-platform-adapter.zh-CN.md`（Q11）；`docs/design/adr-0002-co-mind-platform.zh-CN.md:20-25`；`docs/design/design-custom-platforms.zh-CN.md:31,40,87-90`
 - 测试隔离：`test/registry.test.js:8`；`test/helpers.js:28-46`；`package.json` 的 `test` 脚本
 
 ---
@@ -293,4 +293,3 @@ ADR-0001 的 Q11 明确“**不做 per-platform 启停开关**：文件存在 = 
 | --- | --- | --- |
 | 评审结论落地 | ✅ 已落地 | `design-platform-equivalence.zh-CN.md`、`lib/platforms/index.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

@@ -230,7 +230,7 @@ if (parsed.pathname === '/api/ui-selection') return ok({ selectedPlatforms: [] }
 | `frontend/src/demo/router.ts` | 新增 `/api/ui-selection` 夹具 |
 | `test/proxy.test.js` | 改 154-168 为本地化断言；新增 settings 本机化 / ui-selection 透传用例 |
 | `test/api.test.js` | 新增 ui-selection + `/api/sessions` 缺省取数用例 |
-| `docs/.local/README.md` | 登记本文档索引 |
+| `docs/design/README.md` | 登记本文档索引 |
 
 ---
 
@@ -244,4 +244,3 @@ if (parsed.pathname === '/api/ui-selection') return ok({ selectedPlatforms: [] }
 | settings GET/PUT 对远端本机化 | ✅ 已实现 | `lib/routes/proxy.js`、`lib/routes/settings.js` |
 | 聚合列表配置驱动 selectedPlatforms | ✅ 已实现 | `lib/routes/sessions.js`、`frontend/src/App.tsx` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

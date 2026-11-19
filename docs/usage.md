@@ -121,7 +121,7 @@ Open http://localhost:3800
 
 ### Task Board and New Tasks
 
-The **Task Board** tab (任务看板) groups every session into four status columns — awaiting input / working / waiting / stopped — with a text filter above them. Its header carries a **New Task** button that opens a dialog which spawns the platform CLI to start a brand-new session.
+The **Task Board** tab (任务看板) groups every session into four status columns — awaiting input / working / waiting / stopped — with a text filter above them. Its header carries a **New Task** button that opens a dialog which spawns the platform CLI to start a brand-new session. Design: [kanban](design/design-kanban.zh-CN.md) and [kanban mobile](design/design-kanban-mobile.zh-CN.md).
 
 **The dialog has three fields:**
 
@@ -242,6 +242,10 @@ Two transports per host:
 The global dsh section (`role` = `host`/`client`/`both`, `serverUrl`, `deviceName`, `allowedPorts`, default `[3800]`) lives at the top level of `hosts.json` and is edited via **Settings → Hosts → dsh**; an older `settings.json` `dsh` section migrates in automatically on first read.
 
 Requests are routed to the selected host by the `X-Host-Id` header (the frontend `src/api/client.ts` injects it); because `EventSource` cannot set headers, the SSE stream at `/api/watch` selects the host with `?host=`. The `/api/hosts*`, `/api/inbound*` and `/api/dsh*` endpoints are **local resources** — addressing them with a remote `X-Host-Id` returns 403 instead of forwarding.
+
+**Inbound connections (who is connecting to me).** When acting as the connected side, the `local` row in the Hosts dialog shows an **inbound badge** listing which hosts currently connect to this machine (expandable to see each peer's `peerId`). Connecting peers report a heartbeat via `POST /api/inbound/hello` (TTL 30 s); dsh connections join the same registry with `via='dsh'`. This information is visible only on the machine being connected to; it is not forwarded with remote requests.
+
+> Design: [multi-host](design/design-multi-host.zh-CN.md), [dsh remote connection](design/design-dsh-host-connection.zh-CN.md), [dsh login methods](design/design-dsh-login-methods.zh-CN.md), [inbound peers](design/design-inbound-peers.zh-CN.md).
 
 ## Custom platforms
 

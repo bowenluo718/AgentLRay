@@ -244,4 +244,3 @@ node bin/agentlray.js sessions new --platform dsh --json   # 退出 1：dsh 不�
 | `sessions list/show/resume/new` | ✅ 已实现 | `bin/sessions.js` |
 | `platform list/validate/mount/unmount/replace/unreplace/export` | ✅ 已实现 | `bin/platform.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

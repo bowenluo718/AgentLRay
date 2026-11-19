@@ -6,7 +6,7 @@
   - [design-dsh-host-connection.zh-CN.md](design-dsh-host-connection.zh-CN.md)（完整设计，含方案 A 后续实现说明）
   - [design-multi-host.zh-CN.md](design-multi-host.zh-CN.md)（现有 ssh 多主机模型）
   - [design-inbound-peers.zh-CN.md](design-inbound-peers.zh-CN.md)（被连接方 peer 展示）
-  - `docs/.local/design-ssh-password.zh-CN.md`（未迁移）（复用的 AES-256-GCM 加密方案 `lib/secret.js`）
+  - `design-ssh-password.zh-CN.md`（未随仓库分发）（复用的 AES-256-GCM 加密方案 `lib/secret.js`）
 
 ## 背景
 
@@ -87,7 +87,7 @@ ds-harness-remote 被连接方天然知道谁在连（`ConnectionController` 持
 
 - **扩展现有多主机模型**（[design-multi-host.zh-CN.md](design-multi-host.zh-CN.md)）：`type: 'dsh'` 作为第二种传输，与 ssh 并存；proxy 数据面/状态机/CRUD 复用不变。
 - **inbound 展示**（[design-inbound-peers.zh-CN.md](design-inbound-peers.zh-CN.md)）：peer 结构加 `via` 字段，向后兼容（旧 peer 无 `via` 视为 `ssh`）。
-- **加密方案**（`docs/.local/design-ssh-password.zh-CN.md`（未迁移））：复用 `lib/secret.js` AES-256-GCM，`dsh.passwordEnc` 与 `ssh.identityKeyEnc`/`llm.apiKeyEnc` 同机制。
+- **加密方案**（`design-ssh-password.zh-CN.md`（未随仓库分发））：复用 `lib/secret.js` AES-256-GCM，`dsh.passwordEnc` 与 `ssh.identityKeyEnc`/`llm.apiKeyEnc` 同机制。
 - 本 ADR 落地 `lib/hosts.js` 中 `type: 'dsh'` 的预留占位，不改变 ssh 路径。
 
 ## 实现落地补记（2026-11-17）
@@ -113,4 +113,3 @@ ds-harness-remote 被连接方天然知道谁在连（`ConnectionController` 持
 | 被连接方 inbound `via` | ✅ 已实现 | `lib/inbound.js`、`lib/routes/inbound.js` |
 | loopback 端口映射 | ✅ 已实现 | `lib/dsh/loopback.js`、`loopback-client.js`、`loopback-host.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

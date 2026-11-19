@@ -68,9 +68,9 @@
 文档：
 
 - `docs/usage.zh-CN.md` / `docs/usage.md`：Resume 命令、平台 CLI 命令配置段落（codex/claude-code/omp → 六平台；新增各平台原生续跑命令示例）。
-- `docs/.local/guide-custom-platforms.zh-CN.md`：resume 未声明时的错误文案引用随代码更新。
+- `docs/design/guide-custom-platforms.zh-CN.md`：resume 未声明时的错误文案引用随代码更新。
 - 本项目索引 `AGENTS.md`「代码库现状提示」对应表格行（平台 CLI 命令可配置一条）增补涉及平台。
-- 本设计文档登记 `docs/.local/README.md`。
+- 本设计文档登记 `docs/design/README.md`。
 
 ## 验证
 
@@ -94,4 +94,3 @@
 
 **后续变更（2026-11-10，`0c38d61`）**：dsh 不再支持续跑/新建（交互式 TUI），本设计新增的 dsh `resume` 已被移出，resume 收敛为五平台；同时 `RESUME_BINS` 模块级表已删除，改为各适配器 `resume: { bin, args(id, opts) }` 内联声明、由 `bin/sessions.js` 的 `RESUME_PLATFORMS` 在 require 期从注册表动态收敛。本文档 §目标形态/§实现清单中的 dsh 条目与 `RESUME_BINS` 为当时方案的历史记录。
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

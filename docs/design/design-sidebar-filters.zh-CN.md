@@ -110,4 +110,3 @@
 | 平台/项目筛选迁入侧栏 | ✅ 已实现 | `frontend/src/components/Sidebar.tsx`、`SessionFiltersDialog.tsx` |
 | 分组模式与折叠持久化 | ✅ 已实现 | `frontend/src/store.ts`、`frontend/src/views/sessions/SessionList.tsx` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

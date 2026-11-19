@@ -90,7 +90,7 @@ AgentLRay 目前只在 Linux/macOS 上可用，Windows 上因 `lib/config.js` �
 ### P4：文档
 
 - `docs/usage.zh-CN.md` 默认目录表（:143-153）加「Windows 提示」列，标注不一致平台需设环境变量
-- 本 design + ADR 登记 `docs/.local/README.md` 索引
+- 本 design + ADR 登记 `docs/design/README.md` 索引
 - glossary 增补术语
 - **README.zh-CN.md 不改**（用户确认）
 
@@ -119,4 +119,3 @@ P0 → P1 → P2 → P3 → P4（P0/P1 无强依赖，可并行但建议串行�
 | 命令串单一真源 + `shell: win32` | ✅ 已实现 | `lib/resume.js:43`、`lib/new.js`、`lib/transport.js:19` |
 | 测试跨平台拆分 | ✅ 已实现 | `test/` 中 `win32` skip/branch |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

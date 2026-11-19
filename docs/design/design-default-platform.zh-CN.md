@@ -43,4 +43,3 @@ web 设置弹框「平台」面板缺少「默认平台」设置。此前 `ui.pl
 | 侧栏只写 `selectedPlatforms` | ✅ 已实现 | `frontend/src/store.ts` |
 | 移除两个一次性迁移 | ✅ 已实现 | 代码中无 `migrateLegacySettings` / `LEGACY_DIR_KEYS` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

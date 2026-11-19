@@ -140,4 +140,3 @@ module.exports = require(path.join(process.env.AGENTLRAY_PKG_ROOT, 'lib/platform
 | catalog / `listPlatformInfo` / 全表面 hook | ✅ 已实现 | `lib/platforms/index.js`、`lib/routes/platforms.js` |
 | `platform export` + `AGENTLRAY_PKG_ROOT` | ✅ 已实现 | `bin/platform.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

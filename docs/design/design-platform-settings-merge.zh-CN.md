@@ -173,4 +173,3 @@ dirFor(platform) = resolveDir(dirsConfig[platform.dirSettingKey], platform.defau
 | 平台启停落服务端 | ✅ 已实现 | `lib/platform-config.js` |
 | 设置面板「平台」tab 归并 | ✅ 已实现 | `frontend/src/components/SettingsDialog.tsx` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

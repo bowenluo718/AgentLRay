@@ -165,7 +165,7 @@ if (!hostReady && hostReadyError) {
 | `frontend/src/views/sessions/SessionSummary.tsx` | resume 查询追加 `hostReady` |
 | `frontend/src/views/trace/childAgents.ts` | 3 处追加 `hostReady` |
 | `frontend/src/views/sessions/useSessionSse.ts` | enabled 追加 `getHostReady()` |
-| `docs/.local/README.md` | 登记本文档索引 |
+| `docs/design/README.md` | 登记本文档索引 |
 
 ---
 
@@ -179,4 +179,3 @@ if (!hostReady && hostReadyError) {
 | 恢复记忆主机的就绪状态机 + 超时回落 | ✅ 已实现 | `frontend/src/store.ts`、`frontend/src/App.tsx` |
 | `exportUrl` 补 `?host=` | ✅ 已实现 | `frontend/src/api/client.ts` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

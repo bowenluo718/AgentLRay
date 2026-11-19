@@ -131,7 +131,7 @@ agentlray sessions new [message...] --platform <id> [--dir <cwd>] [--run]
 - **P3 React 前端**：任务看板头部「新建任务」按钮 + 弹窗（提示词/cwd/平台选择、默认当前会话项目平台、只列 create 平台）+ 触发后刷新；`types.ts`/`client.ts`/`store.ts` 增 create 能力位与新建调用。
 - **P4 收尾**：内置 `--help` 实测校正、`docs/usage*` 章节、词表/ADR/本文档登记核对。
 
-> 与既有约定一致：中间文档入 `docs/.local/` 并按 `README.md` 登记；`frontend/` 是唯一功能开发面，legacy `public/` 冻结快照只接安全修复，**新功能不落 legacy**。
+> 与既有约定一致：中间过程文档按 [本目录 README](README.md) 登记；`frontend/` 是唯一功能开发面，legacy `public/` 冻结快照只接安全修复，**新功能不落 legacy**。
 
 ---
 
@@ -145,4 +145,3 @@ agentlray sessions new [message...] --platform <id> [--dir <cwd>] [--run]
 | CLI `sessions new` | ✅ 已实现 | `bin/sessions.js` |
 | Web 新建任务弹窗 + POST 路由 | ✅ 已实现 | `frontend/src/views/kanban`、`lib/routes/sessions.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

@@ -68,4 +68,3 @@
 | 每条标注来源 `agent` | ✅ 已实现 | `lib/platforms/builtin/openclaw/index.js`、`lib/session-list.js` |
 | CLI 缺省全部 agents | ✅ 已实现 | `bin/sessions.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

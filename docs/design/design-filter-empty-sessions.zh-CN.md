@@ -101,4 +101,3 @@ function sortSessionsByStatusGroups(sessions, opts = {}) {
 | 列表剔除空会话（`userCount===0 && messageCount===0`） | ✅ 已实现 | `lib/status.js:219-224` |
 | 详情不过滤 | ✅ 已实现 | `lib/routes/sessions.js` 详情链路未过滤 |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

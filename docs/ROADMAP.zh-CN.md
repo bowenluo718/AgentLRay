@@ -14,6 +14,7 @@
 - **内置平台可续跑** — `codex` / `claude-code` / `omp` / `gemini` / `hermes` 可从 CLI 或复制按钮原生续跑，可配置可执行文件解析；dsh 是交互式 TUI，既不支持续跑也不支持新建。全程支持 Windows（PowerShell 引用、`%USERPROFILE%` 家目录）
 - **白天/黑夜主题、统一设置文件** — 日/夜主题切换；所有服务端设置聚合在单个 `~/.agentlray/settings.json`，位于一个 `GET/PUT /api/settings` 之后
 - **有证据支撑的失败事件与本地复核**，支持完整结果失效、证据导航与窄屏会话布局
+- **多主机与远程连接** — 通过 `ssh -L` 隧道或 `ds-harness-remote` 加密通道（dsh）浏览另一台机器的 AgentLRay；主机在 Settings → 主机 弹框中管理，持久化到 `~/.agentlray/hosts.json`，并可在主机弹框查看本机的入站连接方（inbound peers）
 
 ## 当前优先级
 

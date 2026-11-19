@@ -83,4 +83,3 @@ Windows 上跳过 omp 持有检测/自动终止，`--run` 时打印明确提示�
 | spawn `shell: win32` | ✅ 已实现 | `lib/transport.js:19` |
 | LLM 调用 Windows 分支 | ✅ 已实现 | `lib/llm.js:114` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

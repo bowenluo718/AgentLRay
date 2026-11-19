@@ -54,4 +54,3 @@
 | 四态判定窗口可配置 | ✅ 已实现 | `lib/status-config.js`、`lib/status.js` |
 | `/api/settings` `status` section | ✅ 已实现 | `lib/routes/settings.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

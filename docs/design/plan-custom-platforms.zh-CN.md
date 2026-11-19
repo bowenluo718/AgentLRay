@@ -24,7 +24,7 @@
 ## P2 — CLI platform 子命令
 
 - 新增 `bin/platform.js`：`list`（输出内置+自定义+broken，与 `/api/platforms` 同源）、`validate <file>`（共用 loader 校验 → 调 `list(defaultDir())` 报计数/首条 id/错误）
-- `bin/agentlray.js` 增加 `platform` 分发；`docs/.local/cli-usage.md` 补章节
+- `bin/agentlray.js` 增加 `platform` 分发；`docs/design/cli-usage.md` 补章节
 - **验证**：`--json` 输出约定对齐 CLI 既有（`{schemaVersion:1,…}`）；对样例适配器 validate 通过/对坏文件报错
 
 ## P3 — resume opt-in
@@ -47,9 +47,9 @@
 
 ## P6 — 收尾
 
-- 适配器样例模板文档（如 `docs/.local/custom-platform-example.zh-CN.md` 或并入 usage）
+- 适配器样例模板文档（如 `docs/design/custom-platform-example.zh-CN.md` 或并入 usage）
 - `docs/usage*.md` 增补「自定义平台」章节
-- 核对 `docs/.local/README.md` 索引（词表/设计/ADR/本计划）+ glossary 一致性
+- 核对 `docs/design/README.md` 索引（词表/设计/ADR/本计划）+ glossary 一致性
 
 ## 依赖与并行
 
@@ -71,4 +71,3 @@
 | P2 CLI / P3 resume opt-in | ✅ 已实现 | `bin/platform.js`、`lib/resume.js` |
 | P4–P6 前端与收尾 | ✅ 已实现 | `frontend/src/components/Sidebar.tsx`、`SettingsDialog.tsx` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

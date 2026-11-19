@@ -1,7 +1,7 @@
 # 计算机方案设计：会话状态信息、监控更新与按状态分组排序
 
 > 本文是 AgentLRay 会话功能增强的**方案设计文档**（Orca 协调任务 P0 产物）。
-> 参考实现：`docs/.local/csm-analysis.zh-CN.md`（csm 1.3.1 三种机制分析，下文简称 csm）。
+> 参考实现：csm 1.3.1 三种机制分析（下文简称 csm）。
 > 状态：**P0 设计审查已完成**（reviewer agent，结论"需修订"）。本版已并入全部阻断项/重要项与可行建议（见 §5.1 审查结论与采纳）。
 
 ---
@@ -173,7 +173,7 @@ tail = {
 | `frontend/src/views/sessions/useSessionSse.ts` | 合并 `payload.session.status` 进列表缓存 |
 | `public/js/app.js` | 四态徽标；SSE 合并状态（分组头不做） |
 | `public/css/app.css` | 四态徽标配色；移除 archived/active 徽标样式 |
-| `docs/.local/session-status-design.zh-CN.md` | 本文档；P4 在 `docs/usage.zh-CN.md` 补一句状态说明 |
+| 本文档 | 本文档；P4 在 `docs/usage.zh-CN.md` 补一句状态说明 |
 
 **不做（明确排除）**：进程扫描/ghost 击杀、以 mtime 作为工作证据、`--kill-ghosts` 语义、legacy 分组头。
 
@@ -317,4 +317,3 @@ reviewer agent 结论：**需修订**（0 阻断 + 3 重要 + 4 建议）。均�
 | 状态窗口配置 | ✅ 已实现 | `lib/status-config.js` |
 | SSE 即时刷状态 | ✅ 已实现 | `lib/routes/watch.js`、`frontend/src/views/sessions/useSessionSse.ts` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。

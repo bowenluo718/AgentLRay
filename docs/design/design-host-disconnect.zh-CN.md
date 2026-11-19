@@ -1,7 +1,7 @@
 # 远端主机手动退出连接（disconnect）设计
 
 > 状态：**已实现**。多主机 P0（`d005166` 起）支持经 ssh 隧道连接远端 AgentLRay，但缺少手动断开连接的入口。本文档记录该能力的设计与实现。
-> 关联：[design-multi-host.zh-CN.md](design-multi-host.zh-CN.md)（多主机总设计）、`docs/.local/design-multi-host-tunnel-pool.zh-CN.md`（未迁移）（隧道池，预留 disconnect 概念，未实现）。
+> 关联：[design-multi-host.zh-CN.md](design-multi-host.zh-CN.md)（多主机总设计）、`design-multi-host-tunnel-pool.zh-CN.md`（未随仓库分发）（隧道池，预留 disconnect 概念，未实现）。
 
 ## 1. 需求一句话
 
@@ -114,4 +114,3 @@ export function disconnectHost(id: string): Promise<{ id: string; status: string
 | 前端断开并切回本机 | ✅ 已实现 | `frontend/src/store.ts`、`frontend/src/components/HostsDialog.tsx` |
 | local 不可断开 | ✅ 已实现 | `lib/routes/hosts.js` |
 
-> 本文档已从 `docs/.local/` 迁移至正式文档目录，随代码提交；`docs/.local/` 保留同名过程稿。后续实现变更请同步更新本节与 `docs/.local/README.md` 的进度索引。
