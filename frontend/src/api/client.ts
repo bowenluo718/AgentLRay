@@ -433,21 +433,39 @@ export interface PlatformsMirror {
   replaced: string[];
 }
 
-/** dsh 传输配置（GET/PUT /api/dsh/config）：中继服务器账号与本机角色。 */
+/** dsh 传输配置（GET/PUT /api/dsh/config）：中继服务器与本机角色。 */
 export interface DshConfig {
   /** 本机角色：host=只被连 / client=只去连 / both=两者皆可。 */
   role: 'host' | 'client' | 'both';
   /** 中继服务器地址（默认官方 https://dsh.r2049.cn，可改自托管）。 */
   serverUrl: string;
-  /** 中继服务器账号（邮箱）。 */
-  email: string;
   /** 本机在中继服务器上的设备名。 */
   deviceName: string;
   /** 被连接方放行的本机端口（默认 [3800]）。 */
   allowedPorts: number[];
-  /** true when a password is stored (the password itself never leaves the server) */
-  hasPassword: boolean;
+  /** 登录态（design-dsh-login-methods）：任一 scope 有有效 token 即已登录。 */
+  authStatus: {
+    loggedIn: boolean;
+    /** 有有效 token 的 scope 集合（host / client）。 */
+    roles: ('host' | 'client')[];
+  };
 }
+
+/** 动态发现的 OAuth 扫码 provider（官方 / 自托管）。 */
+export interface DshAuthProvider {
+  id: string;
+  displayName: string;
+  qrStartUrl: string;
+}
+
+export interface DshQrSession {
+  qrId: string;
+  scanUrl: string;
+  expiresIn: number;
+  provider: string;
+}
+
+export type DshQrPollResult = { status: 'pending' } | { status: 'complete' } | { status: 'expired' };
 
 /** GET /api/settings 全量响应（web 设置面板一次读齐所有 section）。 */
 export interface AllSettings {
@@ -608,8 +626,6 @@ export function testHostSpec(body: HostBody & { id: string }): Promise<HostTestR
 export interface DshStatus {
   role: 'host' | 'client' | 'both';
   serverUrl: string;
-  email: string;
-  hasPassword: boolean;
   deviceName: string;
   allowedPorts: number[];
   /** 被连接方服务是否在运行。 */
@@ -627,7 +643,7 @@ export function getDshConfig(): Promise<DshConfig> {
   return fetchJson('/api/dsh/config', { local: true });
 }
 
-/** PUT /api/dsh/config — 保存 dsh 配置（password 语义同 llm.apiKey：未传=保留，''=清除，否则替换）。恒 local。 */
+/** PUT /api/dsh/config — 保存 dsh 配置（email/password 只用于本次登录触发，不落盘；恒 local）。 */
 export function saveDshConfig(body: {
   role?: 'host' | 'client' | 'both';
   serverUrl?: string;
@@ -663,6 +679,48 @@ export function testDshSpec(body: {
   remoteAgentLrayPort?: number;
 }): Promise<HostTestResult> {
   return requestJson('/api/dsh/test', 'POST', body, { local: true });
+}
+
+/** GET /api/dsh/auth/providers — 动态发现扫码登录方式（both 禁扫码 → 空）。
+ *  role 可选：覆盖配置 role（draft 未落盘时按当前角色判断可扫码性，评审 P1）。
+ *  serverUrl 可选：覆盖目标服务器（draft.serverUrl，Q2），使发现针对用户当前编辑的地址。 */
+export function discoverDshAuthProviders(
+  role?: 'host' | 'client' | 'both',
+  serverUrl?: string,
+): Promise<{
+  providers: DshAuthProvider[];
+  devicePairing: boolean;
+}> {
+  const params = new URLSearchParams();
+  if (role) params.set('role', role);
+  if (serverUrl) params.set('serverUrl', serverUrl);
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return fetchJson(`/api/dsh/auth/providers${qs}`, { local: true });
+}
+
+/** POST /api/dsh/auth/qr/start — 发起扫码登录会话。
+ *  serverUrl 可选：目标服务器（draft.serverUrl，Q3），须与 poll 传同一地址。 */
+export function startDshQrLogin(body: {
+  role: 'host' | 'client';
+  provider: string;
+  serverUrl?: string;
+}): Promise<DshQrSession> {
+  return requestJson('/api/dsh/auth/qr/start', 'POST', body, { local: true });
+}
+
+/** POST /api/dsh/auth/qr/poll — 轮询扫码结果。complete 时 token 已落对应 scope。
+ *  serverUrl 须与 qr/start 传同一地址。 */
+export function pollDshQrLogin(body: {
+  role: 'host' | 'client';
+  qrId: string;
+  serverUrl?: string;
+}): Promise<DshQrPollResult> {
+  return requestJson('/api/dsh/auth/qr/poll', 'POST', body, { local: true });
+}
+
+/** POST /api/dsh/auth/logout — 清所有 scope 的 token，回未登录态。 */
+export function logoutDsh(): Promise<{ ok: boolean }> {
+  return requestJson('/api/dsh/auth/logout', 'POST', undefined, { local: true });
 }
 
 /** POST /api/hosts/:id/connect — 建立并保持隧道（前端切换当前选中主机用）。 */

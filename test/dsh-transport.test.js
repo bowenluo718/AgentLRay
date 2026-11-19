@@ -20,7 +20,6 @@ const { normalizeHost, listHosts, createHost, updateHost, deleteHost } = require
 const {
   loadDshSettings,
   saveDshSettings,
-  loadDshCredentials,
   migrateDshSectionOnce,
 } = require('../lib/dsh/settings');
 const { HOSTS_FILE } = require('../lib/hosts');
@@ -91,33 +90,35 @@ test('dsh 主机 CRUD：落盘只有 dsh 字段，编辑不误伤 ssh 凭据分�
 
 // ---- hosts.json 顶层 dsh section ----
 
-test('dsh 设置：密码加密落盘到 hosts.json、GET 视图只给 hasPassword', async () => {
+test('dsh 设置：账号密码不落盘（design-dsh-login-methods D4）', async () => {
   await saveDshSettings({ role: 'host', serverUrl: 'http://127.0.0.1:18123', email: 'a@b.c', password: 's3cret-pw' });
   const stored = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
   assert.equal(stored.dsh.role, 'host');
-  assert.equal(stored.dsh.email, 'a@b.c');
-  assert.ok(stored.dsh.passwordEnc.startsWith('v1:'));
-  // 明文密码不得落盘。
+  // 账号密码不再写入 hosts.json（新模型不落盘）。
+  assert.equal(stored.dsh.email, undefined);
+  assert.equal(stored.dsh.passwordEnc, undefined);
+  // 明文密码也不得落盘。
   assert.equal(JSON.stringify(stored).includes('s3cret-pw'), false);
-  // dsh 配置不再写入 settings.json（文件可能因本用例首次写入而存在——不存在则跳过，
-  // 存在则必须无 dsh）。
+  // 明文密码不出现于任何文件。
   if (fs.existsSync(SETTINGS_FILE)) {
-    assert.equal(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')).dsh, undefined);
+    assert.equal(JSON.stringify(fs.readFileSync(SETTINGS_FILE, 'utf8')).includes('s3cret-pw'), false);
   }
 
   const view = await loadDshSettings();
-  assert.equal(view.hasPassword, true);
-  assert.equal(view.passwordEnc.startsWith('v1:'), true);
-  assert.equal((await loadDshCredentials()).password, 's3cret-pw');
+  assert.equal(view.email, undefined); // 清理：配置视图不含账号密码字段
+  assert.equal(view.passwordEnc, undefined);
+  assert.equal(view.hasPassword, undefined);
 });
 
-test('dsh 设置：密码缺省保留、空串清除', async () => {
+test('dsh 设置：账号密码参数被忽略、绝不持久化', async () => {
   await saveDshSettings({ email: 'a@b.c', password: 'first-pw' });
   await saveDshSettings({ role: 'client' });
-  assert.equal((await loadDshCredentials()).password, 'first-pw');
-  await saveDshSettings({ password: '' });
-  assert.equal((await loadDshSettings()).hasPassword, false);
-  assert.equal(await loadDshCredentials(), null);
+  // 全程不落账号密码。
+  const stored = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  assert.equal(stored.dsh.email, undefined);
+  assert.equal(stored.dsh.passwordEnc, undefined);
+  // 配置字段照常保存。
+  assert.equal(stored.dsh.role, 'client');
 });
 
 test('dsh 设置：非法角色 / 服务器地址 / 放行端口均拒绝', async () => {
@@ -132,8 +133,8 @@ test('dsh 设置：放行端口去重且保序，默认 [3800]', async () => {
   assert.deepEqual((await loadDshSettings()).allowedPorts, [3801, 8080]);
 });
 
-test('dsh 迁移：settings.json 旧 dsh 首次读取拷入 hosts.json，且幂等', async () => {
-  // 种旧数据：settings.json 顶层 dsh（含密文）。
+test('dsh 迁移：settings.json 旧 dsh 首次读取拷入 hosts.json（不含账号密码），且幂等', async () => {
+  // 种旧数据：settings.json 顶层 dsh（含旧 email/passwordEnc）。
   fs.writeFileSync(
     SETTINGS_FILE,
     JSON.stringify({
@@ -149,11 +150,10 @@ test('dsh 迁移：settings.json 旧 dsh 首次读取拷入 hosts.json，且幂�
   );
   await migrateDshSectionOnce();
   const file = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
+  // 只迁移配置字段，旧 email/passwordEnc 不搬（账号密码不落盘，D4）。
   assert.deepEqual(file.dsh, {
     role: 'host',
     serverUrl: 'http://127.0.0.1:18123',
-    email: 'a@b.c',
-    passwordEnc: 'v1:legacycipher',
     deviceName: 'legacybox',
     allowedPorts: [3800, 8080],
   });
@@ -162,8 +162,11 @@ test('dsh 迁移：settings.json 旧 dsh 首次读取拷入 hosts.json，且幂�
   fs.writeFileSync(HOSTS_FILE, JSON.stringify(file));
   await migrateDshSectionOnce();
   assert.equal(JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8')).dsh.serverUrl, 'http://127.0.0.1:19999');
-  // loadDshSettings 返回迁移后的配置。
-  assert.equal((await loadDshSettings()).deviceName, 'legacybox');
+  // loadDshSettings 返回迁移后的配置（不含账号密码字段）。
+  const view = await loadDshSettings();
+  assert.equal(view.deviceName, 'legacybox');
+  assert.equal(view.email, undefined);
+  assert.equal(view.passwordEnc, undefined);
 });
 
 test('dsh 迁移：settings.json 无 dsh 时迁移为 no-op', async () => {
@@ -173,7 +176,7 @@ test('dsh 迁移：settings.json 无 dsh 时迁移为 no-op', async () => {
 });
 
 test('hosts.json 顶层 dsh：主机 CRUD 写盘不冲掉 dsh 配置', async () => {
-  await saveDshSettings({ role: 'both', email: 'a@b.c', password: 'pw' });
+  await saveDshSettings({ role: 'both', serverUrl: 'http://127.0.0.1:18123' });
   await createHost({ id: 'remote', label: '远端', type: 'dsh', dsh: { deviceId: 'dev-1' } });
   let file = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
   assert.equal(file.hosts.length, 1);
@@ -183,8 +186,7 @@ test('hosts.json 顶层 dsh：主机 CRUD 写盘不冲掉 dsh 配置', async () 
   await updateHost('remote', { label: '远端2', type: 'dsh', dsh: { deviceId: 'dev-1', remoteAgentLrayPort: 3999 } });
   file = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8'));
   assert.equal(file.hosts[0].label, '远端2');
-  assert.equal(file.dsh.email, 'a@b.c'); // 顶层 dsh 仍保留
-  assert.equal(file.dsh.passwordEnc.startsWith('v1:'), true);
+  assert.equal(file.dsh.role, 'both'); // 顶层 dsh 仍保留
 });
 
 // ---- inbound peer：via 字段 ----

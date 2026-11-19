@@ -1,0 +1,478 @@
+'use strict';
+// dsh 多登录方式（design-dsh-login-methods）：
+// - 账号密码不落盘：saveDshSettings 不再写 email/passwordEnc（保留旧密文）。
+// - auth.js：provider 发现 / qr start/poll / 账号密码 login / logout / 登录态判定。
+// - 路由：/api/dsh/config 返回 authStatus；/api/dsh/auth/* 端点。
+// - 连接改为纯 token 驱动：client.js/host.js 无有效 token 抛「登录已失效」。
+//
+// 用注入 fake vendor（模拟官方真实形状：providers 3 个、qr 会话、login 401/成功、错误信封），
+// 不依赖真实 dsh.r2049.cn。
+
+const { test, beforeEach, mock } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const http = require('node:http');
+
+const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-auth-test-'));
+process.env.HOME = tmpHome;
+
+const { loadVendor } = require('../lib/dsh/vendor');
+const vendorMod = require('../lib/dsh/vendor');
+const auth = require('../lib/dsh/auth');
+const { saveDshSettings, loadDshSettings } = require('../lib/dsh/settings');
+const { HOSTS_FILE } = require('../lib/hosts');
+const { SETTINGS_FILE } = require('../lib/settings');
+const mountDshRoutes = require('../lib/routes/dsh');
+
+// ---- 注入 fake vendor ----
+
+// 每个 scope 一个内存凭据存储：模拟 ServerCredentialStore（load/save/clear）。
+// auth.js 用 `new ServerCredentialStore(credentialDir(scope))`，directory 末段即 scope 名。
+const stores = {};
+function FakeServerCredentialStore(directory) {
+  const scope = directory.split(path.sep).pop();
+  if (!stores[scope]) stores[scope] = { saved: undefined };
+  this._scope = scope;
+  this._store = stores[scope];
+}
+FakeServerCredentialStore.prototype.load = async function load(serverUrl, deviceId) {
+  const s = this._store.saved;
+  return s && s.serverUrl === serverUrl && s.deviceId === deviceId ? { ...s } : undefined;
+};
+FakeServerCredentialStore.prototype.save = async function save(credentials) {
+  this._store.saved = { ...credentials };
+  return this._store.saved;
+};
+FakeServerCredentialStore.prototype.clear = async function clear() {
+  this._store.saved = undefined;
+};
+FakeServerCredentialStore.prototype.withRefreshLock = async function withRefreshLock(op) {
+  return op();
+};
+FakeServerCredentialStore.prototype.pairingHostOnly = async function pairingHostOnly() {
+  return false;
+};
+FakeServerCredentialStore.prototype.restrictPairingHostOnly = async function restrictPairingHostOnly() {};
+
+// 官方 providers（实测形状）。
+const FAKE_PROVIDERS = [
+  { id: 'zhihu', displayName: '知乎', startUrl: '/api/v1/auth/oauth/start', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=zhihu' },
+  { id: 'github', displayName: 'GitHub', startUrl: '/api/v1/auth/oauth/github/start', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=github' },
+  { id: 'google', displayName: 'Google', startUrl: '/api/v1/auth/oauth/google/start', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=google' },
+];
+
+// 记录被调用的事件，供断言。
+const calls = { authorizeWithAccount: [], qrStart: [], qrPoll: [], providers: 0, providersBaseUrl: undefined, providersThrow: false };
+
+function FakeClientServerApi(serverUrl, store) {
+  this.baseUrl = serverUrl.replace(/\/+$/, '');
+  this.store = store;
+  this.identity = undefined;
+  this.bindIdentity = (id) => { this.identity = id; };
+  this.oauthProviders = async () => {
+    calls.providers += 1;
+    calls.providersBaseUrl = this.baseUrl;
+    if (calls.providersThrow) throw new Error('discovery failed');
+    return FAKE_PROVIDERS;
+  };
+  this.startOAuthQrLogin = async (provider) => {
+    calls.qrStart.push(provider);
+    return { qrId: 'f'.repeat(20) + provider, scanUrl: `${this.baseUrl}/api/v1/auth/q/abc123`, expiresIn: 600, provider };
+  };
+  this.pollOAuthQrLogin = async (identity, qrId) => {
+    calls.qrPoll.push({ qrId, deviceId: identity.deviceId });
+    // 模拟扫码完成：register 一个 token 到 store。
+    await this.store.save({
+      serverUrl: this.baseUrl,
+      deviceId: identity.deviceId,
+      authorizationMethod: 'account',
+      account: '扫码用户',
+      accessToken: 'a'.repeat(20),
+      refreshToken: 'r'.repeat(20),
+      accessTokenExpiresAt: Date.now() + 3600_000,
+      refreshTokenExpiresAt: Date.now() + 30 * 86400_000,
+    });
+    return { status: 'complete', authorization: { method: 'account', account: '扫码用户' } };
+  };
+  this.authorizeWithAccount = async (identity, email, password) => {
+    calls.authorizeWithAccount.push({ deviceId: identity.deviceId, email, password });
+    if (email === 'bad@example.com' || password === 'wrong') {
+      const e = new Error('AUTH_INVALID');
+      e.code = 'AUTH_INVALID';
+      throw e;
+    }
+    await this.store.save({
+      serverUrl: this.baseUrl,
+      deviceId: identity.deviceId,
+      authorizationMethod: 'account',
+      account: email,
+      accessToken: 'a'.repeat(20),
+      refreshToken: 'r'.repeat(20),
+      accessTokenExpiresAt: Date.now() + 3600_000,
+      refreshTokenExpiresAt: Date.now() + 30 * 86400_000,
+    });
+  };
+}
+
+function fakeVendor() {
+  return {
+    serverApi: { ClientServerApi: FakeClientServerApi },
+    serverCredentials: { ServerCredentialStore: FakeServerCredentialStore },
+    crypto: { fromBase64Url: (s) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64') },
+  };
+}
+
+// 每用例：mock loadVendor 返回 fake vendor，并清空状态。
+beforeEach(() => {
+  for (const k of Object.keys(stores)) delete stores[k];
+  calls.authorizeWithAccount = [];
+  calls.qrStart = [];
+  calls.qrPoll = [];
+  calls.providers = 0;
+  calls.providersBaseUrl = undefined;
+  calls.providersThrow = false;
+  try { fs.rmSync(SETTINGS_FILE); } catch { /* 忽略 */ }
+  try { fs.rmSync(HOSTS_FILE); } catch { /* 忽略 */ }
+});
+
+// mock loadVendor 返回 fake vendor，并在执行后恢复。
+function withFakeVendor(fn) {
+  const m = mock.method(vendorMod, 'loadVendor', fakeVendor);
+  return Promise.resolve()
+    .then(fn)
+    .finally(() => m.mock.restore());
+}
+
+// ---- 账号密码不落盘 ----
+
+test('saveDshSettings：旧 email/passwordEnc 在保存时被清除', async () => {
+  // 先模拟旧配置已落 email/passwordEnc。
+  fs.mkdirSync(path.dirname(HOSTS_FILE), { recursive: true });
+  fs.writeFileSync(HOSTS_FILE, JSON.stringify({ dsh: { role: 'both', serverUrl: 'https://dsh.r2049.cn', email: 'old@x.com', passwordEnc: 'enc', deviceName: 'dev', allowedPorts: [3800] } }));
+  await saveDshSettings({ role: 'both', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev', allowedPorts: [3800], email: 'new@x.com', password: 'pw' });
+  const onDisk = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8')).dsh;
+  // 账号密码相关字段整体清理（不保留旧密文，也不写入新账号密码）。
+  assert.equal(onDisk.email, undefined);
+  assert.equal(onDisk.passwordEnc, undefined);
+});
+
+test('saveDshSettings：新配置不写账号密码', async () => {
+  const saved = await saveDshSettings({ role: 'host', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev', allowedPorts: [3800] });
+  const onDisk = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8')).dsh;
+  assert.equal(onDisk.email, undefined);
+  assert.equal(onDisk.passwordEnc, undefined);
+  assert.equal(onDisk.role, 'host');
+  assert.equal(saved.authStatus, undefined); // authStatus 由路由 configView 追加
+});
+
+// ---- 登录态判定 ----
+
+test('scopeLoginStatus：无 token 时未登录，有 token 时已登录', async () => {
+  await withFakeVendor(async () => {
+    // 未登录
+    let status = await auth.scopeLoginStatus();
+    assert.equal(status.loggedIn, false);
+    assert.deepEqual(status.roles, []);
+
+    // 通过账号密码登录 client scope
+    await auth.loginWithAccount('client', 'user@x.com', 'pw');
+    status = await auth.scopeLoginStatus();
+    assert.equal(status.loggedIn, true);
+    assert.deepEqual(status.roles, ['client']);
+  });
+});
+
+test('loginWithAccount：both 角色注册 host+client 两个 scope', async () => {
+  await withFakeVendor(async () => {
+    const res = await auth.loginWithAccount('both', 'user@x.com', 'pw');
+    assert.deepEqual(res.roles, ['host', 'client']);
+    const status = await auth.scopeLoginStatus();
+    assert.deepEqual(status.roles, ['host', 'client']);
+    // 两个 scope 各调了一次 authorizeWithAccount
+    const ids = calls.authorizeWithAccount.map((c) => c.deviceId);
+    assert.equal(new Set(ids).size, 2);
+  });
+});
+
+test('loginWithAccount：账号密码错误抛错且不落 token', async () => {
+  await withFakeVendor(async () => {
+    await assert.rejects(() => auth.loginWithAccount('client', 'bad@example.com', 'pw'), /AUTH_INVALID/);
+    const status = await auth.scopeLoginStatus();
+    assert.equal(status.loggedIn, false);
+  });
+});
+
+// ---- 扫码 ----
+
+test('discoverProviders：both 禁扫码返回空；host/client 返回官方 3 provider', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'both', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    const both = await auth.discoverProviders();
+    assert.deepEqual(both.providers, []);
+    assert.equal(both.devicePairing, false);
+
+    await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    const client = await auth.discoverProviders();
+    assert.equal(client.providers.length, 3);
+    assert.deepEqual(client.providers.map((p) => p.id), ['zhihu', 'github', 'google']);
+  });
+});
+
+test('startQrLogin / pollQrLogin：both 拒绝，host/client 成功并落 token', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'both', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    await assert.rejects(() => auth.startQrLogin('both', 'zhihu'), /both 角色不支持扫码/);
+
+    await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    const sess = await auth.startQrLogin('client', 'github');
+    assert.equal(sess.provider, 'github');
+    assert.ok(sess.qrId.length >= 20);
+    assert.equal(sess.expiresIn, 600);
+
+    const poll = await auth.pollQrLogin('client', sess.qrId);
+    assert.equal(poll.status, 'complete');
+    // poll 成功后 token 已落 client scope
+    const status = await auth.scopeLoginStatus();
+    assert.deepEqual(status.roles, ['client']);
+  });
+});
+
+// ---- logout ----
+
+test('logout：清所有 scope token，回未登录态', async () => {
+  await withFakeVendor(async () => {
+    await auth.loginWithAccount('both', 'user@x.com', 'pw');
+    assert.equal((await auth.scopeLoginStatus()).loggedIn, true);
+    await auth.logout();
+    const status = await auth.scopeLoginStatus();
+    assert.equal(status.loggedIn, false);
+    assert.deepEqual(status.roles, []);
+  });
+});
+
+// ---- 路由：config 带 authStatus ----
+
+test('GET /api/dsh/config 返回 authStatus', async () => {
+  await withFakeVendor(async () => {
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const res = await fetch(`${base}/api/dsh/config`);
+      const body = await res.json();
+      assert.equal(body.authStatus.loggedIn, false);
+      assert.deepEqual(body.authStatus.roles, []);
+      // 账号密码相关字段已从配置视图清理。
+      assert.equal(body.email, undefined);
+      assert.equal(body.hasPassword, undefined);
+      assert.equal(body.authStatus.accountPassword, undefined);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+test('PUT /api/dsh/config 带 email+password 触发登录（配置已落 + token 生成）', async () => {
+  await withFakeVendor(async () => {
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const res = await fetch(`${base}/api/dsh/config`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev', allowedPorts: [3800], email: 'user@x.com', password: 'pw' }),
+      });
+      const body = await res.json();
+      assert.equal(body.authStatus.loggedIn, true);
+      assert.deepEqual(body.authStatus.roles, ['client']);
+      // 账号密码不落盘
+      const onDisk = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8')).dsh;
+      assert.equal(onDisk.email, undefined);
+      assert.equal(onDisk.passwordEnc, undefined);
+      assert.equal(onDisk.role, 'client');
+    } finally {
+      server.close();
+    }
+  });
+});
+
+test('PUT /api/dsh/config 登录失败（账号密码错）返回 400，配置已落但保持未登录', async () => {
+  await withFakeVendor(async () => {
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const res = await fetch(`${base}/api/dsh/config`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev', allowedPorts: [3800], email: 'bad@example.com', password: 'wrong' }),
+      });
+      // P2：认证错误 → 400（而非统一 500），带 AUTH_INVALID code。
+      assert.equal(res.status, 400);
+      const body = await res.json();
+      assert.equal(body.code, 'AUTH_INVALID');
+      // 配置已落（D16 不回滚），但保持未登录。
+      const onDisk = JSON.parse(fs.readFileSync(HOSTS_FILE, 'utf8')).dsh;
+      assert.equal(onDisk.role, 'client');
+      const cfg = await (await fetch(`${base}/api/dsh/config`)).json();
+      assert.equal(cfg.authStatus.loggedIn, false);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+test('POST /api/dsh/auth/logout 后回未登录态', async () => {
+  await withFakeVendor(async () => {
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      // 先登录
+      await fetch(`${base}/api/dsh/config`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev', allowedPorts: [3800], email: 'user@x.com', password: 'pw' }),
+      });
+      let cfg = await (await fetch(`${base}/api/dsh/config`)).json();
+      assert.equal(cfg.authStatus.loggedIn, true);
+      // 退出
+      await fetch(`${base}/api/dsh/auth/logout`, { method: 'POST' });
+      cfg = await (await fetch(`${base}/api/dsh/config`)).json();
+      assert.equal(cfg.authStatus.loggedIn, false);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+// ---- serverUrl 参数化（2026-11-19 评审 Q1–Q4）----
+
+test('discoverProviders：传 serverUrl 时针对该地址发现（不读已保存值）', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://saved.example.com', deviceName: 'dev' });
+    const res = await auth.discoverProviders('client', 'http://custom.example.com:9000');
+    assert.equal(res.providers.length, 3);
+    assert.equal(calls.providersBaseUrl, 'http://custom.example.com:9000');
+  });
+});
+
+test('startQrLogin/pollQrLogin：传 serverUrl 时 token 落该地址（不落已保存地址）', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://saved.example.com', deviceName: 'dev' });
+    const target = 'https://other.example.com';
+    const sess = await auth.startQrLogin('client', 'zhihu', target);
+    assert.equal(sess.provider, 'zhihu');
+    await auth.pollQrLogin('client', sess.qrId, target);
+    // token 以目标 serverUrl 为键落盘。
+    assert.equal(stores.client.saved.serverUrl, target);
+    // 已保存 serverUrl 仍是旧的 → 登录态判定看不到该 token（须 PUT 持久化新地址后才一致）。
+    const status = await auth.scopeLoginStatus();
+    assert.deepEqual(status.roles, []);
+  });
+});
+
+test('discoverProviders/startQrLogin：非法 serverUrl（非 http(s)）抛错', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    await assert.rejects(() => auth.discoverProviders('client', 'ftp://x'), /http:\/\/ 或 https:\/\//);
+    await assert.rejects(() => auth.startQrLogin('client', 'zhihu', 'nope'), /http:\/\/ 或 https:\/\//);
+  });
+});
+
+test('discoverProviders：发现失败（oauthProviders 抛错）回退空 providers + error', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    calls.providersThrow = true;
+    const res = await auth.discoverProviders('client');
+    assert.deepEqual(res.providers, []);
+    assert.equal(res.devicePairing, false);
+    assert.match(res.error, /discovery failed/);
+  });
+});
+
+test('GET /api/dsh/auth/providers?serverUrl= 针对该地址发现', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://saved.example.com', deviceName: 'dev' });
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const target = 'https://target.example.com';
+      const res = await fetch(`${base}/api/dsh/auth/providers?role=client&serverUrl=${encodeURIComponent(target)}`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.providers.length, 3);
+      assert.equal(calls.providersBaseUrl, target);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+test('GET /api/dsh/auth/providers 非法 serverUrl → 400', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const res = await fetch(`${base}/api/dsh/auth/providers?role=client&serverUrl=${encodeURIComponent('not-a-url')}`);
+      assert.equal(res.status, 400);
+    } finally {
+      server.close();
+    }
+  });
+});
+
+test('POST /api/dsh/auth/qr/start|poll 传 serverUrl → token 落该地址', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://saved.example.com', deviceName: 'dev' });
+    const app = require('express')();
+    app.use(require('express').json());
+    mountDshRoutes(app);
+    const server = http.createServer(app);
+    await new Promise((r) => server.listen(0, r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    try {
+      const target = 'https://target.example.com';
+      const startRes = await fetch(`${base}/api/dsh/auth/qr/start`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'client', provider: 'zhihu', serverUrl: target }),
+      });
+      const sess = await startRes.json();
+      const pollRes = await fetch(`${base}/api/dsh/auth/qr/poll`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ role: 'client', qrId: sess.qrId, serverUrl: target }),
+      });
+      const poll = await pollRes.json();
+      assert.equal(poll.status, 'complete');
+      assert.equal(stores.client.saved.serverUrl, target);
+    } finally {
+      server.close();
+    }
+  });
+});
