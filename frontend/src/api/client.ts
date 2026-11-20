@@ -356,6 +356,14 @@ export interface ModeInfo {
   mode: 'full' | 'thin';
   /** 薄服务额外携带版本号（完整实例不带）。 */
   version?: string;
+  /** 薄服务下发的客户端能力位（design-android-mobile-app §5.4/§5.5）：
+   *  - transports：可用连接方式（Android 薄服务仅 ['dsh']；桌面 ['ssh','dsh']）。
+   *  - nativeSave：WebView blob 下载不可用时启用原生保存桥接。
+   *  完整实例不带（前端按全能力处理）。老客户端忽略未知字段。 */
+  capabilities?: {
+    transports?: string[];
+    nativeSave?: boolean;
+  };
 }
 export function getMode(): Promise<ModeInfo> {
   return fetchJson('/api/mode', { local: true });

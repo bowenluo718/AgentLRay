@@ -1,0 +1,6 @@
+// Capacitor Android 工程（design-android-mobile-app §3/§6.3）。
+// 说明：本目录是 `npx cap add android` 生成的原生平台目录；以下文件为**来源覆盖**，
+// 供无 Capacitor 生成步骤时也能对齐关键配置（deps/打包/签名）。实际构建前先 `npx cap sync`。
+include ':app'
+include ':capacitor-android'
+project(':capacitor-android').projectDir = new File('../node_modules/@capacitor/android/capacitor')

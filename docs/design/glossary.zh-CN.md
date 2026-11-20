@@ -134,6 +134,32 @@ AgentLRay 实例在中继服务器上的身份，首启生成 25519 密钥对落
 **连接来源（via）**：
 inbound peer 快照每项标注的连接方式来源：`ssh`（连接方 ssh 上报 + 心跳）或 `dsh`（ds-harness-remote 被连接方从设备体系直接获知）。旧 peer 无 `via` 视为 `ssh`。前端「被 N 连」徽标与明细统一展示两种来源。
 
+**薄服务（Thin service）**：
+独立进程、只做远程连接的轻量网关（`bin/thin-server.js`，默认 `PORT=3801`），去除系统配置面，作为**移动端 APP 的 HTTP 后端**（ADR-0007 Q5）。跑在**连接方**去连远端完整 AgentLRay；本地只挂 proxy + hosts + dsh + version + mode + SPA，无 `local` 宿主，`GET /api/mode` 返回 `{mode:'thin'}`，系统配置面一律 403。与完整网关（full）是同一套代码的两种装配。
+_Avoid_: 瘦服务、迷你网关（易与「功能阉割」混淆；薄=仅连接，非功能少）
+
+**nodejs-mobile（已否决）**：
+（历史）Android/iOS 内嵌 Node.js 运行时的库。官方最新版停在 **Node 18.20.4**，不支持 `child_process` / `cluster`；且无法满足 dsh vendor 的 Node ≥22.12（`require(esm)`）、noble v2 的 `>=20.19`、全局 `WebSocket` 要求，**不能承载 dsh 隧道**。2026-11-21 起被 PRoot 方案取代（ADR-0008 修订 R2）。
+_Avoid_: Node.js on Android（泛指，含 Termux 等非原生方案）
+
+**PRoot**：
+用户态 chroot / 系统调用拦截工具，在应用私有目录内伪造 root 与文件系统视图（`-0` 仅命名空间内伪造，**不是真实 root**）。本方案用它承载 Ubuntu + Node，解决 nodejs-mobile 的 Node 版本限制，并获得可 stop/restart 的真实子进程。Android 10+ 禁止从可写目录 `execve`，PRoot/loader 需以 `lib*.so` 放入 `jniLibs/<abi>/` 并设 `extractNativeLibs=true`。许可证 GPL-2.0；**不构成安全边界**（与 app 同权限）。
+_Avoid_: 虚拟机、容器（不是硬件虚拟化 / 内核隔离）
+
+**rootfs / app bundle（运行时分层）**：
+PRoot 运行时的两层：**rootfs**（Ubuntu minbase arm64 + 官方 Node 22/24 + 系统库，随 app 版本重建）与 **app bundle**（`package.json` / `bin/` / `lib/` / `frontend/dist/` / `node_modules/`，每版本解压到 `filesDir/app`）。持久数据 `.agentlray` 单独存放，升级不覆盖。构建产物带 SHA-256 清单与版本标记。
+_Avoid_: assets（那是 APK 内压缩包，需解压后才可用）
+
+**Android 薄服务承载（Android thin runtime）**：
+薄服务在 Android 上的承载方式：app 私有目录内以 **PRoot** 子进程运行 Ubuntu arm64 rootfs + Node 22/24，执行**同一套** thin-server 代码；首版只启用 dsh 传输（产品裁剪，SSH 在 PRoot 下技术上可行但未启用）。`AGENTLRAY_HOME` 指向 bind 到 `filesDir/.agentlray` 的路径（**注意不是 `HOME`**），前端 dist 与 `node_modules` 随 app bundle 解压到 `filesDir`，WebView 经 Capacitor 加载 `http://127.0.0.1:3801`。与 full server / 桌面 thin server 并列的第三个承载。
+_Avoid_: Kotlin 薄服务（曾考虑的替代路径，R6 后废弃）、Android 版薄服务、nodejs-mobile（已否决）
+
+**Capacitor**：
+跨平台 WebView 容器框架（原生壳 + 插件桥）。本方案用它托管 WebView 加载本地薄服务 URL，获得生命周期、返回键、插件生态与签名/加固工具链。注意 `server.url` 会在 `onCreate` 立即加载，必须先等 `/api/version` 就绪（启动屏门控）；WebView 的 blob 下载不可用，导出/下载走自定义保存插件。_Avoid_: Cordova（旧同源方案）、原生 WebView（`android.webkit.WebView` 直接加载，无框架层）
+
+**极简壳（Minimal shell）**：
+移动端 app 的交互边界：app 除启动动图外不做任何 UI 操作，**所有操作与查看（含主机管理）都在 web 页面内完成**，app 层零业务逻辑。后台策略**仅前台**（切后台断隧道/停薄服务，回前台重建）。_Avoid_: 混合导航壳（原生 Tab + WebView 内容，非本方案）
+
 > 注：本文档随 grill-with-docs 设计会话逐步增补，尚未定稿。
 
 ---
@@ -145,4 +171,5 @@ inbound peer 快照每项标注的连接方式来源：`ssh`（连接方 ssh 上
 | 能力/阶段 | 状态 | 代码证据 |
 | --- | --- | --- |
 | 术语与既定实现一致 | ✅ 已核对 | 平台/会话/状态/多主机/dsh 术语均可在 `lib/` 与 `platforms/` 找到对应实现 |
+| Android 承载术语（PRoot / rootfs / app bundle） | 🟡 设计态，未实现 | ADR-0008（2026-11-21 修订）；`docs/.local/design-android-mobile-app.zh-CN.md` |
 

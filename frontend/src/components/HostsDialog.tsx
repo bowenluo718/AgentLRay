@@ -211,7 +211,7 @@ export function HostsDialog({
     setFormOpen(true);
   };
 
-  const data = hosts.data ?? [];
+  const data = hosts.data?.hosts ?? [];
   const selfLabel = inbound?.self?.label;
 
   // dsh 主机行说明：匹配设备列表渲染为「设备名（在线/离线）· deviceId 前 8 位」。

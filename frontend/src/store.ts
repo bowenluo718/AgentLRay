@@ -304,6 +304,12 @@ function loadPersisted(): PersistedUI & { rememberedHostId: string } {
 export type Theme = 'light' | 'dark';
 /** 运行时模式（design-thin-service Q13）：full=完整实例，thin=薄服务（仅远程连接）。 */
 export type AppMode = 'full' | 'thin';
+/** 薄服务下发的客户端能力位（design-android-mobile-app §5.4/§5.5）。
+ *  transports：可用连接方式（Android 薄服务仅 ['dsh']）；nativeSave：启用原生保存桥接。 */
+export interface ModeCapabilities {
+  transports?: string[];
+  nativeSave?: boolean;
+}
 export type MainView = 'sessions' | 'insights' | 'prompts' | 'kanban';
 /** 右侧视图页签值校验（URL 参数 / localStorage 解析共用；非法值一律回退默认）。 */
 export function isMainView(v: unknown): v is MainView {
@@ -498,6 +504,9 @@ interface AppState {
   /** 运行时模式（design-thin-service Q13）：full / thin。boot 先 GET /api/mode 解析，
    *  解析完成前为 null（App 首帧门控）；thin 下裁剪系统配置入口并跳过平台写同步。 */
   mode: AppMode | null;
+  /** 运行时能力位（thin 由 /api/mode 下发；full/未解析为 null=全能力）。
+   *  驱动 HostFormDialog 传输选项过滤与下载方式（design-android-mobile-app §5.5）。 */
+  modeCapabilities: ModeCapabilities | null;
   /** 远端初始化竞态守卫：切换远端后置 false；用户自主改动平台选择后置 true。
    *  applyRemoteSelection（切换远端时拉远端 server 真源）若 dirty 则跳过覆盖，
    *  避免初始化返回晚于用户即时操作而覆盖用户选择。 */
@@ -507,8 +516,8 @@ interface AppState {
   setHosts: (hosts: HostInfo[]) => void;
   /** 写入入站 peer 快照（inbound peers）。 */
   setInbound: (inbound: InboundInfo | null) => void;
-  /** 写入运行时模式（boot 解析 /api/mode 后调用）。 */
-  setMode: (mode: AppMode) => void;
+  /** 写入运行时模式（boot 解析 /api/mode 后调用）；可选携带能力位（thin）。 */
+  setMode: (mode: AppMode, capabilities?: ModeCapabilities | null) => void;
   /** 设置/更新单个主机连接状态与错误。 */
   setHostRuntime: (id: string, status: HostStatus, error?: string | null) => void;
   /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
@@ -609,6 +618,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   inbound: null,
   // 运行时模式：boot 解析 /api/mode 前为 null（App 首帧门控渲染轻量占位）。
   mode: null,
+  modeCapabilities: null,
 
   setHosts: (hosts) => {
     const status: Record<string, HostStatus> = { local: 'connected' };
@@ -620,7 +630,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ hosts, hostStatus: status, hostError: err });
   },
   setInbound: (inbound) => set({ inbound }),
-  setMode: (mode) => set({ mode }),
+  setMode: (mode, capabilities = null) => set({ mode, modeCapabilities: capabilities }),
   setHostRuntime: (id, status, error = null) =>
     set((s) => ({
       hostStatus: { ...s.hostStatus, [id]: status },
@@ -707,7 +717,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       /* non-fatal */
     }
     // 拉取新主机的平台列表（local 也刷新，保证平台列表跟随主机）。
-    getHosts().then((hosts) => get().setHosts(hosts)).catch(() => {});
+    getHosts().then((res) => get().setHosts(res.hosts)).catch(() => {});
     return true;
   },
 

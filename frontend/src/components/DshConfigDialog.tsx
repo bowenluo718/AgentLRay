@@ -197,7 +197,7 @@ export function DshConfigDialog({
   // wasDsh 在 mutationFn 内按「退出前」的主机判定（不依赖 onSuccess 闭包旧值，评审 P5）。
   const logoutMut = useMutation({
     mutationFn: async (): Promise<{ wasDsh: boolean }> => {
-      const wasDsh = hosts.data?.find((h) => h.id === selectedHostId)?.type === 'dsh';
+      const wasDsh = hosts.data?.hosts?.find((h) => h.id === selectedHostId)?.type === 'dsh';
       await logoutDsh();
       if (wasDsh) await setSelectedHostId('local');
       return { wasDsh };

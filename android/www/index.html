@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>AgentLRay</title>
+    <style>
+      /* 占位启动屏：薄服务就绪前展示（native Splash 亦可覆盖）。就绪后 MainActivity 用
+         WebView.loadUrl('http://127.0.0.1:3801') 替换整个页面。 */
+      html, body { margin: 0; height: 100%; background: #0d1117; color: #e6edf3; }
+      body { display: flex; align-items: center; justify-content: center; font: 14px/1.5 system-ui, sans-serif; }
+      .wrap { text-align: center; }
+      .brand { font-size: 20px; font-weight: 600; letter-spacing: .5px; }
+      .hint { margin-top: 8px; color: #8b9498; }
+      .dot { animation: blink 1.2s infinite ease-in-out; }
+      @keyframes blink { 0%, 100% { opacity: .2 } 50% { opacity: 1 } }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="brand">AgentLRay</div>
+      <div class="hint">正在启动本地薄服务<span class="dot">…</span></div>
+    </div>
+  </body>
+</html>

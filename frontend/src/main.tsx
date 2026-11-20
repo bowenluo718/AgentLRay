@@ -25,7 +25,7 @@ async function bootMode() {
   try {
     const m = await getMode();
     const thin = m.mode === 'thin';
-    useAppStore.getState().setMode(thin ? 'thin' : 'full');
+    useAppStore.getState().setMode(thin ? 'thin' : 'full', m.capabilities ?? null);
     // 薄服务：在采用已连好的主机前保持数据面不可发（避免以 local 头抢先拉远端数据）。
     if (thin) useAppStore.getState().setHostConnecting();
   } catch {

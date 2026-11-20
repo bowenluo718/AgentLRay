@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { saveTextFile } from '@/lib/download';
 import {
   createReviewTransfer, importReviewTransfer, previewReviewTransfer, parseReviewTransfer,
   REVIEW_LABELS, REVIEW_TRANSFER_MAX_BYTES,
@@ -79,12 +80,8 @@ export function ReviewTransferPanel({ entries, ready, onImported }: {
     try {
       const latest = createReviewTransfer(window.localStorage, identities, preview.bundle.exportedAt);
       if (JSON.stringify(latest) !== JSON.stringify(preview.bundle)) throw new Error('本地复核已变化，请重新预览。');
-      const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'agentlray-reviews.json';
-      link.click();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      // 统一保存入口：Android WebView 走原生 SaveFile 桥接，桌面走 blob 下载（design-android §7.6）。
+      saveTextFile(json, 'agentlray-reviews.json', 'application/json');
       setResult(`已发起下载 ${preview.bundle.records.length} 条复核。请妥善保管明文文件。`);
     } catch (failure) {
       setError(`未导出：${failure instanceof Error ? failure.message : '下载失败。'}`);

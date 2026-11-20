@@ -94,14 +94,28 @@ function startApp() {
   });
 }
 
-test('薄服务 GET /api/mode → {mode:thin, version}', async () => {
-  const app = await startApp();
+test('薄服务 GET /api/mode → {mode:thin, version, capabilities}', async () => {
+  const app = express();
+  mountProxyRoutes(app, { thin: true });
+  mountModeRoutes(app, { mode: 'thin', capabilities: { transports: ['dsh'], nativeSave: true } });
+  app.get('/api/version', (_req, res) => res.json({ bootId: 'thin-1', version: '0.1.1' }));
+  app.use(express.json());
+  mountHostsRoutes(app, { includeLocal: false });
+  mountDshRoutes(app, { forceClient: true });
+  app.get('/api/sessions', (_req, res) => res.json([{ where: 'local-thin' }]));
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
   try {
-    const r = await app.request('/api/mode');
-    assert.equal(r.status, 200);
-    assert.deepEqual(JSON.parse(r.body), { mode: 'thin', version: '0.1.1' });
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/mode`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      mode: 'thin',
+      version: '0.1.1',
+      capabilities: { transports: ['dsh'], nativeSave: true },
+    });
   } finally {
-    app.server.close();
+    server.close();
   }
 });
 
@@ -125,9 +139,10 @@ test('薄服务 /api/hosts 无 local 宿主', async () => {
   try {
     const r = await app.request('/api/hosts');
     assert.equal(r.status, 200);
-    const hosts = JSON.parse(r.body);
-    assert.ok(Array.isArray(hosts));
-    assert.ok(!hosts.some((h) => h.id === LOCAL_ID), '薄服务不应返回 local');
+    const body = JSON.parse(r.body);
+    assert.ok(Array.isArray(body.hosts), '响应应含 hosts 数组');
+    assert.ok('lastHostId' in body, '响应应含 lastHostId 顶层字段');
+    assert.ok(!body.hosts.some((h) => h.id === LOCAL_ID), '薄服务不应返回 local');
   } finally {
     app.server.close();
   }
@@ -142,7 +157,7 @@ test('薄服务 /api/hosts 对未连接远端如实报 disconnected（前端 ado
   try {
     const r = await app.request('/api/hosts');
     assert.equal(r.status, 200);
-    const hosts = JSON.parse(r.body);
+    const { hosts } = JSON.parse(r.body);
     const target = hosts.find((h) => h.id === 'thin-offline');
     assert.ok(target, '已保存的远端主机应在列表内');
     assert.equal(target.status, 'disconnected', '未连接主机的运行时状态必须为 disconnected');

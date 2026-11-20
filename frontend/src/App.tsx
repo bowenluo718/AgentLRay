@@ -76,7 +76,7 @@ export default function App() {
       return;
     }
     getHosts()
-      .then((hosts) => setHosts(hosts))
+      .then((res) => setHosts(res.hosts))
       .catch(() => {})
       .finally(() => setHostsLoaded(true));
   }, [setHosts]);
@@ -251,9 +251,9 @@ export default function App() {
                 if (!o) {
                   // 新增后刷新主机列表；有主机则连接首台（服务端尚未连接新加主机）。
                   getHosts()
-                    .then((hs) => {
-                      setHosts(hs);
-                      if (hs.length > 0) void useAppStore.getState().setSelectedHostId(hs[0].id);
+                    .then((res) => {
+                      setHosts(res.hosts);
+                      if (res.hosts.length > 0) void useAppStore.getState().setSelectedHostId(res.hosts[0].id);
                     })
                     .catch(() => {});
                 }

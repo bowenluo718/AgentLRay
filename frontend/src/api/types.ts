@@ -127,8 +127,12 @@ export interface HostInfo {
   version: { bootId: string; version?: string } | null;
 }
 
-/** GET /api/hosts 响应：[local, ...hosts]。 */
-export type HostsResponse = HostInfo[];
+/** GET /api/hosts 响应对象：`hosts` 为 [local, ...hosts]，`lastHostId` 为记忆主机 id
+ *  （design-android-mobile-app §7.7；薄服务 boot 据此恢复上次主机，可为 null）。 */
+export interface HostsResponse {
+  hosts: HostInfo[];
+  lastHostId: string | null;
+}
 
 // ---------- Sessions ----------
 

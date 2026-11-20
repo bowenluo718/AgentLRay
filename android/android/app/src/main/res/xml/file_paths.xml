@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SaveFilePlugin 分享路径：仅暴露应用私有 filesDir/exports（导出文件），不暴露其他目录。 -->
+<paths>
+    <files-path name="exports" path="exports/" />
+</paths>

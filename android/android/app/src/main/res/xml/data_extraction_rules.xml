@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 备份/迁移规则（design-android-mobile-app §8.1）：全程排除 .agentlray
+     （hosts.json/secret/dsh 凭据）与运行时目录，避免凭据进云备份/设备迁移。 -->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapability="true">
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+    </device-transfer>
+</data-extraction-rules>

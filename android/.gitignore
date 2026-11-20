@@ -1,0 +1,18 @@
+# Android 工程构建产物与运行时二进制（不入库）
+node_modules/
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+
+# Capacitor 原生工程由 `npx cap add android` 生成；来源覆盖文件（Kotlin/Manifest/res/脚本）
+# 入库，生成物中仅保留我们维护的部分。以下为随 app 打包的运行时资产，由脚本产出：
+android/app/src/main/assets/runtime/*.tar.zst
+android/app/src/main/assets/runtime/*.manifest.json
+android/app/src/main/jniLibs/**/*.so
+
+# 签名材料（绝不入库）
+*.keystore
+*.jks
+keystore.properties

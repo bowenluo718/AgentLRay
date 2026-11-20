@@ -1,0 +1,22 @@
+{
+  "name": "agentlray-android",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AgentLRay Android 壳（Capacitor WebView + PRoot Node 运行时，design-android-mobile-app）",
+  "scripts": {
+    "sync": "cap sync android",
+    "open": "cap open android",
+    "build:web": "npm --prefix .. run build:ui",
+    "bundle:app": "node scripts/bundle-app.mjs",
+    "package:runtime": "node scripts/package-runtime.mjs",
+    "build:rootfs": "bash scripts/build-rootfs.sh arm64"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "typescript": "^5.6.0"
+  }
+}

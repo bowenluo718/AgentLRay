@@ -3,6 +3,7 @@
 
 import { hidePrompts } from '@/api/client';
 import type { PromptGroup, PromptSession, PromptsData } from '@/api/types';
+import { saveTextFile } from '@/lib/download';
 
 /** app.js promptsMatchesSearch — id/slug/title/prompt-text substring match. */
 export function promptsMatchesSearch(session: PromptSession, q: string): boolean {
@@ -91,14 +92,10 @@ export async function hidePromptTextsChunked(texts: string[]): Promise<void> {
   }
 }
 
-/** Client-side JSON download, same as legacy 导出 JSON. */
+/** Client-side JSON download, same as legacy 导出 JSON.
+ *  统一保存入口：Android WebView 走原生 SaveFile 桥接，桌面走 blob 下载（design-android §7.6）。 */
 export function downloadJson(data: unknown, filename: string): void {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  saveTextFile(JSON.stringify(data, null, 2), filename, 'application/json');
 }
 
 export function errorMessage(error: unknown): string {

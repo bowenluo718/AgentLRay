@@ -76,6 +76,7 @@
 | [design-dsh-host-connection.zh-CN.md](design-dsh-host-connection.zh-CN.md) | 方案设计 | 基于 ds-harness-remote 的 dsh 远程主机连接 | ✅ 已实现 | 2026-11-17 |
 | [design-dsh-login-methods.zh-CN.md](design-dsh-login-methods.zh-CN.md) | 方案设计 | dsh 多登录方式（扫码 + 账号密码） | ✅ 已实现 | 2026-11-19 |
 | [design-thin-service.zh-CN.md](design-thin-service.zh-CN.md) | 方案设计 | 独立薄服务（thin service）：仅远程连接的连接方网关——`/api/mode` 运行时信号、无 `local`、dsh 强制 client、boot 自动连接、系统配置面不挂/不透传、前端 thin 裁剪；`agentlray thin` | ✅ 已实现 | 2026-11-20 |
+| [design-android-mobile-app.zh-CN.md](design-android-mobile-app.zh-CN.md) | 方案设计 | Android 移动端 App 工程蓝图：PRoot + Ubuntu + Node 22/24 承载 dsh-only 薄服务 + Capacitor WebView 套壳；仓库模块改造（hosts 守卫/lastHostId/mode capabilities/传输过滤/下载桥接）与 `android/` 工程骨架已落地 | 🟡 部分实现（P0 真机验证未完成） | 2026-11-21 |
 
 ### 决策记录（ADR）
 
@@ -88,6 +89,7 @@
 | [adr-0005-platform-sources.zh-CN.md](adr-0005-platform-sources.zh-CN.md) | 决策记录 | 平台来源统一与全表面等价 D1–D10 | ✅ Accepted，已实现 | 2026-11-07 |
 | [adr-0006-dsh-host-connection.zh-CN.md](adr-0006-dsh-host-connection.zh-CN.md) | 决策记录 | 基于 ds-harness-remote 的 dsh 远程主机连接 D1–D11 | ✅ Accepted，已实现 | 2026-11-17 |
 | [adr-0007-thin-service.zh-CN.md](adr-0007-thin-service.zh-CN.md) | 决策记录 | 独立薄服务（thin service）Q1–Q27 决策收敛 | ✅ Accepted，已实现 | 2026-11-20 |
+| [adr-0008-android-mobile-app.zh-CN.md](adr-0008-android-mobile-app.zh-CN.md) | 决策记录 | Android 移动端 App：**PRoot + Ubuntu + Node 22/24** 承载 dsh-only 薄服务 + Capacitor WebView 套壳（grill R1–R6 收敛；2026-11-21 修订 R2，原 nodejs-mobile 因 Node 18 无法承载 dsh 被否决） | 🟡 Accepted，仓库改造已实现（P0 真机验证未完成） | 2026-11-21 |
 
 ### 参考
 

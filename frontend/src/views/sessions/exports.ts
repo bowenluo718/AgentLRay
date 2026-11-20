@@ -6,6 +6,7 @@ import { exportUrl, getOtlp } from '@/api/client';
 import type { Platform, SessionDetail } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 import { getTextContent } from '@/lib/pure';
+import { saveTextFile } from '@/lib/download';
 import { formatDate } from './lib';
 
 export function sessionToMarkdown(detail: SessionDetail, platform: Platform, selectedSessionId: string): string {
@@ -92,13 +93,8 @@ export function sessionToMarkdown(detail: SessionDetail, platform: Platform, sel
 }
 
 export function downloadFile(content: string, filename: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  // 统一保存入口：Android WebView 走原生 SaveFile 桥接，桌面走 blob 下载（design-android §7.6）。
+  saveTextFile(content, filename, mimeType);
 }
 
 // Sanitize: keep alphanumeric, dash, underscore

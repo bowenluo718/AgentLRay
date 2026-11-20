@@ -113,6 +113,13 @@ export function HostFormDialog({
   editing: HostInfo | null;
 }) {
   const queryClient = useQueryClient();
+  // 能力位（design-android-mobile-app §5.5）：thin 由 /api/mode 下发 transports。
+  // Android 薄服务仅 ['dsh'] → 传输下拉只剩 dsh，默认选它；full/未解析则两选一不变。
+  const modeCapabilities = useAppStore((s) => s.modeCapabilities);
+  const availableTransports: Transport[] = (modeCapabilities?.transports ?? ['ssh', 'dsh']).filter(
+    (t): t is Transport => t === 'ssh' || t === 'dsh'
+  );
+  const defaultTransport: Transport = availableTransports[0] ?? 'dsh';
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   // 必填缺失标记：ssh→host / dsh→deviceId / 新建时 id。校验失败置 true 以红框提示。
   const [missing, setMissing] = useState<{ host?: boolean; deviceId?: boolean; id?: boolean }>({});
@@ -126,13 +133,16 @@ export function HostFormDialog({
   });
 
   // 打开时按 editing 初始化表单；关闭后清空。
+  // 传输默认值受能力位约束：编辑态类型不可用（如 Android 保存了 ssh 主机）→ 回退第一个可用项；
+  // 新建态直接用第一个可用项（完整实例仍默认 ssh，Android 默认 dsh）。
   useEffect(() => {
     if (!open) return;
     if (editing) {
+      const editingTransport: Transport = editing.type === 'dsh' ? 'dsh' : 'ssh';
       setForm({
         id: editing.id,
         label: editing.label,
-        transport: editing.type === 'dsh' ? 'dsh' : 'ssh',
+        transport: availableTransports.includes(editingTransport) ? editingTransport : defaultTransport,
         host: editing.ssh?.host ?? '',
         user: editing.ssh?.user ?? '',
         port: editing.ssh?.port ? String(editing.ssh.port) : '',
@@ -146,10 +156,12 @@ export function HostFormDialog({
         dshRemotePort: editing.dsh?.remoteAgentLrayPort ? String(editing.dsh.remoteAgentLrayPort) : '3800',
       });
     } else {
-      setForm(EMPTY_FORM);
+      setForm({ ...EMPTY_FORM, transport: defaultTransport });
     }
     setMissing({});
-  }, [open, editing]);
+    // availableTransports/defaultTransport 由 modeCapabilities 派生；boot 后稳定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing, modeCapabilities]);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hosts'] });
 
@@ -262,8 +274,12 @@ export function HostFormDialog({
               className="h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs"
               onChange={(e) => setForm({ ...form, transport: e.target.value as Transport })}
             >
-              <option value="ssh">ssh 隧道（ssh -L 端口转发）</option>
-              <option value="dsh">dsh 远程通道（加密通道 + 中继服务器，免 ssh/免公网端口）</option>
+              {availableTransports.includes('ssh') ? (
+                <option value="ssh">ssh 隧道（ssh -L 端口转发）</option>
+              ) : null}
+              {availableTransports.includes('dsh') ? (
+                <option value="dsh">dsh 远程通道（加密通道 + 中继服务器，免 ssh/免公网端口）</option>
+              ) : null}
             </select>
           </label>
           {form.transport === 'ssh' ? (
