@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from '@/components/Sidebar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { HostConnectingView } from '@/components/HostConnectingView';
+import { HostCompatBanner } from '@/components/HostCompatBanner';
 import { HostFormDialog } from '@/components/HostFormDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -341,6 +342,7 @@ export default function App() {
             ) : null}
           </div>
         ) : null}
+        <HostCompatBanner />
         <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1 md:hidden">
           <span className="text-sm font-semibold">AgentLRay</span>
           <div className="flex items-center gap-1">

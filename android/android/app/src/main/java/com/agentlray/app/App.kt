@@ -25,6 +25,8 @@ class App : Application() {
         super.onCreate()
         install(this)
         logRing = RuntimeLogRing()
+        // P4 崩溃基线：未捕获异常 → 堆栈 + 运行时日志尾部落盘（Sentry 接入点，§7.5）。
+        CrashLog.install(this, logRing)
         installer = RootfsInstaller(this, filesDir)
         runtime = NodeRuntimeManager(this, logRing) {
             // 惰性求值：ensure() 完成后才有稳定布局；manager 每次 spawn 前重新取，兼弱升级。

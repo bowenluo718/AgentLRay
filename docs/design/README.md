@@ -76,7 +76,7 @@
 | [design-dsh-host-connection.zh-CN.md](design-dsh-host-connection.zh-CN.md) | 方案设计 | 基于 ds-harness-remote 的 dsh 远程主机连接 | ✅ 已实现 | 2026-11-17 |
 | [design-dsh-login-methods.zh-CN.md](design-dsh-login-methods.zh-CN.md) | 方案设计 | dsh 多登录方式（扫码 + 账号密码） | ✅ 已实现 | 2026-11-19 |
 | [design-thin-service.zh-CN.md](design-thin-service.zh-CN.md) | 方案设计 | 独立薄服务（thin service）：仅远程连接的连接方网关——`/api/mode` 运行时信号、无 `local`、dsh 强制 client、boot 自动连接、系统配置面不挂/不透传、前端 thin 裁剪；`agentlray thin` | ✅ 已实现 | 2026-11-20 |
-| [design-android-mobile-app.zh-CN.md](design-android-mobile-app.zh-CN.md) | 方案设计 | Android 移动端 App 工程蓝图：PRoot + Ubuntu + Node 22/24 承载 dsh-only 薄服务 + Capacitor WebView 套壳；仓库模块改造（hosts 守卫/lastHostId/mode capabilities/传输过滤/下载桥接）与 `android/` 工程骨架已落地 | 🟡 部分实现（P0 真机验证未完成） | 2026-11-21 |
+| [design-android-mobile-app.zh-CN.md](design-android-mobile-app.zh-CN.md) | 方案设计 | Android 移动端 App 工程蓝图：PRoot + Ubuntu + Node 22/24 承载 dsh-only 薄服务 + Capacitor WebView 套壳；仓库模块改造（hosts 守卫/lastHostId/mode capabilities/传输过滤/下载桥接）、`android/` 工程骨架、P1 最小壳、P2 导出桥接、P3 版本兼容已落地；P0 静态推断见 [android/docs/p0-runtime-inference.zh-CN.md](../../android/docs/p0-runtime-inference.zh-CN.md) | 🟡 部分实现（P0 真机验证待做；P4 部分实现） | 2026-11-21 |
 
 ### 决策记录（ADR）
 

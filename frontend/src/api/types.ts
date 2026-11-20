@@ -125,6 +125,10 @@ export interface HostInfo {
   status: HostStatus;
   error: string | null;
   version: { bootId: string; version?: string } | null;
+  /** 远端上报的版本号（GET /api/version 的 version 字段；老远端不返回则为 null）。 */
+  remoteVersion: string | null;
+  /** 远端版本是否满足客户端最低要求：false → 提示升级；null → 未知不可判定。 */
+  compatible: boolean | null;
 }
 
 /** GET /api/hosts 响应对象：`hosts` 为 [local, ...hosts]，`lastHostId` 为记忆主机 id

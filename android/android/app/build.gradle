@@ -7,6 +7,12 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
+// 正式签名经环境变量/ gradle 属性注入（keystore 不入库，design §6.4）：
+//   AGENTLRAY_KEYSTORE / AGENTLRAY_KEYSTORE_PASSWORD / AGENTLRAY_KEY_ALIAS / AGENTLRAY_KEY_PASSWORD
+// 或 -PagentlrayKeystore=... 等。未配置时 release 退回 debug 签名（仅本地冒烟）。
+def releaseStoreFile = System.getenv("AGENTLRAY_KEYSTORE") ?: project.findProperty("agentlrayKeystore")
+def hasReleaseSigning = releaseStoreFile != null
+
 android {
     namespace "com.agentlray.app"
     compileSdk rootProject.ext.compileSdkVersion
@@ -15,12 +21,23 @@ android {
         applicationId "com.agentlray.app"
         minSdk rootProject.ext.minSdkVersion
         targetSdk rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "0.1.0"
+        versionCode 2
+        versionName "0.1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // 仅 arm64-v8a（Node 官方 arm64 构建一致）；x86_64 仅模拟器需独立 rootfs（§6.1）。
         ndk {
             abiFilters "arm64-v8a"
+        }
+    }
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStoreFile)
+                storePassword System.getenv("AGENTLRAY_KEYSTORE_PASSWORD") ?: project.findProperty("agentlrayKeystorePassword")
+                keyAlias System.getenv("AGENTLRAY_KEY_ALIAS") ?: project.findProperty("agentlrayKeyAlias")
+                keyPassword System.getenv("AGENTLRAY_KEY_PASSWORD") ?: project.findProperty("agentlrayKeyPassword")
+            }
         }
     }
 
@@ -45,9 +62,13 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled = false
+            // P4：代码压缩/混淆（规则见 proguard-rules.pro）。shrinkResources 暂不开：
+            // Capacitor 模板资源有动态引用，需真机构建验证后再启用（§6.4 体积）。
+            minifyEnabled = true
+            shrinkResources = false
+            proguardFiles 'proguard-rules.pro'
             // 正式签名经 CI 注入 keystore（不入库，§6.4）。未配置时用 debug 签名占位。
-            signingConfig = signingConfigs.debug
+            signingConfig = hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
         }
         debug {
             debuggable = true

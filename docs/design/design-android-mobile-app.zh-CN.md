@@ -1,6 +1,6 @@
 # Android 移动端 App 完整工程设计方案
 
-> 类型：方案设计　｜　日期：2026-11-21　｜　状态：**部分实现**（仓库侧模块改造 + android/ 工程骨架已落地；P0 真机验证未完成，见 §12）
+> 类型：方案设计　｜　日期：2026-11-21　｜　状态：**部分实现**（仓库侧模块改造 + android/ 工程骨架已落地，P0 静态推断完成、P1–P3 已实现、P4 部分实现；真机验证待做，见 §12）
 > 需求来源：`todo.md` #17「开发移动端 APP，用于远程连接」
 > 前置：ADR-0008（决策收敛，grill R1–R6；2026-11-21 修订 R2 承载）、`design-thin-service`（ADR-0007，已实现）
 > 决策真源：[adr-0008-android-mobile-app.zh-CN.md](adr-0008-android-mobile-app.zh-CN.md)
@@ -550,19 +550,19 @@ Application.onCreate / Service.onCreate
 
 ## 12. 实现进度（代码核对：2026-11-21）
 
-**状态：部分实现**——仓库侧模块改造与 Android 工程骨架已落地并做后端/前端验证；P0 真机门禁与 P1–P4 未完成（当前环境无 Android SDK/真机，未构建 APK）。
+**状态：部分实现**——仓库侧模块改造、Android 工程骨架、P1 最小壳、P2 导出桥接、P3 版本兼容已落地并做后端/前端验证；P4 发布部分实现（签名注入/R8/崩溃落盘）。P0 真机门禁未做（当前环境无 Android SDK/真机，未构建 APK），已以静态推断文档覆盖（`android/docs/p0-runtime-inference.zh-CN.md`）。
 
 | 能力/阶段 | 状态 | 代码证据 |
 | --- | --- | --- |
 | 决策收敛（ADR-0008，R2 修订为 PRoot） | ✅ 已完成（待 P0 验证） | [adr-0008](adr-0008-android-mobile-app.zh-CN.md) |
 | 完整工程蓝图（本文件） | ✅ 已完成 | 本文档 |
-| §5 仓库模块改造（hosts 守卫/lastHostId/mode capabilities/前端传输过滤/下载桥接） | ✅ 已实现 | `lib/hosts.js`（`sshDisabled`/`assertTransportAllowed`/`getLastHostId`/`setLastHostId`、`resolveThinBootHost` 优先 lastHostId + DISABLE_SSH 过滤）、`lib/routes/hosts.js`（GET `{lastHostId,hosts}`、PUT 透传、connect 写盘）、`lib/routes/mode.js`（capabilities）、`frontend/src/api/{types,client}.ts`、`frontend/src/store.ts`（`modeCapabilities`）、`frontend/src/components/HostFormDialog.tsx`（传输按 capabilities 过滤/默认）、`frontend/src/lib/download.ts`（nativeSave 桥接）+ 3 处调用（`exports.ts`/`promptsLib.ts`/`ReviewTransferPanel.tsx`）；测试 `test/thin-android-guards.test.js`（12 例），全量 **751/751** 通过，`npm run build:ui` 通过 |
+| §5 仓库模块改造（hosts 守卫/lastHostId/mode capabilities/前端传输过滤/下载桥接） | ✅ 已实现 | `lib/hosts.js`（`sshDisabled`/`assertTransportAllowed`/`getLastHostId`/`setLastHostId`、`resolveThinBootHost` 优先 lastHostId + DISABLE_SSH 过滤）、`lib/routes/hosts.js`（GET `{lastHostId,hosts}`、PUT 透传、connect 写盘）、`lib/routes/mode.js`（capabilities）、`frontend/src/api/{types,client}.ts`、`frontend/src/store.ts`（`modeCapabilities`）、`frontend/src/components/HostFormDialog.tsx`（传输按 capabilities 过滤/默认）、`frontend/src/lib/download.ts`（nativeSave 桥接）+ 3 处调用（`exports.ts`/`promptsLib.ts`/`ReviewTransferPanel.tsx`）；测试 `test/thin-android-guards.test.js`（12 例），全量 **757/757** 通过（本轮新增版本兼容 6 例），`npm run build:ui` 通过 |
 | Android 工程骨架（`android/`） | 🟡 已落地（未构建/真机验证） | `android/{package.json,capacitor.config.ts,www/,README.md}`、`android/android/app/src/main/java/com/agentlray/app/{App,MainActivity,NodeRuntimeManager,RootfsInstaller,RuntimeLogRing,RuntimeWatchdog,SecurityConfig,SaveFilePlugin}.kt`、`AndroidManifest.xml`、`res/xml/{network_security_config,data_extraction_rules,file_paths}.xml`、`android/android/{build.gradle,settings.gradle,variables.gradle,app/build.gradle}`、`android/scripts/{build-rootfs.sh,bundle-app.mjs,package-runtime.mjs}`；`bundle-app.mjs` 本机实测产出 `app-bundle.tar.zst`（2.4MB）且 `require('@lukeburns/clatterjs'/'ws'/'express'/'zod')` 冒烟通过 |
-| P0 运行时/打包/生命周期/能力面/安全基线 | ⬜ 待真机验证 | 源码就绪（见上）；exec/16KB/rootfs/zstd-jni ABI/冷启动等须按 `android/README.md` P0 清单在真机完成 |
-| P1 最小可运行壳 | ⬜ 待实现 | — |
-| P2 dsh 连接闭环 | ⬜ 待实现 | 服务端 GET 导出（`a.href=exportUrl`）在 Android WebView 仍不可用，P2 补 fetch→saveFile |
-| P3 健壮性 | ⬜ 待实现 | — |
-| P4 发布（签名/加固/Sentry/体积） | ⬜ 待实现 | — |
+| P0 运行时/打包/生命周期/能力面/安全基线 | 🟡 源码就绪 + **静态推断**（真机待验） | 工程闭环见 `android/`；静态推断与三处高险（exec/16KB/zstd-jni ABI）见 `android/docs/p0-runtime-inference.zh-CN.md`；真机必验清单同上 |
+| P1 最小可运行壳 | 🟡 已实现（未真机构建/启动） | Capacitor 壳 + `MainActivity` 就绪门控 + `www/` 占位页 + `App` 单例启动 |
+| P2 dsh 连接闭环 | 🟡 已实现（未真机连远端验证） | dsh 登录/设备选择/隧道复用现有栈；**本轮补齐服务端导出桥接**：`frontend/src/views/sessions/exports.ts` 在 `nativeSave` 时 `fetch(exportUrl)→saveTextFile`，`serverExportFilename` 解析 `Content-Disposition` |
+| P3 健壮性 | 🟡 已实现（断线/版本兼容，SSE 真机待验） | 崩溃退避/前后台/孤儿清理/端口错误屏已落地；**本轮新增版本兼容**：`lib/version-compat.js`（单一真源判定）+ `/api/hosts` 序列化 `remoteVersion`/`compatible` + `HostCompatBanner.tsx` 升级提示；`test/version-compat.test.js`（6 例） |
+| P4 发布（签名/加固/Sentry/体积） | 🟡 部分实现 | **本轮**：release 签名经 env 注入（`app/build.gradle`）+ R8 压缩/混淆（`proguard-rules.pro`）+ 原生崩溃落盘基线（`CrashLog.kt`）；厂商加固 SDK / 正式 Sentry / AAB 分发链 / 体积实测待发布前完成 |
 | token 认证 / 接口鉴权 / 随机端口 | ⏸ 暂缓（§11） | — |
 
 > 实现偏差（记录在案）：①目录布局按标准 Capacitor 落在 `android/android/`（`cap sync` 要求），design §3 扁平树为其内容；②`.tar.zst` 解压用 `commons-compress` + `zstd-jni`（Android ABI 兼容性待 P0）；③前端下载桥接依赖 `window.Capacitor.Plugins.SaveFile` 探测，未引入 `@capacitor/core` 构建耦合。

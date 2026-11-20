@@ -6,7 +6,7 @@ import { exportUrl, getOtlp } from '@/api/client';
 import type { Platform, SessionDetail } from '@/api/types';
 import { DEMO } from '@/demo/flag';
 import { getTextContent } from '@/lib/pure';
-import { saveTextFile } from '@/lib/download';
+import { nativeSaveEnabled, saveTextFile } from '@/lib/download';
 import { formatDate } from './lib';
 
 export function sessionToMarkdown(detail: SessionDetail, platform: Platform, selectedSessionId: string): string {
@@ -103,6 +103,15 @@ export function exportFilename(detail: SessionDetail | undefined, selectedSessio
   return `agentlray-${id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60)}.${ext}`;
 }
 
+/** 从服务端 Content-Disposition 解析附件文件名（`attachment; filename="…"`），失败回退同款命名。 */
+function serverExportFilename(resp: Response, sessionId: string, format: 'md' | 'html'): string {
+  const disposition = resp.headers.get('Content-Disposition') ?? '';
+  const match = /filename="?([^";]+)"?/i.exec(disposition);
+  if (match?.[1]) return match[1];
+  const safeId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 60);
+  return `agentlray-${safeId}.${format}`;
+}
+
 export type ExportFormat = 'markdown' | 'html' | 'json' | 'clipboard' | 'otlp';
 
 export async function runExport(
@@ -124,8 +133,27 @@ export async function runExport(
     }
     // Server-rendered export: shareable Markdown / self-contained HTML with
     // best-effort secret redaction. Content-Disposition drives the filename.
+    const url = exportUrl(platform, selectedSessionId, format === 'html' ? 'html' : 'md', { agent });
+    if (nativeSaveEnabled()) {
+      // Android WebView 不支持 `<a href>` 服务端附件下载（design-android §7.6）：
+      // 改走 fetch → 原生 SaveFile 桥接落盘/分享。exportUrl 已用 `?host=` query 路由远端，
+      // 此处必须用裸 fetch（不能再带 X-Host-Id header，避免双重路由）。
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) {
+          const body = (await resp.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error || resp.statusText);
+        }
+        const content = await resp.text();
+        const mime = format === 'html' ? 'text/html;charset=utf-8' : 'text/markdown;charset=utf-8';
+        saveTextFile(content, serverExportFilename(resp, selectedSessionId, format === 'html' ? 'html' : 'md'), mime);
+      } catch (error) {
+        toast.error('导出失败: ' + (error as Error).message);
+      }
+      return;
+    }
     const a = document.createElement('a');
-    a.href = exportUrl(platform, selectedSessionId, format === 'html' ? 'html' : 'md', { agent });
+    a.href = url;
     a.download = '';
     a.click();
   } else if (format === 'json') {

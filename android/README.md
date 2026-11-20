@@ -3,9 +3,10 @@
 Android 客户端：**极简壳**（Capacitor WebView）+ **PRoot + Ubuntu + Node 22/24** 承载 dsh-only 薄服务
 （`bin/thin-server.js`），连接远端完整 AgentLRay 并套壳呈现其 web 页面。
 
-> 决策与蓝图：[`docs/.local/design-android-mobile-app.zh-CN.md`](../docs/.local/design-android-mobile-app.zh-CN.md)（v1.1，PRoot 承载）、[`docs/design/adr-0008-android-mobile-app.zh-CN.md`](../docs/design/adr-0008-android-mobile-app.zh-CN.md)。
-> **状态：P0 未验证**。本工程的源码/脚本已就绪，但 APK 构建、真机启动、exec/16KB 限制等需在带
-> Android SDK 与真机的环境完成 P0 门禁（见下）。
+> 决策与蓝图：[`docs/design/design-android-mobile-app.zh-CN.md`](../docs/design/design-android-mobile-app.zh-CN.md)（v1.1，PRoot 承载）、[`docs/design/adr-0008-android-mobile-app.zh-CN.md`](../docs/design/adr-0008-android-mobile-app.zh-CN.md)。
+> **状态：P1–P3 已实现、P4 部分实现；P0 真机门禁未验证**（已做静态推断，见
+> [`docs/p0-runtime-inference.zh-CN.md`](docs/p0-runtime-inference.zh-CN.md)）。APK 构建、真机启动、
+> exec/16KB 限制需在带 Android SDK 与真机的环境完成。
 
 ## 目录
 
@@ -54,6 +55,12 @@ cd android && npm install && npx cap sync android
 
 # 5) 构建 APK（需 Android SDK / JDK 17）
 cd android/android && ./gradlew assembleRelease    # 或 assembleDebug
+
+# 6) P4 正式签名（可选）：release 会经环境变量注入 keystore（不入库）
+#    AGENTLRAY_KEYSTORE=... AGENTLRAY_KEYSTORE_PASSWORD=... \
+#    AGENTLRAY_KEY_ALIAS=... AGENTLRAY_KEY_PASSWORD=... ./gradlew assembleRelease
+#    未配置时 release 退回 debug 签名（仅本地冒烟）；release 已启用 R8 压缩/混淆
+#    （proguard-rules.pro）。
 ```
 
 > `android/android/` 是 Capacitor 生成的原生平台目录。本仓库已提供关键**来源覆盖**（Kotlin、
@@ -86,7 +93,10 @@ proot --kill-on-exit -0 -r <filesDir>/runtime/rootfs \
   /usr/local/bin/node /opt/agentlray/bin/thin-server.js
 ```
 
-## P0 门禁（go/no-go，未完成前不得进入 P1）
+## P0 门禁（go/no-go）
+
+> 无真机环境下已做**静态推断**：[`docs/p0-runtime-inference.zh-CN.md`](docs/p0-runtime-inference.zh-CN.md)
+> （exec/16KB/zstd-jni ABI 三处高险 + 逐项证据）。以下勾选项为真机实测项，未完成前发布链路阻塞。
 
 - [ ] PRoot + rootfs + Node 在 **arm64 真机**（API 26/29/33/35）启动 `thin-server`，`/api/version` 200；
 - [ ] dsh 握手连通、会话列表可见、SSE 连续 5 分钟；
@@ -102,7 +112,10 @@ proot --kill-on-exit -0 -r <filesDir>/runtime/rootfs \
 2. **解压实现**：`RootfsInstaller` 用 `org.apache.commons:commons-compress` + `com.github.luben:zstd-jni`
    解压 `.tar.zst`（支持符号/硬链接与权限位）。**zstd-jni 的 Android ABI 兼容性需 P0 验证**；
    若不兼容，改用随包静态 `zstd`/`tar` 或改存未压缩 tar。
-3. **下载桥接**：前端 `saveTextFile()` 在 `nativeSave=true` 且探测到 `window.Capacitor.Plugins.SaveFile`
-   时走原生；否则 blob 下载。服务端 GET 导出（`a.href=exportUrl`）仍为浏览器式下载，Android 上
-   需 P2 补齐（fetch→saveFile）。
-4. **签名/加固/崩溃上报（Sentry）**：P4，未在本轮实现。
+3. **服务端导出桥接**：Android WebView 不支持 `<a href>` 服务端附件下载，`runExport` 的 md/html
+   分支在 `nativeSave` 时改走 `fetch(exportUrl) → saveTextFile`（`frontend/src/views/sessions/exports.ts`）；
+   桌面/常规浏览器仍走浏览器下载。
+4. **P0 真机验证未完成**：见 `android/docs/p0-runtime-inference.zh-CN.md`（静态推断）与下方
+   「P0 门禁」清单；exec/16KB/zstd-jni ABI 三处高险须真机实测后方可发布。
+5. **崩溃上报**：`CrashLog` 已把未捕获异常 + 运行时日志尾部落盘（Sentry 接入点）；厂商加固/
+   正式 Sentry SDK 接入属发布前工程，未接入。
