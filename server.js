@@ -22,6 +22,7 @@ const mountProxyRoutes = require('./lib/routes/proxy');
 const mountHostsRoutes = require('./lib/routes/hosts');
 const mountInboundRoutes = require('./lib/routes/inbound');
 const mountDshRoutes = require('./lib/routes/dsh');
+const mountModeRoutes = require('./lib/routes/mode');
 const { startDshHostService, stopDshHostService } = require('./lib/dsh/host');
 const pkg = require('./package.json');
 
@@ -49,6 +50,9 @@ setSelfIdentity({ version: pkg.version, bootId: SERVER_BOOT_ID });
 app.get('/api/version', (req, res) => {
   res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
 });
+// 运行时模式信号（design-thin-service Q13）：完整实例 → { mode: 'full' }。
+// 与 /api/version 同列本地资源，proxy.js 不会把远端模式透传回来。
+mountModeRoutes(app, { mode: 'full' });
 
 if (HAS_DIST) {
   app.use(express.static(DIST_DIR, { maxAge: 0, etag: false, lastModified: false }));

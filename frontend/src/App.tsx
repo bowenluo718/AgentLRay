@@ -6,6 +6,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Sidebar } from '@/components/Sidebar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { HostConnectingView } from '@/components/HostConnectingView';
+import { HostFormDialog } from '@/components/HostFormDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
@@ -32,7 +33,10 @@ const TABS: { view: MainView; label: string; title: string }[] = [
 export default function App() {
   usePlatforms(); // 服务端平台列表驱动（结果写入 store）
   useVersionPoller();
-  useInboundPoller();
+  // 薄服务不做入站 peer 轮询：薄服务是连接方，不提供 /api/inbound（Q22/Q25）。
+  const mode = useAppStore((s) => s.mode);
+  const isThin = mode === 'thin';
+  useInboundPoller(isThin);
   const { theme, setTheme } = useTheme();
   const view = useAppStore((s) => s.view);
   const setView = useAppStore((s) => s.setView);
@@ -48,32 +52,68 @@ export default function App() {
   const hostReady = useAppStore((s) => s.hostReady);
   const platformsLoaded = useAppStore((s) => s.platformsLoaded);
   const applyRemoteSelection = useAppStore((s) => s.applyRemoteSelection);
+  const adoptThinHost = useAppStore((s) => s.adoptThinHost);
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 薄服务空态「添加主机」表单（主区无数据面时直接打开 HostFormDialog）。
+  const [thinFormOpen, setThinFormOpen] = useState(false);
+  // 首帧主机列表是否已拉取完成（区分「加载中」与「确无主机」，thin 空态判断用）。
+  const [hostsLoaded, setHostsLoaded] = useState(false);
   // 刷新后重连记忆的远端主机（问题 1/2）。只跑一次：hosts 首帧拉取到位后，
   // 若记忆的是远端，重新 connectHost 以 X-Host-Id 访问其数据。不 reload（防循环）。
   const didRestoreHost = useRef(false);
+  // 薄服务 boot 采用主机（只一次）：服务端已自动连好，前端首帧直接落到目标主机。
+  const didThinBoot = useRef(false);
   const navigationToggle = useRef<HTMLButtonElement>(null);
   const navigationPanel = useRef<HTMLDivElement>(null);
 
-  // 首帧拉取主机列表（[local, ...hosts]），写入 store；切换主机时 store 内部已负责刷新。
+  // 首帧拉取主机列表（完整实例 [local, ...hosts]；薄服务仅远端），写入 store；
+  // 切换主机时 store 内部已负责刷新。
   useEffect(() => {
-    if (DEMO) return;
+    if (DEMO) {
+      setHostsLoaded(true);
+      return;
+    }
     getHosts()
       .then((hosts) => setHosts(hosts))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setHostsLoaded(true));
   }, [setHosts]);
+
+  // 薄服务 boot：主机会列表到位后，取记忆主机（若仍是有效远端）或第一台。服务端 boot
+  // 已连好的主机（status === 'connected'）直接采用（不重复 connect，避免反复拆建单隧道）；
+  // 未连上的（如用户上次断开后刷新）走 setSelectedHostId 重新探测（失败停连接占位，可重连）。
+  // 无主机 → 空态引导添加（Q23/Q26）。只跑一次。
+  useEffect(() => {
+    if (DEMO || !isThin || didThinBoot.current || !hostsLoaded) return;
+    didThinBoot.current = true;
+    const remembered = useAppStore.getState().rememberedHostId;
+    const target = hosts.find((h) => h.id === remembered) ?? hosts[0];
+    if (!target) return; // 无主机：渲染空态（见下方 thin 空态分支）
+    // 服务端已自动连好 → 首帧直落（快路径）；否则进入连接占位并重新探测（慢路径）。
+    if (target.status === 'connected') {
+      adoptThinHost(target.id);
+    } else {
+      useAppStore.getState().setSelectedHostId(target.id).then((ok) => {
+        if (!ok) {
+          // 重连失败：停留连接占位，用户可在主机列表再连/重试（薄服务无 local 可回落）。
+          useAppStore.getState().setHostRuntime(target.id, 'error', '连接失败，请在主机列表重试');
+          useAppStore.getState().setHostReadyResult('连接失败，请在主机列表重试');
+        }
+      });
+    }
+  }, [isThin, hostsLoaded, hosts, adoptThinHost]);
 
   // 刷新后重连记忆的远端主机（先连后加载）。hosts 首帧到位且记忆的是远端时，
   // setSelectedHostId 内部进入连接中（hostReady=false，占位不渲染数据面）、connectHost、
   // 成功后提交 + 置 hostReady=true；失败/超时回落本机。只恢复一次；不 reload（防循环）。
+  // 薄服务不跑此路径（无 local 回落；由上方 thin boot 采用服务端已连好的主机）。
   useEffect(() => {
-    if (DEMO || didRestoreHost.current) return;
+    if (DEMO || isThin || didRestoreHost.current) return;
     if (hosts.length === 0) return; // 等首帧主机列表落位
     const remembered = useAppStore.getState().rememberedHostId;
     if (remembered === 'local') return;
-    didRestoreHost.current = true;
     // 记忆的主机可能已被删除 → 回落本机（hostReady 置 true，避免整页空白）。
     if (!hosts.some((h) => h.id === remembered)) {
       useAppStore.getState().setSelectedHostId('local');
@@ -168,10 +208,79 @@ export default function App() {
     };
   }, [navigationOpen, returnToContent]);
 
+  // 模式未解析（boot 门控）：渲染轻量占位（main.tsx 已在挂载前解析，正常不命中）。
+  if (mode === null) {
+    return (
+      <TooltipProvider delayDuration={300}>
+        <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">加载中…</div>
+      </TooltipProvider>
+    );
+  }
+
+  // 薄服务（design-thin-service）：无 local 宿主，系统配置面已去除。
+  if (isThin) {
+    // 主机列表未到位：轻量占位（服务端 boot 已自动连，通常瞬时完成）。
+    if (!hostsLoaded) {
+      return (
+        <TooltipProvider delayDuration={300}>
+          <div className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground">正在加载主机…</div>
+        </TooltipProvider>
+      );
+    }
+    // 尚未添加远程主机：空态引导（Q26）。添加后刷新列表并连接首台。
+    if (hosts.length === 0) {
+      return (
+        <TooltipProvider delayDuration={300}>
+          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
+            <p className="text-sm font-medium text-foreground">尚未添加远程主机</p>
+            <p className="max-w-md text-xs text-muted-foreground">
+              薄服务仅用于远程连接：添加一台运行完整 AgentLRay 的主机（ssh 隧道或 dsh 通道），
+              即可查看与操控其会话。
+            </p>
+            <button
+              type="button"
+              onClick={() => setThinFormOpen(true)}
+              className="rounded-md border border-primary/50 bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20"
+            >
+              添加主机
+            </button>
+            <HostFormDialog
+              open={thinFormOpen}
+              onOpenChange={(o) => {
+                setThinFormOpen(o);
+                if (!o) {
+                  // 新增后刷新主机列表；有主机则连接首台（服务端尚未连接新加主机）。
+                  getHosts()
+                    .then((hs) => {
+                      setHosts(hs);
+                      if (hs.length > 0) void useAppStore.getState().setSelectedHostId(hs[0].id);
+                    })
+                    .catch(() => {});
+                }
+              }}
+              editing={null}
+            />
+          </div>
+        </TooltipProvider>
+      );
+    }
+    // 已有主机但尚未采用/连接就绪：连接占位（服务端 boot 连好的主机在此被采用）。
+    if (!hostReady) {
+      const targetId = selectedHostId && selectedHostId !== 'local' ? selectedHostId : hosts[0]?.id ?? '';
+      return (
+        <TooltipProvider delayDuration={300}>
+          <div className="flex h-full flex-col overflow-hidden">
+            <HostConnectingView hostId={targetId} />
+          </div>
+        </TooltipProvider>
+      );
+    }
+  }
+
   // 先连后加载：记忆的是远端且尚未就绪（连接中/刚回落前）→ 渲染连接占位，
   // 不渲染任何数据面（组件树不挂载，天然不发数据面请求）。本机（hostReady 初始 true）
   // 或 DEMO 不命中。失败回落本机后 hostReady=true，占位自动消失。
-  if (!hostReady && rememberedHostId !== 'local') {
+  if (!isThin && !hostReady && rememberedHostId !== 'local') {
     return (
       <TooltipProvider delayDuration={300}>
         <div className="flex h-full flex-col overflow-hidden">
@@ -235,15 +344,17 @@ export default function App() {
         <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1 md:hidden">
           <span className="text-sm font-semibold">AgentLRay</span>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              title="设置"
-              aria-label="设置"
-              className="inline-flex min-h-11 items-center justify-center rounded px-2 text-muted-foreground hover:text-foreground focus-visible:outline"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings className="h-4 w-4" />
-            </button>
+            {!isThin ? (
+              <button
+                type="button"
+                title="设置"
+                aria-label="设置"
+                className="inline-flex min-h-11 items-center justify-center rounded px-2 text-muted-foreground hover:text-foreground focus-visible:outline"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings className="h-4 w-4" />
+              </button>
+            ) : null}
             <button
               type="button"
               title={theme === 'dark' ? '切换到白天主题' : '切换到黑夜主题'}
@@ -271,7 +382,7 @@ export default function App() {
               navigationOpen ? 'flex' : 'hidden',
               sidebarCollapsed && 'md:hidden'
             )}>
-            <Sidebar onNavigate={returnToContent} onOpenSettings={() => setSettingsOpen(true)} />
+            <Sidebar onNavigate={returnToContent} onOpenSettings={isThin ? undefined : () => setSettingsOpen(true)} />
           </div>
           <main className={cn('min-h-0 min-w-0 flex-col overflow-hidden md:flex', navigationOpen ? 'hidden' : 'flex')}>
             <Tabs
@@ -319,7 +430,7 @@ export default function App() {
             </Tabs>
           </main>
         </div>
-        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <SettingsDialog open={isThin ? false : settingsOpen} onOpenChange={setSettingsOpen} />
       </div>
     </TooltipProvider>
   );

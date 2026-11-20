@@ -75,6 +75,7 @@
 | [design-inbound-peers.zh-CN.md](design-inbound-peers.zh-CN.md) | 方案设计 | 被连接主机情况查看（inbound peers） | ✅ 已实现 | 2026-11-13 |
 | [design-dsh-host-connection.zh-CN.md](design-dsh-host-connection.zh-CN.md) | 方案设计 | 基于 ds-harness-remote 的 dsh 远程主机连接 | ✅ 已实现 | 2026-11-17 |
 | [design-dsh-login-methods.zh-CN.md](design-dsh-login-methods.zh-CN.md) | 方案设计 | dsh 多登录方式（扫码 + 账号密码） | ✅ 已实现 | 2026-11-19 |
+| [design-thin-service.zh-CN.md](design-thin-service.zh-CN.md) | 方案设计 | 独立薄服务（thin service）：仅远程连接的连接方网关——`/api/mode` 运行时信号、无 `local`、dsh 强制 client、boot 自动连接、系统配置面不挂/不透传、前端 thin 裁剪；`agentlray thin` | ✅ 已实现 | 2026-11-20 |
 
 ### 决策记录（ADR）
 
@@ -86,6 +87,7 @@
 | [adr-0004-new-session-create.zh-CN.md](adr-0004-new-session-create.zh-CN.md) | 决策记录 | 新建会话 create 契约 | ✅ Accepted，已实现 | 2026-11-03 |
 | [adr-0005-platform-sources.zh-CN.md](adr-0005-platform-sources.zh-CN.md) | 决策记录 | 平台来源统一与全表面等价 D1–D10 | ✅ Accepted，已实现 | 2026-11-07 |
 | [adr-0006-dsh-host-connection.zh-CN.md](adr-0006-dsh-host-connection.zh-CN.md) | 决策记录 | 基于 ds-harness-remote 的 dsh 远程主机连接 D1–D11 | ✅ Accepted，已实现 | 2026-11-17 |
+| [adr-0007-thin-service.zh-CN.md](adr-0007-thin-service.zh-CN.md) | 决策记录 | 独立薄服务（thin service）Q1–Q27 决策收敛 | ✅ Accepted，已实现 | 2026-11-20 |
 
 ### 参考
 

@@ -302,6 +302,8 @@ function loadPersisted(): PersistedUI & { rememberedHostId: string } {
 
 /** 界面主题：亮色 / 暗色（两态手动切换，首启跟随系统一次后固定）。 */
 export type Theme = 'light' | 'dark';
+/** 运行时模式（design-thin-service Q13）：full=完整实例，thin=薄服务（仅远程连接）。 */
+export type AppMode = 'full' | 'thin';
 export type MainView = 'sessions' | 'insights' | 'prompts' | 'kanban';
 /** 右侧视图页签值校验（URL 参数 / localStorage 解析共用；非法值一律回退默认）。 */
 export function isMainView(v: unknown): v is MainView {
@@ -419,6 +421,9 @@ function persistState(): void {
 function syncSelectedPlatforms(): void {
   const st = useAppStore.getState();
   if (DEMO) return;
+  // 薄服务不透传系统设置（proxy 对 /api/settings 一律 403）：平台选择只存 localStorage，
+  // 不写服务端（Q15/Q22）。完整实例照常写（local 写本机 / 远端经 X-Host-Id 写远端）。
+  if (st.mode === 'thin') return;
   saveUiSettings({ selectedPlatforms: st.selectedPlatforms }).catch(() => {
     /* non-fatal */
   });
@@ -471,6 +476,10 @@ interface AppState {
 
   /** 当前选中主机（默认 'local' 本机；切换成功后提交，失败停留原主机）。 */
   selectedHostId: string;
+  /** 薄服务 boot 采用主机（design-thin-service Q19/Q23）：服务端已自动连好目标主机，
+   *  前端首帧直接采用它（不重复 connectHost）：设 activeHostId + 选中/记忆 + 恢复该
+   *  主机 UI 偏好 + 置 hostReady。thin 无 local 语义。 */
+  adoptThinHost: (id: string) => void;
   /** 记忆的上次选中主机（从 localStorage 恢复；刷新后 App 据此重连）。 */
   rememberedHostId: string;
   /** 主机列表（[local 内建, ...hosts]），含运行时 status。 */
@@ -486,6 +495,9 @@ interface AppState {
   hostReadyError: string | null;
   /** 本机当前被哪些其他主机连接（inbound peers，由 useInboundPoller 拉取）。 */
   inbound: InboundInfo | null;
+  /** 运行时模式（design-thin-service Q13）：full / thin。boot 先 GET /api/mode 解析，
+   *  解析完成前为 null（App 首帧门控）；thin 下裁剪系统配置入口并跳过平台写同步。 */
+  mode: AppMode | null;
   /** 远端初始化竞态守卫：切换远端后置 false；用户自主改动平台选择后置 true。
    *  applyRemoteSelection（切换远端时拉远端 server 真源）若 dirty 则跳过覆盖，
    *  避免初始化返回晚于用户即时操作而覆盖用户选择。 */
@@ -495,6 +507,8 @@ interface AppState {
   setHosts: (hosts: HostInfo[]) => void;
   /** 写入入站 peer 快照（inbound peers）。 */
   setInbound: (inbound: InboundInfo | null) => void;
+  /** 写入运行时模式（boot 解析 /api/mode 后调用）。 */
+  setMode: (mode: AppMode) => void;
   /** 设置/更新单个主机连接状态与错误。 */
   setHostRuntime: (id: string, status: HostStatus, error?: string | null) => void;
   /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
@@ -593,6 +607,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   hostReady: initial.rememberedHostId === 'local',
   hostReadyError: null,
   inbound: null,
+  // 运行时模式：boot 解析 /api/mode 前为 null（App 首帧门控渲染轻量占位）。
+  mode: null,
 
   setHosts: (hosts) => {
     const status: Record<string, HostStatus> = { local: 'connected' };
@@ -604,6 +620,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ hosts, hostStatus: status, hostError: err });
   },
   setInbound: (inbound) => set({ inbound }),
+  setMode: (mode) => set({ mode }),
   setHostRuntime: (id, status, error = null) =>
     set((s) => ({
       hostStatus: { ...s.hostStatus, [id]: status },
@@ -694,16 +711,65 @@ export const useAppStore = create<AppState>((set, get) => ({
     return true;
   },
 
+  adoptThinHost: (id) => {
+    // 薄服务：服务端 boot 已自动连好目标主机。前端首帧直接采用（不重复 connectHost），
+    // 设 activeHostId + 选中/记忆 + 恢复该主机 UI 偏好 + 置 hostReady（Q19/Q23）。
+    setActiveHostId(id);
+    let restored: PersistedUI | null = null;
+    try {
+      const raw = localStorage.getItem(settingsKeyFor(id));
+      if (raw) restored = parsePersistedSettings(JSON.parse(raw), { ...get(), hasStoredPlatform: false });
+    } catch {
+      restored = null; // corrupted per-host storage — fall back to current values
+    }
+    set({
+      selectedHostId: id,
+      rememberedHostId: id,
+      hostReady: true,
+      hostReadyError: null,
+      remoteDirty: false,
+      selectedSessionId: '',
+      selectedAgent: '',
+      detailAgent: '',
+      viewingChildAgent: null,
+      ...(restored
+        ? {
+            // 与 setSelectedHostId 的远端分支一致：不恢复 platform/selectedPlatforms（薄服务
+            // 只连远端，平台选择交给 applyRemoteSelection 取远端 server 真源），仅恢复 UI 偏好。
+            groupBy: restored.groupBy,
+            projectFilter: restored.projectFilter,
+            collapsedGroups: restored.collapsedGroups,
+            sidebarCollapsed: restored.sidebarCollapsed,
+            sidebarWidth: restored.sidebarWidth,
+            view: restored.view,
+            theme: restored.theme,
+          }
+        : {}),
+    });
+    setHostReady(true); // 同步 client 镜像（SSE/手动 fetch 判定）
+    try {
+      localStorage.setItem(REMEMBERED_HOST_KEY, id);
+    } catch {
+      /* non-fatal */
+    }
+  },
+
   disconnectHost: async (id) => {
     try {
       await apiDisconnectHost(id);
     } catch (e) {
       return false;
     }
-    // 断开的是当前查看的远端 → 自动切回本机（setSelectedHostId 内部连 local 恒成功、
-    // 置 hostReady，并把 REMEMBERED_HOST_KEY 写回 local）。否则只更新该主机运行时状态。
+    // 断开的是当前查看的远端 → 完整实例自动切回本机（local）；薄服务无 local 可回落，
+    // 仅标记断开并停数据面（用户可在主机列表再连接其他主机）。
     if (id === get().selectedHostId) {
-      await get().setSelectedHostId('local');
+      if (get().mode === 'thin') {
+        get().setHostRuntime(id, 'disconnected', null);
+        set({ hostReady: false, hostReadyError: null });
+        setHostReady(false);
+      } else {
+        await get().setSelectedHostId('local');
+      }
     } else {
       get().setHostRuntime(id, 'disconnected', null);
     }

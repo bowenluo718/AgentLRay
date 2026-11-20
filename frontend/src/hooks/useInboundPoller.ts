@@ -6,8 +6,9 @@ import { useAppStore } from '@/store';
 // local），与当前查看的远端无关。对齐 useVersionPoller 的 setInterval + focus 刷新模式。
 const POLL_MS = 10_000;
 
-export function useInboundPoller() {
+export function useInboundPoller(disabled = false) {
   useEffect(() => {
+    if (disabled) return;
     let disposed = false;
     const setInbound = useAppStore.getState().setInbound;
     const poll = async () => {
@@ -26,5 +27,5 @@ export function useInboundPoller() {
       clearInterval(timer);
       window.removeEventListener('focus', poll);
     };
-  }, []);
+  }, [disabled]);
 }

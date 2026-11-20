@@ -243,6 +243,53 @@ npm start
 
 > 详细设计：[多主机](design/design-multi-host.zh-CN.md)、[dsh 远程连接](design/design-dsh-host-connection.zh-CN.md)、[dsh 登录方式](design/design-dsh-login-methods.zh-CN.md)、[入站 peer](design/design-inbound-peers.zh-CN.md)。
 
+### 薄服务（thin service，仅远程连接）
+
+薄服务是一个**独立进程**，跑在**连接方**（移动端/代理侧），只做「远程连接 + 数据面转发 + 主机管理」，去连**完整 AgentLRay**（远端桌面数据源）。它**不携带**平台注册/状态机/insights/搜索全栈，**从数据模型上排除系统配置**：本地不挂 `settings`/`cli-bins`/`platforms` 写面/`insights`/`prompts`/`search`/`sessions`/`export`/`watch`/`inbound`，这些一律经 `proxy.js` 转发给远端；系统配置写面（`/api/settings*`、`/api/platforms/:id/(mount\|replace)`）即使连上远端也返回 403。前端复用**同一份 `frontend/dist`**，启动先取 `GET /api/mode`（薄服务返回 `{ mode: 'thin', version }`），据此隐藏设置入口并跳过系统配置调用。
+
+**三种启动方式（等价）：**
+
+```bash
+npx agentlray thin            # 已全局/项目安装 CLI
+node bin/agentlray.js thin    # 仓库内直接跑
+npm run thin                  # 同上（脚本包装）
+```
+
+**可用参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `--port <port>` / `-p` | 监听端口，默认 `3801`（与完整实例默认 `3800` 区隔，可同机并存） |
+| `--host <host>` / `-H` | 绑定地址，默认 `127.0.0.1` |
+| `--version` / `-v` | 打印版本号后退出 |
+| `--help` / `-h` | 打印用法后退出 |
+
+参数采用 `--flag value` 或 `--flag=value` 两种写法；显式参数覆盖同名环境变量。
+
+**环境变量：**
+
+| 变量 | 说明 |
+|------|------|
+| `PORT` / `HOST` | 等价于 `--port`/`--host`，参数优先 |
+| `AGENTLRAY_THIN_HOST=<id>` | 启动即自动连接的主机 `id`；缺省取 `~/.agentlray/hosts.json` 的第一台；都没有则不连，前端显示「尚未添加远程主机」空态 |
+| `AGENTLRAY_HOME` | 覆盖配置目录（默认 `~/.agentlray`），用于隔离主机/dsh 配置 |
+
+**启动后的行为：**
+
+1. 先 `listen` 再后台自动连接——避免慢隧道阻塞首屏；连接结果写入主机运行时，前端 `GET /api/hosts` 读到后首帧直落该主机。
+2. `GET /api/hosts` **只返回远端**（薄服务无 `local` 宿主）；无主机时页面引导「添加主机」。
+3. dsh 传输**强制 client**（只出站连远端，不在本机启被连接方服务）。
+4. stdout 打印监听地址、连接结果；`SIGTERM`/`SIGINT`/进程退出兜底杀掉所有 ssh/dsh 隧道子进程，防孤儿。
+
+**注意事项：**
+
+- **前端需先构建**：缺少 `frontend/dist/index.html` 时页面返回 503（提示 `npm run build:ui`）。发布包已含 `frontend/dist`；从源码运行时先 `npm run build:ui`。
+- **无鉴权**：沿用 CSRF 防护但无登录；默认只绑 `127.0.0.1`。要让局域网/移动端访问需显式 `HOST=0.0.0.0`——**这会暴露远端全部会话，谨慎使用**，并自行用反代/防火墙收口。
+- **配置来源**：主机与 dsh 配置仍用 `~/.agentlray/hosts.json`，与完整实例共用格式，可用 `AGENTLRAY_HOME` 指向独立目录。
+- 薄服务与完整实例**不是**同一个网关：完整实例在本地跑全栈并可改系统配置；薄服务是纯连接方轻量网关。
+
+> 详细设计：[薄服务方案](design/design-thin-service.zh-CN.md)、[ADR-0007](design/adr-0007-thin-service.zh-CN.md)。
+
 ## 自定义平台（Custom platforms）
 
 AgentLRay 支持**不修改源码**接入新平台：写一个 JS **平台适配器**放进平台目录，启动时加载器逐文件校验并把合法适配器并入平台注册表；所有 generic 表面（会话路由 / search / prompts / tool-audit / watch / export / CLI）按**能力位**自动接入。校验失败或 id 冲突的文件标记 **broken**（页面与 `agentlray platform list` 可见），绝不拖垮启动。

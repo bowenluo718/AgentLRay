@@ -247,6 +247,53 @@ Requests are routed to the selected host by the `X-Host-Id` header (the frontend
 
 > Design: [multi-host](design/design-multi-host.zh-CN.md), [dsh remote connection](design/design-dsh-host-connection.zh-CN.md), [dsh login methods](design/design-dsh-login-methods.zh-CN.md), [inbound peers](design/design-inbound-peers.zh-CN.md).
 
+### Thin service (remote-only)
+
+The thin service is a **standalone process** that runs on the **connecting side** (mobile/proxy) and only does "remote connect + data-plane forwarding + host management" against a **full AgentLRay** (the remote desktop data source). It **does not carry** the platform registry, state machine, insights or search stack, and **excludes system configuration by data model**: it does not mount `settings`/`cli-bins`/platform write surfaces/`insights`/`prompts`/`search`/`sessions`/`export`/`watch`/`inbound` locally — those all go through `proxy.js` to the remote; system-config write surfaces (`/api/settings*`, `/api/platforms/:id/(mount|replace)`) return 403 even when connected to a remote. The frontend reuses the **same `frontend/dist`** and fetches `GET /api/mode` first (the thin service answers `{ mode: 'thin', version }`), which hides the settings entry and skips system-config calls.
+
+**Three equivalent ways to start:**
+
+```bash
+npx agentlray thin            # globally/project-installed CLI
+node bin/agentlray.js thin    # run straight from the repo
+npm run thin                  # same, script wrapper
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--port <port>` / `-p` | Listen port, default `3801` (distinct from the full instance's default `3800`; both can coexist on one host) |
+| `--host <host>` / `-H` | Bind address, default `127.0.0.1` |
+| `--version` / `-v` | Print version and exit |
+| `--help` / `-h` | Print usage and exit |
+
+Flags accept `--flag value` and `--flag=value`; explicit flags override the same-named environment variable.
+
+**Environment variables:**
+
+| Variable | Description |
+|----------|-------------|
+| `PORT` / `HOST` | Same as `--port`/`--host`; flags win |
+| `AGENTLRAY_THIN_HOST=<id>` | Host `id` to auto-connect on boot; falls back to the first entry in `~/.agentlray/hosts.json`; if neither exists it does not connect and the UI shows the "no remote host yet" empty state |
+| `AGENTLRAY_HOME` | Override the config directory (default `~/.agentlray`) to isolate host/dsh config |
+
+**What happens on boot:**
+
+1. It `listen`s first, then auto-connects in the background — a slow tunnel never blocks the first paint; the result is written into host runtime, so the frontend's `GET /api/hosts` lands on that host on its first frame.
+2. `GET /api/hosts` returns **remote hosts only** (the thin service has no `local` host); with none, the page prompts "Add host".
+3. The dsh transport is **forced to client mode** (only outbound to the remote; it does not start the connected-side service here).
+4. stdout prints the listen address and connection result; `SIGTERM`/`SIGINT`/process exit tear down all ssh/dsh tunnel children to avoid orphans.
+
+**Caveats:**
+
+- **The frontend must be built first**: without `frontend/dist/index.html` the page returns 503 (hinting `npm run build:ui`). Published packages already ship `frontend/dist`; when running from source, run `npm run build:ui` first.
+- **No auth**: CSRF protection is kept but there is no login; it binds `127.0.0.1` by default. To reach it from a LAN/mobile device you must set `HOST=0.0.0.0` explicitly — **this exposes all remote sessions, so use with caution** and front it with a reverse proxy/firewall.
+- **Config source**: hosts and dsh config still use `~/.agentlray/hosts.json`, sharing the format with the full instance; point `AGENTLRAY_HOME` at a separate directory to isolate.
+- The thin service and the full instance are **not** the same gateway: the full instance runs the whole stack locally and can change system config; the thin service is a pure connecting-side lightweight gateway.
+
+> Design: [thin service](design/design-thin-service.zh-CN.md), [ADR-0007](design/adr-0007-thin-service.zh-CN.md).
+
 ## Custom platforms
 
 AgentLRay lets you plug in extra platforms without changing the source: write a JavaScript **platform adapter** and drop it into a platform directory. On startup the loader validates each file and merges valid adapters into the platform registry; every generic surface (session routes, search, prompts, tool audit, watch, export, CLI) then resolves the new platform by capability bit. Invalid or conflicting files are marked **broken** (visible in the UI and on `platform list`) and never break startup.

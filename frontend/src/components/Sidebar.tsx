@@ -89,9 +89,11 @@ export function Sidebar({ onNavigate, onOpenSettings }: { onNavigate?: () => voi
           <h1 className="text-lg font-semibold tracking-wide">AgentLRay</h1>
         </div>
         <div className="flex items-center gap-1">
-          <Button variant="outline" size="icon" title="设置" aria-label="设置" onClick={onOpenSettings}>
-            <Settings className="h-4 w-4" />
-          </Button>
+          {onOpenSettings ? (
+            <Button variant="outline" size="icon" title="设置" aria-label="设置" onClick={onOpenSettings}>
+              <Settings className="h-4 w-4" />
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             size="icon"

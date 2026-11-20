@@ -1,5 +1,6 @@
 // 首帧连接占位（multi-host「先连后加载」）：记忆的远端尚未就绪时不渲染任何数据面，
 // 只显示主机名 + 连接中徽标 + 可回本机。本机（hostReady 初始 true）不命中此组件。
+import { toast } from 'sonner';
 import { HOST_STATUS_DOT, HOST_STATUS_LABEL } from '@/lib/host-status';
 import { REMEMBERED_HOST_KEY, useAppStore } from '@/store';
 import { cn } from '@/lib/utils';
@@ -8,6 +9,8 @@ export function HostConnectingView({ hostId }: { hostId: string }) {
   const hosts = useAppStore((s) => s.hosts);
   const hostError = useAppStore((s) => s.hostReadyError);
   const setSelectedHostId = useAppStore((s) => s.setSelectedHostId);
+  // 薄服务无 local 可回落（design-thin-service）：不显示「回本机」，改为「重试连接」。
+  const isThin = useAppStore((s) => s.mode) === 'thin';
   const label = hosts.find((h) => h.id === hostId)?.label ?? hostId;
 
   const backToLocal = () => {
@@ -18,6 +21,13 @@ export function HostConnectingView({ hostId }: { hostId: string }) {
       /* non-fatal */
     }
     setSelectedHostId('local');
+  };
+
+  // 薄服务重连：无 local 可回落，重新探测目标主机（setSelectedHostId 内部 connectHost）。
+  const retry = () => {
+    setSelectedHostId(hostId).then((ok) => {
+      if (!ok) toast.error(`连接 ${label} 失败`);
+    });
   };
 
   return (
@@ -32,13 +42,23 @@ export function HostConnectingView({ hostId }: { hostId: string }) {
       <p className="max-w-md text-center text-xs text-muted-foreground">
         正在建立 ssh 隧道并探测远端 AgentLRay，请稍候…
       </p>
-      <button
-        type="button"
-        onClick={backToLocal}
-        className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
-      >
-        回本机
-      </button>
+      {isThin ? (
+        <button
+          type="button"
+          onClick={retry}
+          className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
+        >
+          重试连接
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={backToLocal}
+          className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:border-primary/40 hover:text-foreground"
+        >
+          回本机
+        </button>
+      )}
     </div>
   );
 }

@@ -136,6 +136,8 @@ export function HostsDialog({
   const hostStatus = useAppStore((s) => s.hostStatus);
   const hostError = useAppStore((s) => s.hostError);
   const inbound = useAppStore((s) => s.inbound);
+  // 薄服务无 local 宿主（后端已不返回），空态文案改为「远程主机」。
+  const isThin = useAppStore((s) => s.mode) === 'thin';
   const setSelectedHostId = useAppStore((s) => s.setSelectedHostId);
   const disconnectHost = useAppStore((s) => s.disconnectHost);
   // 新建/编辑表单弹框（默认隐藏）。editing 非 null 时编辑该主机。
@@ -232,7 +234,7 @@ export function HostsDialog({
             {/* 空态：无已保存主机时显示提示，仍可通过底部「添加主机」新建 */}
             {data.length === 0 ? (
               <div className="rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-                还没有已保存的主机，点击下方「添加主机」创建。
+                {isThin ? '尚未添加远程主机，点击下方「添加主机」创建。' : '还没有已保存的主机，点击下方「添加主机」创建。'}
               </div>
             ) : null}
 

@@ -110,13 +110,19 @@ export function KanbanView() {
     return { platform: selected?.platform || currentPlatform, cwd: selected?.cwd ?? undefined };
   }, [raw, selectedSessionId, currentPlatform]);
 
+  // 薄服务跳过 getKanbanConfig（design-thin-service Q27）：系统配置面不透传，
+  // 看板直接用后端默认 maxPerStatus=20，不落盘。
+  const isThin = useAppStore((s) => s.mode) === 'thin';
+
   // 每列最多条数：与服务端 kanban-config 同缓存键（SettingsDialog 保存后 invalidate 同步）。
+  // thin 不发起查询，直接用默认值。
   const kanbanCfg = useQuery({
     queryKey: ['kanban-config'] as const,
     queryFn: getKanbanConfig,
     staleTime: Number.POSITIVE_INFINITY,
+    enabled: !isThin,
   });
-  const maxPerStatus = kanbanCfg.data?.maxPerStatus?.value ?? DEFAULT_MAX_PER_STATUS;
+  const maxPerStatus = isThin ? DEFAULT_MAX_PER_STATUS : (kanbanCfg.data?.maxPerStatus?.value ?? DEFAULT_MAX_PER_STATUS);
 
   // 过滤管线（与侧栏同配方）：共享 projectFilter 客户端过滤 → 看板局部文本过滤。
   const projectValues = useMemo(() => resolveProjectValues(raw), [raw]);

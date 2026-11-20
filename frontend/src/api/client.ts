@@ -349,6 +349,18 @@ export function getVersion(): Promise<VersionInfo> {
   return fetchJson('/api/version', { local: true });
 }
 
+/** GET /api/mode — 运行时模式信号（design-thin-service Q13）。完整实例 → full，
+ *  薄服务 → thin。与 /api/hosts、/api/version 同列本地资源（local: true），绝不透传远端。
+ *  前端启动先取此值，thin 时一次性裁剪系统配置入口（单 dist，无构建期分叉）。 */
+export interface ModeInfo {
+  mode: 'full' | 'thin';
+  /** 薄服务额外携带版本号（完整实例不带）。 */
+  version?: string;
+}
+export function getMode(): Promise<ModeInfo> {
+  return fetchJson('/api/mode', { local: true });
+}
+
 // ---------- 统一设置端点 ----------
 // 所有服务端设置聚合到单一 GET/PUT /api/settings（落盘 ~/.agentlray/settings.json，
 // 各 section 白名单/校验在对应 lib 模块）。GET 全量返回；PUT 只保存请求体提供的

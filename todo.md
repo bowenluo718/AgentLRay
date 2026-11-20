@@ -13,5 +13,5 @@
 13. llm配置密码需要加密 done
 14. 14.全agent支持新建续跑，可以注入插件或者扩展
 15. 打开会话详情时实时刷新消息和支持继续聊天
-16. 开发薄服务和页面，只用于远程连接
+16. 开发薄服务和页面，只用于远程连接 ✅（已实现：`agentlray thin` / `npm run thin`，见 `docs/design/design-thin-service.zh-CN.md`）
 17. 开发移动端APP，用于远程连接
