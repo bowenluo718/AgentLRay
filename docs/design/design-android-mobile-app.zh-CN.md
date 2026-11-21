@@ -12,6 +12,7 @@
 | v1.0 | 2026-11-20 | 初稿：nodejs-mobile 承载 dsh-only 薄服务 + Capacitor WebView 套壳。 |
 | v1.1 | 2026-11-21 | 评审整改：①承载由 nodejs-mobile 改为 **PRoot + Ubuntu + Node 22/24**（原方案受 Node 18 限制无法运行 dsh 栈）；②补齐打包路径、进程生命周期、能力面、发布合规与测试策略；③token 鉴权 / 接口鉴权 / 固定端口风险记入 §11「暂缓事项」，本期不实现。 |
 | v1.2 | 2026-11-21 | 构建实测整改：①debug APK 已在本机产出（JDK21+Gradle8.11+AGP8.7.2+SDK35）；②zstd-jni 无 Android ABI，运行时层改 `.tgz` + 内置 `GZIPInputStream`（偏差②）；③真机首启报「rootfs 内缺少 node」，定位为 `ensure()` 并发竞态（onCreate 后台线程 × onStart 双跑共用 tmp），修复见 §7.1（`@Synchronized` + 哨兵校验 + 自愈）；④资产扩展名取 `.tgz` 因 aapt2 会解压并改写 `assets/**.gz` 名（偏差④）。 |
+| v1.3 | 2026-11-21 | 真机二次定位：proot 报 `library "libtalloc.so.2" not found`。根因：Android 8+ bionic linker **忽略 app 进程的 `LD_LIBRARY_PATH`**（安全策略），原注入无效；且 proot 的 `DT_RUNPATH` 指向 Termux 前缀（宿主不存在）。修复：依赖库与 proot 同放 `jniLibs/arm64-v8a/`（nativeLibraryDir），用 patchelf 把 proot 及其依赖的 `DT_RUNPATH` 改为 `${ORIGIN}`（bionic API 24+ 支持），`--replace-needed libtalloc.so.2→libtalloc.so`（jniLibs 只收 `*.so`）；删除 `LD_LIBRARY_PATH` 注入与 `assets/runtime/lib` 拷贝。fetch-proot.sh 已内建 patchelf 步骤。 |
 
 本文档是 ADR-0008 的**可落地工程蓝图**：把已收敛的决策展开为架构图、工程结构、模块改造、构建打包、生命周期状态机、分阶段实施计划与验收标准。**决策本身以 ADR-0008 为准，本文件只回答"怎么做"。**
 
@@ -567,7 +568,7 @@ Application.onCreate / Service.onCreate
 | P4 发布（签名/加固/Sentry/体积） | 🟡 部分实现 | **本轮**：release 签名经 env 注入（`app/build.gradle`）+ R8 压缩/混淆（`proguard-rules.pro`）+ 原生崩溃落盘基线（`CrashLog.kt`）；厂商加固 SDK / 正式 Sentry / AAB 分发链 / 体积实测待发布前完成 |
 | token 认证 / 接口鉴权 / 随机端口 | ⏸ 暂缓（§11） | — |
 
-> 实现偏差（记录在案）：①目录布局按标准 Capacitor 落在 `android/android/`（`cap sync` 要求），design §3 扁平树为其内容；②原 `.tar.zst` + `zstd-jni` 方案经 Maven 核验**无 Android ABI 分类器**（`linux_aarch64` 为 glibc，bionic 无法加载），已改为 `.tgz` + Android 内置 `GZIPInputStream`（`commons-compress` 仅做 tar 解析）；③前端下载桥接依赖 `window.Capacitor.Plugins.SaveFile` 探测，未引入 `@capacitor/core` 构建耦合；④资产扩展名取 `.tgz` 而非 `.tar.gz`：aapt2 会解压 `assets/**.gz` 并把资产名改写为去后缀形式，导致运行时找不到文件。
+> 实现偏差（记录在案）：①目录布局按标准 Capacitor 落在 `android/android/`（`cap sync` 要求），design §3 扁平树为其内容；②原 `.tar.zst` + `zstd-jni` 方案经 Maven 核验**无 Android ABI 分类器**（`linux_aarch64` 为 glibc，bionic 无法加载），已改为 `.tgz` + Android 内置 `GZIPInputStream`（`commons-compress` 仅做 tar 解析）；③前端下载桥接依赖 `window.Capacitor.Plugins.SaveFile` 探测，未引入 `@capacitor/core` 构建耦合；④资产扩展名取 `.tgz` 而非 `.tar.gz`：aapt2 会解压 `assets/**.gz` 并把资产名改写为去后缀形式，导致运行时找不到文件。⑤PRoot 原生依赖不随 `LD_LIBRARY_PATH` 注入：Android 8+ bionic 忽略 app 进程的 `LD_LIBRARY_PATH`，且 jniLibs 只收无版本号 `*.so`（`libtalloc.so.2` 会被 AGP 丢弃）；故依赖库与 proot 同放 `jniLibs`，构建期用 patchelf 把 proot 及其依赖的 `DT_RUNPATH` 改成 `${ORIGIN}`（bionic API 24+ 把 `$ORIGIN` 重写为可执行文件目录）并同步 `NEEDED` 命名。
 
 ---
 

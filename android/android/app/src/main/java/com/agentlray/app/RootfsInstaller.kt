@@ -66,11 +66,6 @@ class RootfsInstaller(
         val appDir = File(filesDir, "app")
         val dataDir = File(filesDir, ".agentlray").apply { mkdirs() }
 
-        // PRoot 运行库（libtalloc/libandroid-shmem，文件名含 .2，jniLibs 不收）→ filesDir/runtime/lib，
-        // NodeRuntimeManager 设 LD_LIBRARY_PATH 指向此处。
-        val libDir = File(runtimeDir, "lib")
-        copyNativeLibs(libDir)
-
         val version = buildVersionTag()
         // 就绪判定除版本标记外，还要求关键路径存在：陈旧/半成品目录（历史竞态或进程被杀）
         // 会被判定为「未就绪」并自动重建，而不是把残缺 rootfs 交给运行时。
@@ -94,29 +89,6 @@ class RootfsInstaller(
         File(rootfsDir, "opt/agentlray").mkdirs()
         File(rootfsDir, "home/agentlray/.agentlray").mkdirs()
         return Layout(rootfsDir, appDir, dataDir, runtimeDir)
-    }
-
-    private fun copyNativeLibs(libDir: File) {
-        val names = try {
-            context.assets.list("runtime/lib") ?: emptyArray()
-        } catch (e: Exception) {
-            emptyArray()
-        }
-        if (names.isEmpty()) return
-        libDir.mkdirs()
-        for (name in names) {
-            val dest = File(libDir, name)
-            if (dest.isFile && dest.length() > 0) continue
-            try {
-                context.assets.open("runtime/lib/$name").use { input ->
-                    dest.outputStream().use { out -> input.copyTo(out) }
-                }
-                dest.setExecutable(false, false)
-                dest.setReadable(true, false)
-            } catch (e: Exception) {
-                Log.w(TAG, "拷贝运行库失败：$name", e)
-            }
-        }
     }
 
     private fun buildVersionTag(): String {

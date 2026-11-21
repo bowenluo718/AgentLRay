@@ -167,7 +167,7 @@ SSE 连续 5 分钟（P0-A 验收原文）。
   - APK 内资产：`assets/runtime/{rootfs-arm64.tgz 78,954,685 B, app-bundle.tgz 5,254,853 B}`，
     与 `*.manifest.json` 的 sha256 逐字节一致；
   - APK 内原生库：`lib/arm64-v8a/{libproot.so 259,832 B, libproot-loader.so 18,136 B}` +
-    `assets/runtime/lib/{libtalloc.so.2, libandroid-shmem.so}`；
+    `jniLibs/arm64-v8a/{libtalloc.so, libandroid-shmem.so}`（与 proot 同目录）；
   - **坑**：AGP/aapt2 会对 `assets/**.gz` 解压并去掉 `.gz` 后缀（资产名变 `rootfs-arm64.tar`），
     导致 `RootfsInstaller` 找不到资产 → 资产统一改名为 `.tgz`。
 - 工具链获取脚本：`android/scripts/fetch-proot.sh`（Termux aarch64 预编译 proot/loader/libtalloc/
@@ -183,6 +183,22 @@ SSE 连续 5 分钟（P0-A 验收原文）。
     app=`bin/thin-server.js`），残缺抛错；`isReady`、`App.ensureLayout` 缓存、`spawnAndAwait`
     均过哨兵，命中残缺目录则删除重建（自愈）；解压进度/条目数/耗时写入日志环供错误屏展示。
   - **待复验**：重装 APK 后首启应直接进入 UI；若仍失败，错误屏会带 rootfs 顶层条目与体积。
+- **真机二次启动（2026-11-21，用户实测）**：竞态修复生效（日志「解压 rootfs-arm64.tgz 完成：8274
+  条目 / 6.4s」「运行时层就绪」），但 proot 报
+  `CANNOT LINK EXECUTABLE "…/lib/arm64/libproot.so": library "libtalloc.so.2" not found: needed by main executable`，
+  `proot 退出 code=1`，重试 3 次后「已达最大重启次数」。
+  - 定位：proot 的 `DT_RUNPATH` 指向 `/data/data/com.termux/files/usr/lib`（Termux 前缀，宿主
+    不存在）；我们原用 `LD_LIBRARY_PATH=<filesDir>/runtime/lib` 注入，但 **Android 8+ 的 bionic
+    linker 会忽略 app 进程的 `LD_LIBRARY_PATH`**（安全策略），故库仍找不到。
+  - 修复（fetch-proot.sh + 构建期 patchelf）：依赖库 `libtalloc.so`/`libandroid-shmem.so` 改为
+    与 proot 同放 `jniLibs/arm64-v8a/`（nativeLibraryDir）；bionic 自 API 24 支持 ELF 内嵌
+    `DT_RUNPATH` 且把 `${ORIGIN}` 重写为可执行文件所在目录，故用
+    `patchelf --set-rpath '${ORIGIN}'`（proot 及其依赖）并 `--replace-needed libtalloc.so.2 libtalloc.so`
+    （jniLibs 只收 `*.so`）；删除 `copyNativeLibs`/`LD_LIBRARY_PATH` 旧路径。
+  - 依赖库随后无 RUNPATH 依赖：libtalloc 仅 NEEDED `libc.so`，libandroid-shmem 仅 NEEDED
+    `liblog.so`/`libc.so`（系统库），故同目录 `$ORIGIN` 即满足。
+  - **待复验**：重装后 proot 应能 LINK（`libtalloc.so` 已在 nativeLibraryDir + RUNPATH=`${ORIGIN}`）。
+    仍可能触发的新问题：node 在 16KB 页、seccomp、exec 限制——见 §8。
 
 ---
 

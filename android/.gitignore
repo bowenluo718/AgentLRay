@@ -25,6 +25,3 @@ android/app/src/main/assets/public/
 android/app/src/main/assets/capacitor.config.json
 android/app/src/main/assets/capacitor.plugins.json
 android/app/src/main/res/xml/config.xml
-
-# PRoot 运行库（fetch-proot.sh 从 Termux 仓库获取；libtalloc/libandroid-shmem 名称含 .2 不入 jniLibs）
-android/app/src/main/assets/runtime/lib/

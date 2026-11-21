@@ -194,9 +194,9 @@ class NodeRuntimeManager(
 
     private fun buildCommand(layout: RootfsInstaller.Layout, proot: File): List<String> {
         val n = layout.nodeBin
-        // proot 的 DT_RUNPATH 指向 Termux 前缀（宿主不存在）；用 LD_LIBRARY_PATH 指向
-        // filesDir/runtime/lib（libtalloc/libandroid-shmem，RootfsInstaller 已拷）。
-        val libDir = File(layout.runtimeDir, "lib").absolutePath
+        // 依赖库（libtalloc/libandroid-shmem）与 libproot.so 同在 nativeLibraryDir：
+        // proot 的 DT_RUNPATH 已在构建期改为 ${ORIGIN}（fetch-proot.sh 用 patchelf 改写）。
+        // 不能用 LD_LIBRARY_PATH —— Android 8+ 的 bionic linker 对 app 进程忽略它。
         return listOf(
             proot.absolutePath,
             "--kill-on-exit",
@@ -209,7 +209,6 @@ class NodeRuntimeManager(
             "-b", "/sys",
             "-w", "/opt/agentlray",
             "/usr/bin/env",
-            "LD_LIBRARY_PATH=$libDir",
             "AGENTLRAY_HOME=/home/agentlray",
             "AGENTLRAY_DISABLE_SSH=1",
             "AGENTLRAY_NATIVE_SAVE=1",

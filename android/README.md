@@ -55,9 +55,10 @@ node android/scripts/bundle-app.mjs
 #         --manifest .../rootfs-arm64.manifest.json --version node22.15.0-arm64
 
 # 3) PRoot 二进制：Termux 官方 aarch64 预编译（无 NDK 交叉编译链时）
-bash android/scripts/fetch-proot.sh arm64
-#   → jniLibs/arm64-v8a/libproot.so + libproot-loader.so
-#   → assets/runtime/lib/{libtalloc.so.2,libandroid-shmem.so}
+bash android/scripts/fetch-proot.sh arm64      # 需要 patchelf（pip install patchelf）
+#   → jniLibs/arm64-v8a/{libproot.so,libproot-loader.so,libtalloc.so,libandroid-shmem.so}
+#   依赖库与 proot 同目录，proot 的 DT_RUNPATH 被 patchelf 改为 ${ORIGIN}：
+#   Android 8+ 的 bionic linker 会忽略 app 进程的 LD_LIBRARY_PATH，只能靠 ELF 内嵌 RUNPATH。
 
 # 4) 把 bundle/rootfs 放到 assets/runtime 并同步 Capacitor 原生工程
 cp android/build/app-bundle/app-bundle.tgz android/build/app-bundle/app.manifest.json \

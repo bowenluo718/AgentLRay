@@ -4,11 +4,19 @@
 # 本机无 root/NDK 交叉编译链时，从 Termux 官方仓库取 aarch64 预编译 proot + 依赖：
 #   bin/proot            → jniLibs/arm64-v8a/libproot.so        （nativeLibraryDir 可执行）
 #   libexec/proot/loader → jniLibs/arm64-v8a/libproot-loader.so （静态 aarch64 loader）
-#   lib/libtalloc.so.2.5.0 → assets/runtime/lib/libtalloc.so.2  （文件名含 .2，jniLibs 不收）
-#   lib/libandroid-shmem.so → assets/runtime/lib/libandroid-shmem.so
+#   lib/libtalloc.so.2.5.0 → jniLibs/arm64-v8a/libtalloc.so      （重命名 + patchelf 改写 proot 的 NEEDED）
+#   lib/libandroid-shmem.so → jniLibs/arm64-v8a/libandroid-shmem.so
 #
-# 运行时由 RootfsInstaller 把 assets/runtime/lib/* 拷到 filesDir/runtime/lib，
-# NodeRuntimeManager 设 LD_LIBRARY_PATH 指向它（proot 的 DT_RUNPATH 指向 Termux 前缀，宿主不存在）。
+# 为什么必须放进 jniLibs（而不是 assets + LD_LIBRARY_PATH）：
+#   Android 8+ 的 bionic linker 会**忽略** app 进程的 LD_LIBRARY_PATH（安全策略），proot 启动时报
+#   `CANNOT LINK EXECUTABLE "…/libproot.so": library "libtalloc.so.2" not found`。
+#   bionic 自 API 24 起支持 ELF 内嵌 DT_RUNPATH 且会把 ${ORIGIN} 重写为可执行文件所在目录，
+#   因此用 patchelf 把 proot（及其依赖）的 RUNPATH 改成 ${ORIGIN}，依赖库与 proot 同放
+#   nativeLibraryDir（jniLibs → 安装时解压到 lib/<abi>），linker 即可解析。
+#   因 jniLibs 只收 `*.so`（libtalloc.so.2 的版本号后缀会被 AGP 丢弃），故重命名为 libtalloc.so
+#   并用 `patchelf --replace-needed` 同步改写 proot 的 NEEDED。
+#
+# 依赖：bash、curl、ar、tar、patchelf（`pip install patchelf` 或发行版包）。
 #
 # 用法：bash scripts/fetch-proot.sh [arm64]
 # 说明：Termux proot 为 targetSdk 28（Termux 自身）构建；本 app targetSdk 35 下
@@ -23,7 +31,11 @@ esac
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 JNI_DIR="$REPO_ROOT/android/android/app/src/main/jniLibs/$JNI_ABI"
-LIB_DIR="$REPO_ROOT/android/android/app/src/main/assets/runtime/lib"
+
+if ! command -v patchelf >/dev/null 2>&1; then
+  echo "!! 需要 patchelf（pip install patchelf / apt install patchelf）" >&2
+  exit 1
+fi
 REPO_BASE="${TERMUX_REPO:-https://packages.termux.dev/apt/termux-main}"
 PKG_INDEX="$REPO_BASE/dists/stable/main/binary-$TERMUX_ARCH/Packages"
 
@@ -67,13 +79,23 @@ extract_pkg libtalloc
 extract_pkg libandroid-shmem
 
 PREFIX="data/data/com.termux/files/usr"
-mkdir -p "$JNI_DIR" "$LIB_DIR"
+mkdir -p "$JNI_DIR"
 cp "$WORK/x/proot/$PREFIX/bin/proot" "$JNI_DIR/libproot.so"
 cp "$WORK/x/proot/$PREFIX/libexec/proot/loader" "$JNI_DIR/libproot-loader.so"
+cp "$WORK/x/libtalloc/$PREFIX/lib/libtalloc.so.2.5.0" "$JNI_DIR/libtalloc.so"
+cp "$WORK/x/libandroid-shmem/$PREFIX/lib/libandroid-shmem.so" "$JNI_DIR/libandroid-shmem.so"
+
+# 依赖库：SONAME 与 RUNPATH 归一到 ${ORIGIN}（与 proot 同目录 = nativeLibraryDir）。
+patchelf --set-soname libtalloc.so --set-rpath '${ORIGIN}' "$JNI_DIR/libtalloc.so"
+patchelf --set-rpath '${ORIGIN}' "$JNI_DIR/libandroid-shmem.so"
+# proot：RUNPATH 指向自身目录；NEEDED 由 libtalloc.so.2 改为 libtalloc.so（jniLibs 只收 *.so）。
+patchelf --set-rpath '${ORIGIN}' --replace-needed libtalloc.so.2 libtalloc.so "$JNI_DIR/libproot.so"
+
 chmod 755 "$JNI_DIR/libproot.so" "$JNI_DIR/libproot-loader.so"
-cp "$WORK/x/libtalloc/$PREFIX/lib/libtalloc.so.2.5.0" "$LIB_DIR/libtalloc.so.2"
-cp "$WORK/x/libandroid-shmem/$PREFIX/lib/libandroid-shmem.so" "$LIB_DIR/libandroid-shmem.so"
-chmod 644 "$LIB_DIR/libtalloc.so.2" "$LIB_DIR/libandroid-shmem.so"
+chmod 644 "$JNI_DIR/libtalloc.so" "$JNI_DIR/libandroid-shmem.so"
+
+echo "==> 校验（RUNPATH 应为 \${ORIGIN}，NEEDED 应为 libtalloc.so）"
+readelf -dW "$JNI_DIR/libproot.so" | grep -E "RUNPATH|NEEDED"
 
 echo "==> 完成"
-ls -lh "$JNI_DIR" "$LIB_DIR"
+ls -lh "$JNI_DIR"
