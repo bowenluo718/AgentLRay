@@ -49,6 +49,8 @@ class RootfsInstaller(
         val runtimeDir: File,
     ) {
         val nodeBin: File get() = File(rootfsDir, "usr/local/bin/node")
+        /** proot guest 视图下 node 的绝对路径（`-r rootfsDir` 使 guest `/` = host rootfsDir）。 */
+        val nodeGuestPath: String get() = "/usr/local/bin/node"
         val thinServerEntry: File get() = File(appDir, "bin/thin-server.js")
     }
 

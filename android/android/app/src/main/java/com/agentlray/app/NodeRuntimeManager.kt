@@ -193,7 +193,6 @@ class NodeRuntimeManager(
     }
 
     private fun buildCommand(layout: RootfsInstaller.Layout, proot: File): List<String> {
-        val n = layout.nodeBin
         // 依赖库（libtalloc/libandroid-shmem）与 libproot.so 同在 nativeLibraryDir：
         // proot 的 DT_RUNPATH 已在构建期改为 ${ORIGIN}（fetch-proot.sh 用 patchelf 改写）。
         // 不能用 LD_LIBRARY_PATH —— Android 8+ 的 bionic linker 对 app 进程忽略它。
@@ -214,7 +213,9 @@ class NodeRuntimeManager(
             "AGENTLRAY_NATIVE_SAVE=1",
             "PORT=3801",
             "HOST=127.0.0.1",
-            n.absolutePath,
+            // guest 根路径：proot 的 -r rootfsDir 把 guest `/` 映射到 host rootfsDir，
+            // 传给 guest 进程的程序路径必须是 guest 视角（宿主绝对路径会被 proot 当 guest 路径解析而失配）。
+            layout.nodeGuestPath,
             "/opt/agentlray/bin/thin-server.js",
         )
     }

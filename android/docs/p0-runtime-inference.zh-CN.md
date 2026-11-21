@@ -199,6 +199,16 @@ SSE 连续 5 分钟（P0-A 验收原文）。
     `liblog.so`/`libc.so`（系统库），故同目录 `$ORIGIN` 即满足。
   - **待复验**：重装后 proot 应能 LINK（`libtalloc.so` 已在 nativeLibraryDir + RUNPATH=`${ORIGIN}`）。
     仍可能触发的新问题：node 在 16KB 页、seccomp、exec 限制——见 §8。
+- **真机三次启动（2026-11-21，用户实测）**：proot 已成功 LINK 并启动（退出码从 1 变 127），报
+  `[node] /usr/bin/env: '/data/user/0/.../runtime/rootfs/usr/local/bin/node': No such file or directory`。
+  - 定位：`NodeRuntimeManager.buildCommand` 用 `layout.nodeBin.absolutePath`（**宿主**绝对路径）作为
+    传给 guest `/usr/bin/env` 的程序参数。proot 的 `-r rootfsDir` 把 guest `/` 映射到宿主 rootfsDir，
+    但宿主绝对路径在 guest 里会被当成 guest 路径解析 → 映射到 `rootfs/data/user/...` 而不存在。
+  - 修复：新增 `Layout.nodeGuestPath = "/usr/local/bin/node"`（guest 根路径），`buildCommand` 改用它；
+    env（`/usr/bin/env`）与脚本（`/opt/agentlray/bin/thin-server.js`）本就是 guest 路径，现一致。
+  - 关键证据：env 能跑说明 rootfs 已完整解压且 proot 路径映射工作正常；纯属程序路径视角错误。
+  - **待复验**：重装后应能启动 node；再下一关大概率是 guest node 的加载（16KB 页 / guest ld-linux）或
+    proot ptrace/seccomp——见 §8。
 
 ---
 
