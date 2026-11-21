@@ -105,6 +105,11 @@ class NodeRuntimeManager(
 
         RuntimeWatchdog.cleanupOrphan(layout, logRing)
 
+        // DNS：用 Android 宿主 DNS 覆盖 rootfs 内 /etc/resolv.conf（构建期只有兜底值）。
+        // 不注入时 PRoot 内 glibc 解析报 EAI_AGAIN，dsh 等出站请求全部失败。
+        val dns = ResolvConf.apply(context, layout.rootfsDir)
+        logRing.append("", if (dns.isEmpty()) "resolv.conf：保留兜底 DNS" else "resolv.conf：${dns.joinToString(",")}")
+
         val command = buildCommand(layout, proot)
         val pb = ProcessBuilder(command)
         pb.directory(layout.appDir)

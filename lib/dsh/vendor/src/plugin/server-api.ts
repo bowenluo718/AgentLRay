@@ -613,7 +613,16 @@ export class HostServerApi {
     } catch (error) {
       if (this.lifetime.signal.aborted) throw this.lifetime.signal.reason
       if (error instanceof ServerApiError) throw error
-      throw new ServerApiError('CONNECTION_FAILED', 'Server request failed.', true, undefined, undefined, controller.signal.aborted ? 'timeout' : 'network_error')
+      // AgentLRay 补丁：透传原始 error 作为 cause，调用方可读到底层 syscall 级原因。
+      throw new ServerApiError(
+        'CONNECTION_FAILED',
+        'Server request failed.',
+        true,
+        undefined,
+        undefined,
+        controller.signal.aborted ? 'timeout' : 'network_error',
+        error,
+      )
     } finally {
       clearTimeout(timer)
     }
@@ -659,7 +668,13 @@ export class ServerApiError extends Error {
     readonly status?: number,
     readonly phase?: 'credential_refresh',
     readonly reason?: 'http_error' | 'invalid_json' | 'invalid_error_envelope' | 'timeout' | 'network_error',
-  ) { super(message) }
+    // AgentLRay 补丁：保留底层 cause（fetch 的 TypeError.cause 携带 syscall 级
+    // ENOTFOUND / ECONNREFUSED / ENETUNREACH / 证书错误），供调用方日志与 UI 诊断。
+    // 上游原实现丢弃 cause，导致网络失败只能看到 "Server request failed."。
+    readonly cause?: unknown,
+  ) {
+    super(message)
+  }
 }
 
 function validateTokens(value: unknown): TokenPair {

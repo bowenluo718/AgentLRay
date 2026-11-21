@@ -57,6 +57,19 @@ tar -xJf "$BUILD_DIR/$NODE_TAR" -C "$ROOTFS/usr/local" --strip-components=1
 # 4) 预创建 bind target（§4.2：-b 目标必须存在）
 mkdir -p "$ROOTFS/opt/agentlray" "$ROOTFS/home/agentlray/.agentlray"
 
+# 4.1) DNS 兜底：debootstrap minbase 留下的 /etc/resolv.conf 为空（或指向 systemd-resolved
+#      stub 127.0.0.53），PRoot 内没有 systemd-resolved 填充它 → glibc getaddrinfo 报
+#      EAI_AGAIN，dsh 等一切出站域名解析失败（见 change-dsh-providers-error-and-logging §8）。
+#      这里写入阿里公共 DNS 作为兜底；运行时 NodeRuntimeManager 会用 Android 宿主 DNS 覆盖它。
+#      只放一个 nameserver：国内移动网络访问 8.8.8.8 常被丢包，多一个只会让解析多等一轮超时。
+#      注意：必须是普通文件（不能用 symlink 到 host 的 resolv.conf，PRoot 内不可达）。
+rm -f "$ROOTFS/etc/resolv.conf"
+cat > "$ROOTFS/etc/resolv.conf" <<'EOF'
+# AgentLRay 兜底 DNS（构建期写入；运行时由宿主 DNS 覆盖）
+nameserver 223.5.5.5
+options timeout:2 attempts:2
+EOF
+
 # 5) 校验 node 动态依赖
 echo "==> ldd /usr/local/bin/node"
 chroot "$ROOTFS" ldd /usr/local/bin/node > "$BUILD_DIR/ldd-node.txt" || true

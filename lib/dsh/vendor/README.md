@@ -106,7 +106,7 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
 
 | 文件 | 说明 |
 | --- | --- |
-| `server-api.ts` | `ClientServerApi` / `HostServerApi`：与远端服务器配对 / 授权 / 凭据签发 |
+| `server-api.ts` | `ClientServerApi` / `HostServerApi`：与远端服务器配对 / 授权 / 凭据签发（**已补丁**，见 §4.9） |
 | `server-credentials.ts` | `ServerCredentialStore`：服务器凭据落盘与轮转 |
 | `server-connection.ts` | `HostServerConnection`：宿主侧 WebSocket + Noise + Relay/WebRTC 隧道 |
 | `connection-controller.ts` | `ConnectionController`：认证对端通道与 RPC 分发 |
@@ -205,6 +205,17 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
 * **为什么改**：AgentLRay 的 dsh 隧道语义与 ssh 隧道一致，同一远端可并存多条独立隧道（例如「连接测试」的探测隧道与常驻隧道、同一设备的多个端口目标）。上游的顶替规则会让后建立的隧道把先建立的顶掉。
 * **改成**：只按 `connectionId` 顶替（同一连接 id 的旧通道仍被回收），不同连接 id 的并发连接共存；各自的存活由传输层关闭 / 租约心跳清理（`HostServerConnection` 的 `tunnels` 表本就按 `connectionId` 独立管理）。
 * **同步上游时**：上游若调整该顶替规则，需重新评估本补丁是否仍需要（补丁以 `PATCH(AgentLRay)` 注释标注，便于 diff 定位）。
+
+### 4.9 `src/plugin/server-api.ts` —— `ServerApiError` 保留底层 `cause`（AgentLRay 补丁）
+
+* **上游**：`publicRequest` 的 catch 把任何非 `ServerApiError` 异常统一包成
+  `ServerApiError('CONNECTION_FAILED', 'Server request failed.', …)`，**丢弃原始 error**；`ServerApiError` 本身也不带 `cause`。
+* **为什么改**：真实的网络失败链是 `ServerApiError → TypeError('fetch failed') → ENOTFOUND / ECONNREFUSED / ENETUNREACH / 证书 / bad port`。
+  丢掉 cause 后，手机等现场只能看到无信息量的 `Server request failed.`，无法区分「网络不通」「DNS 失败」「IPv6 不可达」「代理劫持」，排查只能靠猜。
+* **改成**：`ServerApiError` 构造器新增可选 `cause` 参数并挂到实例上；`publicRequest` 的 catch 传入原始 `error`。
+  `lib/dsh/auth.js` 的 `describeNetworkError` 沿 `cause` 链逐层展开（最多 6 层）写入日志并透出前端。
+* **兼容性**：仅新增可选参数与实例属性，不改变错误 `code` / `message` / `reason`，调用方现有判断不受影响。
+* **同步上游时**：上游若自行保留 cause，本补丁可删除。
 
 ## 5. 编译
 

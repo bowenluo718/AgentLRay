@@ -64,7 +64,7 @@ const FAKE_PROVIDERS = [
 ];
 
 // 记录被调用的事件，供断言。
-const calls = { authorizeWithAccount: [], qrStart: [], qrPoll: [], providers: 0, providersBaseUrl: undefined, providersThrow: false };
+const calls = { authorizeWithAccount: [], qrStart: [], qrPoll: [], providers: 0, providersBaseUrl: undefined, providersThrow: false, providersNetworkError: false, providersDnsError: false };
 
 function FakeClientServerApi(serverUrl, store) {
   this.baseUrl = serverUrl.replace(/\/+$/, '');
@@ -74,6 +74,30 @@ function FakeClientServerApi(serverUrl, store) {
   this.oauthProviders = async () => {
     calls.providers += 1;
     calls.providersBaseUrl = this.baseUrl;
+    if (calls.providersDnsError) {
+      // 手机 rootfs 无可用 nameserver 时的真实链路：fetch failed → getaddrinfo EAI_AGAIN。
+      const err = new Error('Server request failed.');
+      err.name = 'ServerApiError';
+      err.code = 'CONNECTION_FAILED';
+      err.reason = 'network_error';
+      err.cause = Object.assign(new Error('fetch failed'), {
+        name: 'TypeError',
+        cause: Object.assign(new Error('getaddrinfo EAI_AGAIN dsh.r2049.cn'), { code: 'EAI_AGAIN' }),
+      });
+      throw err;
+    }
+    if (calls.providersNetworkError) {
+      // 模拟真实错误链：ServerApiError → TypeError('fetch failed') → 底层 syscall 错误。
+      const err = new Error('Server request failed.');
+      err.name = 'ServerApiError';
+      err.code = 'CONNECTION_FAILED';
+      err.reason = 'network_error';
+      err.cause = Object.assign(new Error('fetch failed'), {
+        name: 'TypeError',
+        cause: Object.assign(new Error('connect ENETUNREACH 2402:4e00::1:443'), { code: 'ENETUNREACH' }),
+      });
+      throw err;
+    }
     if (calls.providersThrow) throw new Error('discovery failed');
     return FAKE_PROVIDERS;
   };
@@ -133,6 +157,8 @@ beforeEach(() => {
   calls.providers = 0;
   calls.providersBaseUrl = undefined;
   calls.providersThrow = false;
+  calls.providersNetworkError = false;
+  calls.providersDnsError = false;
   try { fs.rmSync(SETTINGS_FILE); } catch { /* 忽略 */ }
   try { fs.rmSync(HOSTS_FILE); } catch { /* 忽略 */ }
 });
@@ -475,4 +501,149 @@ test('POST /api/dsh/auth/qr/start|poll 传 serverUrl → token 落该地址', as
       server.close();
     }
   });
+});
+
+// ---- dsh 配置详细日志（含请求/响应参数）----
+
+// 独立日志目录 + 重置懒初始化：每个日志用例读写自己的 app 日志，避免与其它用例串味。
+function withLogCapture(fn) {
+  const log = require('../lib/logging');
+  const { AGENTLRAY_LOG_DIR } = process.env;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-auth-log-'));
+  process.env.AGENTLRAY_LOG_DIR = dir;
+  process.env.AGENTLRAY_LOG_LEVEL = 'trace';
+  log.close();
+  const readApp = () => {
+    const file = path.join(dir, `app-${log.localDate()}.log`);
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  };
+  return Promise.resolve()
+    .then(() => fn(readApp))
+    .finally(() => {
+      log.close();
+      if (AGENTLRAY_LOG_DIR === undefined) delete process.env.AGENTLRAY_LOG_DIR;
+      else process.env.AGENTLRAY_LOG_DIR = AGENTLRAY_LOG_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+}
+
+test('日志：discoverProviders 记录请求(role/serverUrl)与响应(provider 列表)', async () => {
+  await withFakeVendor(() =>
+    withLogCapture(async (readApp) => {
+      await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+      await auth.discoverProviders('client', 'https://target.example.com');
+      const text = readApp();
+      assert.match(text, /dsh discover providers/);
+      // 请求参数：role + 目标 serverUrl（draft 覆盖值）。
+      assert.match(text, /"role":"client"/);
+      assert.match(text, /"serverUrl":"https:\/\/target\.example\.com"/);
+      // 响应参数：provider 数量与 id 列表。
+      assert.match(text, /"providerCount":3/);
+      assert.match(text, /"providers":\["zhihu","github","google"\]/);
+    }),
+  );
+});
+
+test('日志：discoverProviders 失败记录请求与 error（warn）', async () => {
+  await withFakeVendor(() =>
+    withLogCapture(async (readApp) => {
+      await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+      calls.providersThrow = true;
+      await auth.discoverProviders('client');
+      const text = readApp();
+      assert.match(text, /\[warn\].*dsh discover providers failed/);
+      assert.match(text, /"error":"discovery failed"/);
+    }),
+  );
+});
+
+test('日志：discoverProviders 网络失败记录 reason 与底层 cause（code/message）', async () => {
+  await withFakeVendor(() =>
+    withLogCapture(async (readApp) => {
+      await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+      calls.providersNetworkError = true;
+      const res = await auth.discoverProviders('client');
+      const text = readApp();
+      assert.match(text, /\[warn\].*dsh discover providers failed/);
+      // 顶层：原始 message + 错误码 + 失败类别。
+      assert.match(text, /"error":"Server request failed\."/);
+      assert.match(text, /"code":"CONNECTION_FAILED"/);
+      assert.match(text, /"reason":"network_error"/);
+      // 底层 cause 链逐层展开：fetch failed → syscall 级 ENETUNREACH（便于区分 DNS/连接/IPv6/证书）。
+      assert.match(text, /"cause":\[\{"name":"TypeError","message":"fetch failed"\}/);
+      assert.match(text, /"name":"Error","code":"ENETUNREACH","message":"connect ENETUNREACH 2402:4e00::1:443"/);
+      // 透出给前端：原始文案 + 全链路原因，让「网络不通」与「服务器拒绝」可区分。
+      assert.equal(res.providers.length, 0);
+      assert.equal(
+        res.error,
+        'Server request failed. (network_error; TypeError: fetch failed; ENETUNREACH: connect ENETUNREACH 2402:4e00::1:443)',
+      );
+    }),
+  );
+});
+
+test('discoverProviders：DNS 解析失败时返回面向用户的 hint（不再只给 Server request failed.）', async () => {
+  await withFakeVendor(() =>
+    withLogCapture(async () => {
+      await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+      calls.providersDnsError = true;
+      const res = await auth.discoverProviders('client');
+      // 原始 error 保留（诊断用），hint 供 UI 优先展示。
+      assert.match(res.error, /EAI_AGAIN/);
+      assert.equal(res.hint, '无法解析中继服务器域名，请检查手机网络或 DNS 设置');
+    }),
+  );
+});
+
+test('discoverProviders：非 DNS 类网络失败（ENETUNREACH）不返回 hint', async () => {
+  await withFakeVendor(() =>
+    withLogCapture(async () => {
+      await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+      calls.providersNetworkError = true;
+      const res = await auth.discoverProviders('client');
+      assert.equal(res.hint, undefined);
+    }),
+  );
+});
+
+test('both 角色不发起发现（D3：both 禁扫码）', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'both', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    const res = await auth.discoverProviders();
+    assert.deepEqual(res.providers, []);
+    assert.equal(calls.providers, 0, 'both 不应发起网络发现');
+  });
+});
+
+test('日志：PUT /api/dsh/config 记录写白名单与响应参数', async () => {
+  await withFakeVendor(() =>
+    withLogCapture(async (readApp) => {
+      await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+      const app = require('express')();
+      app.use(require('express').json());
+      mountDshRoutes(app);
+      const server = http.createServer(app);
+      await new Promise((r) => server.listen(0, r));
+      const base = `http://127.0.0.1:${server.address().port}`;
+      try {
+        await fetch(`${base}/api/dsh/config`);
+        await fetch(`${base}/api/dsh/config`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ role: 'client', serverUrl: 'https://saved2.example.com', deviceName: 'dev2', allowedPorts: [3800] }),
+        });
+      } finally {
+        server.close();
+      }
+      const text = readApp();
+      // 读：不记 app 日志（access 日志已覆盖；读操作无审计需求）。
+      assert.doesNotMatch(text, /dsh config read/);
+      // 写：白名单只记字段名（update dsh-config）。
+      assert.match(text, /"action":"update","target":"dsh-config"/);
+      // 写后响应：新 serverUrl/deviceName 落日志（响应参数）。
+      assert.match(text, /dsh config saved/);
+      assert.match(text, /"serverUrl":"https:\/\/saved2\.example\.com"/);
+      assert.match(text, /"deviceName":"dev2"/);
+    }),
+  );
 });

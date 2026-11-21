@@ -41,6 +41,36 @@ function parsePorts(text: string): number[] {
     .filter((n) => Number.isInteger(n) && n >= 1 && n <= 65535);
 }
 
+/**
+ * 是否为可发起 provider 发现的「完整」中继地址。
+ * 移动端逐字符输入时，中途停顿会把半截地址（如 https://dsh.r2049.c）发给服务器；
+ * 这类地址在内网可能被 DNS 搜索域静默补全到错误主机，导致扫码方式恒为空。
+ * 这里在本地拦截：要求 http(s)、主机名合法；域名顶级段至少 2 个字符（排除 ".c" 这类半截），
+ * IPv4 / IPv6 字面量 / localhost 放行。与后端 `normalizeServerUrl` 的主机名规则保持一致。
+ */
+function isDiscoverableServerUrl(value: string): boolean {
+  const target = value.trim();
+  if (!target) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname;
+  if (!host) return false;
+  // IPv4 / IPv6 字面量（IPv6 在 URL 中带方括号）。
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
+  if (/^\[[0-9a-f:.]+\]$/i.test(host)) return true;
+  // localhost 不受 DNS 搜索域影响（解析走 /etc/hosts），PC 自托管中继合法。
+  if (host === 'localhost') return true;
+  // 域名：至少含一个点，且最后一段（顶级段）长度 >= 2。
+  if (!host.includes('.')) return false;
+  const lastLabel = host.split('.').pop() ?? '';
+  return lastLabel.length >= 2;
+}
+
 export function DshConfigDialog({
   open,
   onOpenChange,
@@ -53,6 +83,8 @@ export function DshConfigDialog({
   const seeded = useRef(false);
   const [providers, setProviders] = useState<DshAuthProvider[]>([]);
   const [providersError, setProvidersError] = useState<string | null>(null);
+  // 后端对网络类失败的归类提示（如 DNS 解析失败）。优先展示它，原始 error 仅作 title 诊断。
+  const [providersHint, setProvidersHint] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('password');
   const [loginError, setLoginError] = useState<string | null>(null);
   const [serverDirty, setServerDirty] = useState(false);
@@ -73,27 +105,52 @@ export function DshConfigDialog({
     });
   }
 
-  // provider 发现：both 禁扫码；serverUrl 非空才调。参数显式传入避免闭包陈旧。
+  // 请求代际守卫：只有「最新一次」发现的结果才允许落地，避免晚到的旧响应
+  // （例如半截地址返回的空列表）覆盖新地址已拿到的 provider（移动端 RTT 抖动放大）。
+  const discoverGen = useRef(0);
+
+  // provider 发现：both 禁扫码；完整地址才调。参数显式传入避免闭包陈旧。
   const discover = async (url: string, role: Draft['role']) => {
+    // 每次调用先递增代际：即使是「跳过请求」的早退，也要让在飞的旧请求失效。
+    const gen = ++discoverGen.current;
+    // 清空 provider 时要连同旧的发现错误一起清，避免切换角色/清空地址后残留上一次的失败提示。
     if (role === 'both') {
       setProviders([]);
+      setProvidersError(null);
+      setProvidersHint(null);
       return;
     }
     const target = url.trim();
     if (!target) {
       setProviders([]);
+      setProvidersError(null);
+      setProvidersHint(null);
+      return;
+    }
+    // 半截地址不发起发现：本地判定「非完整地址」直接给出可区分的提示，不发请求。
+    if (!isDiscoverableServerUrl(target)) {
+      setProviders([]);
+      setProvidersHint(null);
+      setProvidersError('地址不完整，请填写完整域名（如 https://dsh.r2049.cn）');
       return;
     }
     try {
       // 传 draft.serverUrl（Q2）：发现针对用户当前编辑的地址，而非已保存值。
       const res = await discoverDshAuthProviders(role, target);
+      if (gen !== discoverGen.current) return; // 已有更新的发现，丢弃本次结果。
       setProviders(res.providers);
-      setProvidersError(null);
-      if (res.providers.length > 0 && activeTab !== 'password') {
-        if (!res.providers.some((p) => p.id === activeTab)) setActiveTab('password');
+      // 后端发现失败以 200 + 空 providers + error 返回：透出 error，让「失败」与「无扫码方式」可区分。
+      setProvidersError(res.error ?? null);
+      // 可归类失败（如 DNS 解析失败）优先展示后端给出的中文提示，原始 error 降为诊断信息。
+      setProvidersHint(res.hint ?? null);
+      // 用函数式更新读取「当前」页签，避免 render 闭包里的旧值。
+      if (res.providers.length > 0) {
+        setActiveTab((cur) => (cur !== 'password' && !res.providers.some((p) => p.id === cur) ? 'password' : cur));
       }
     } catch (e) {
+      if (gen !== discoverGen.current) return; // 旧请求的失败同样不得覆盖新结果。
       setProviders([]);
+      setProvidersHint(null);
       setProvidersError((e as Error).message);
     }
   };
@@ -115,6 +172,7 @@ export function DshConfigDialog({
       seeded.current = false;
       setLoginError(null);
       setProvidersError(null);
+      setProvidersHint(null);
       setActiveTab('password');
       setServerDirty(false);
     }
@@ -168,6 +226,8 @@ export function DshConfigDialog({
     setDraft((prev) => ({ ...prev, role }));
     if (role === 'both') {
       setProviders([]);
+      setProvidersError(null);
+      setProvidersHint(null);
       setActiveTab('password');
     } else if (currentUrl) {
       void discover(currentUrl, role);
@@ -327,6 +387,20 @@ export function DshConfigDialog({
               </p>
             ) : null}
 
+            {/* 发现失败提示：与「服务器确实没有扫码方式」区分开。
+                providersError 来自后端发现失败（200 + 空 providers + error），
+                无 provider 时它为空，不展示该行。 */}
+            {providersHint || providersError ? (
+              // 可归类失败（如 DNS 解析失败）优先展示面向用户的中文提示；原始错误放进 title 供排查。
+              <p
+                className="text-[11px] text-destructive"
+                role="alert"
+                title={providersHint ? (providersError ?? undefined) : undefined}
+              >
+                {providersHint ?? `未发现扫码方式：${providersError}`}
+              </p>
+            ) : null}
+
             {/* 登录方式 */}
             {useTabs ? (
               <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -366,7 +440,7 @@ export function DshConfigDialog({
               <div className="space-y-2">
                 <PasswordLoginPanel
                   busy={loginMut.isPending}
-                  error={loginError ?? providersError}
+                  error={loginError}
                   onLogin={(email, password) => {
                     const err = validateConfig();
                     if (err) {

@@ -21,6 +21,7 @@ const {
   loadDshSettings,
   saveDshSettings,
   migrateDshSectionOnce,
+  normalizeServerUrl,
 } = require('../lib/dsh/settings');
 const { HOSTS_FILE } = require('../lib/hosts');
 const { SETTINGS_FILE } = require('../lib/settings');
@@ -125,6 +126,26 @@ test('dsh 设置：非法角色 / 服务器地址 / 放行端口均拒绝', asyn
   await assert.rejects(() => saveDshSettings({ role: 'peer' }), /dsh\.role/);
   await assert.rejects(() => saveDshSettings({ serverUrl: 'ftp://x' }), /dsh\.serverUrl/);
   await assert.rejects(() => saveDshSettings({ allowedPorts: [0] }), /dsh\.allowedPorts/);
+});
+
+test('normalizeServerUrl：主机名合法性——拒绝单段/畸形地址，放行域名、IP 与 localhost', async () => {
+  // 单段主机名（无点）拒绝：避免被内网 DNS 搜索域静默补全到错误主机。
+  assert.throws(() => normalizeServerUrl('https://relay'), /主机名无效/);
+  // 畸形 URL 拒绝。
+  assert.throws(() => normalizeServerUrl('https://'), /不是合法地址/);
+  // localhost 放行：解析走 /etc/hosts，不受搜索域影响，PC 自托管中继是合法场景。
+  assert.equal(normalizeServerUrl('http://localhost:3800'), 'http://localhost:3800');
+  // 合法域名 / IPv4 / IPv6 放行，且保留原大小写与路径、仅去尾部斜杠。
+  assert.equal(normalizeServerUrl('https://dsh.r2049.cn/'), 'https://dsh.r2049.cn');
+  assert.equal(normalizeServerUrl('http://127.0.0.1:18123'), 'http://127.0.0.1:18123');
+  assert.equal(normalizeServerUrl('http://[::1]:3800'), 'http://[::1]:3800');
+  assert.equal(normalizeServerUrl('https://Example.COM/base/'), 'https://Example.COM/base');
+  // 空值仍归一为空串（不改既有语义）。
+  assert.equal(normalizeServerUrl(''), '');
+});
+
+test('dsh 设置：保存单段服务器地址被拒绝（服务端兜底）', async () => {
+  await assert.rejects(() => saveDshSettings({ serverUrl: 'https://relay' }), /dsh\.serverUrl/);
 });
 
 test('dsh 设置：放行端口去重且保序，默认 [3800]', async () => {

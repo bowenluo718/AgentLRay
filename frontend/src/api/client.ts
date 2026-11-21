@@ -710,6 +710,10 @@ export function discoverDshAuthProviders(
 ): Promise<{
   providers: DshAuthProvider[];
   devicePairing: boolean;
+  /** 发现失败原因（后端 200 + 空 providers 时携带）；成功/无 provider 时为 undefined。 */
+  error?: string;
+  /** 面向用户的可操作提示（如 DNS 解析失败）；可归类时由后端给出。 */
+  hint?: string;
 }> {
   const params = new URLSearchParams();
   if (role) params.set('role', role);
