@@ -1,16 +1,17 @@
 package com.agentlray.app
 
 import android.content.Context
+import android.os.Environment
 import java.io.File
 
 /**
  * 调试用：把应用私有目录 `filesDir/.agentlray`（用户数据：hosts.json / settings.json / secret
- * / dsh 凭据）递归同步到**应用专属外部目录**
- * `/sdcard/Android/data/com.agentlray.app/files/agentlray`，便于在手机文件管理器里直接查看。
+ * / dsh 凭据）递归同步到共享外部存储 `/sdcard/com.agentlray.app/files/agentlray`，
+ * 便于在手机文件管理器里直接查看。
  *
- * 选应用专属外部目录（`getExternalFilesDir`）：该目录**无需任何存储权限**即可读写，且对文件管理器
- * 可见（相比私有 `/data/user/0/...` 无需 adb run-as）。Android 11+ 系统文件管理器可直接浏览
- * `Android/data/<pkg>/files/` 下的内容。
+ * 该目录是**共享外部存储根**下自建路径，**需要存储权限**（Android 11+ 为「所有文件访问权限」
+ * `MANAGE_EXTERNAL_STORAGE`，见 `MainActivity` 的权限申请）。相比应用专属目录，好处是路径更
+ * 直观、不依赖 `Android/data/` 的访问限制。
  *
  * 语义为**镜像覆盖拷贝**：只新增/覆盖，不删除目标侧多余文件（避免误删用户已导出的历史副本）。
  * 符号链接/特殊文件跳过（.agentlray 只存普通文件与目录）。
@@ -34,8 +35,9 @@ object DataDirSyncer {
         }
     }
 
-    /** 目标目录：`/sdcard/Android/data/<pkg>/files/agentlray`（应用专属外部目录，免权限）。 */
-    fun targetDir(context: Context): File = File(context.getExternalFilesDir(null), "agentlray")
+    /** 目标目录：`/sdcard/com.agentlray.app/files/agentlray`（共享外部存储根下自建路径）。 */
+    fun targetDir(context: Context): File =
+        File(Environment.getExternalStorageDirectory(), "com.agentlray.app/files/agentlray")
 
     /** 源目录：`filesDir/.agentlray`。 */
     fun sourceDir(context: Context): File = File(context.filesDir, ".agentlray")

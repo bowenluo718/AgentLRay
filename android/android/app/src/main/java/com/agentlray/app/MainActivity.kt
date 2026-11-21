@@ -1,15 +1,22 @@
 package com.agentlray.app
 
+import android.Manifest
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.core.content.ContextCompat
 import com.getcapacitor.BridgeActivity
 
 /**
@@ -24,8 +31,8 @@ import com.getcapacitor.BridgeActivity
  * 注意（§7.2）：不用 onPause（权限弹窗/通知栏会误停）；旋转不重建（configChanges 见 Manifest）。
  *
  * 调试入口：debug 构建在右下角悬浮「同步配置」按钮，把 `filesDir/.agentlray` 递归同步到
- * 应用专属外部目录 `/sdcard/Android/data/<pkg>/files/agentlray`（见 [DataDirSyncer]，
- * 免存储权限），供手机文件管理器直接查看用户配置。
+ * `/sdcard/com.agentlray.app/files/agentlray`（见 [DataDirSyncer]）。共享外部存储需要
+ * 「所有文件访问权限」（API 30+）或 WRITE_EXTERNAL_STORAGE（API ≤29），未授权时先引导授权。
  */
 class MainActivity : BridgeActivity() {
 
@@ -34,6 +41,8 @@ class MainActivity : BridgeActivity() {
         App.instance.runtime.stop()
     }
     private var errorDialog: AlertDialog? = null
+    /** 已点击同步但还在等存储权限返回（从系统设置页回来后自动续跑）。 */
+    private var pendingSync = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -44,6 +53,15 @@ class MainActivity : BridgeActivity() {
         val runtime = App.instance.runtime
         runtime.onReady = { runOnUiThread { loadThinUi() } }
         runtime.onError = { message -> runOnUiThread { showError(message) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从「所有文件访问权限」设置页返回：权限已授予则自动续跑同步。
+        if (pendingSync && hasStorageAccess()) {
+            pendingSync = false
+            startSync()
+        }
     }
 
     override fun onStart() {
@@ -93,7 +111,58 @@ class MainActivity : BridgeActivity() {
         addContentView(fab, lp)
     }
 
-    private fun onSyncClicked() = startSync()
+    private fun onSyncClicked() {
+        if (hasStorageAccess()) {
+            startSync()
+        } else {
+            pendingSync = true
+            requestStorageAccess()
+        }
+    }
+
+    /** API 30+ 需「所有文件访问权限」；API ≤29 需 WRITE_EXTERNAL_STORAGE。 */
+    private fun hasStorageAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        }
+
+    private fun requestStorageAccess() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        Uri.parse("package:$packageName"),
+                    ),
+                )
+            } catch (e: Exception) {
+                // 部分 ROM 不认带 package 的入口，退回全局列表页。
+                startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+            }
+            Toast.makeText(this, "请授予「所有文件访问权限」后返回，将自动同步", Toast.LENGTH_LONG).show()
+        } else {
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_STORAGE)
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_STORAGE) return
+        if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            pendingSync = false
+            startSync()
+        } else {
+            pendingSync = false
+            Toast.makeText(this, "未授予存储权限，无法写入 /sdcard", Toast.LENGTH_LONG).show()
+        }
+    }
 
     private fun startSync() {
         val dst = DataDirSyncer.targetDir(this)
@@ -142,5 +211,6 @@ class MainActivity : BridgeActivity() {
     companion object {
         private const val THIN_ORIGIN = "http://127.0.0.1:3801"
         private const val STOP_DEBOUNCE_MS = 5_000L
+        private const val REQ_STORAGE = 1001
     }
 }

@@ -33,8 +33,24 @@ android/
 
 ## 构建步骤
 
+> **一键构建**（rootfs 与 PRoot 二进制已就绪时）：
+>
+> ```bash
+> npm run build:apk            # debug APK → android/android/app/build/outputs/apk/debug/
+> npm run build:apk:release    # release APK（未配置签名时回退 debug 签名）
+> npm run build:apk -- --skip-web   # 复用已构建的 frontend/dist，只重打原生层
+> ```
+>
+> 脚本 `android/scripts/build-apk.sh` 依次执行：`build:ui` → `bundle-app.mjs` →
+> 同步 `assets/runtime/`（含 rootfs SHA-256 校验）→ `cap sync` → `gradlew assemble*`，
+> 并在结束时自检 APK 内 `assets/runtime/*` 与 `lib/arm64-v8a/libproot*.so` 是否存在。
+> 环境探测：自动选择 JDK 21+、Android SDK（compileSdk 35 / build-tools 35.0.0）；
+> 缺 rootfs/PRoot 时直接报错并给出生成命令（见下）。
+
 > **环境**：JDK 21（Capacitor 7 的 `capacitor-android` 要求 Java 21）+ Android SDK（compileSdk 35 / build-tools 35）。
 > 本仓库的 `app/build.gradle` 自行设置 Kotlin/Java 17，但 Gradle 进程需 JDK 21。
+
+以下是手工分步流程（等价于一键命令的展开）：
 
 ```bash
 # 0) 仓库根：构建前端 dist（app bundle 依赖它）
@@ -124,15 +140,18 @@ debug 构建在界面右下角悬浮「同步配置」按钮（`MainActivity.ins
 `filesDir/.agentlray`（`hosts.json`/`settings.json`/`secret`/dsh 凭据）**递归同步**到
 
 ```
-/sdcard/Android/data/com.agentlray.app/files/agentlray
+/sdcard/com.agentlray.app/files/agentlray
 ```
 
-- 选**应用专属外部目录**（`Context.getExternalFilesDir(null)`）：免任何存储权限，且手机文件管理器
-  可直接浏览 `Android/data/<pkg>/files/`（无需 adb `run-as`）。
+- 该路径在**共享外部存储根**下，需要存储权限：Android 11+（API 30+）为「所有文件访问权限」
+  （`MANAGE_EXTERNAL_STORAGE`，首次点击会跳到系统设置页，授予后返回自动续跑）；API ≤29 为
+  `WRITE_EXTERNAL_STORAGE` 运行时权限（Manifest 已声明并带 `maxSdkVersion=29`，
+  application 设 `requestLegacyExternalStorage="true"`）。
 - 实现：`DataDirSyncer`（镜像覆盖拷贝，不删目标侧多余文件；符号链接/特殊文件跳过），结果计数
-  与失败项经 Toast 展示，同时写入运行日志环。
+  与失败项经 Toast 展示，同时写入运行日志环；同步后抽查 `hosts.json`/`settings.json`/`secret` 是否落地。
 - 拷贝在后台线程执行（`agentlray-sync`），完成后回主线程提示。
 - `secret` 为 AES-256-GCM 密文，导出后仍是密文（设计如此）。
+- 该权限仅用于此调试入口；正式分发若要保留需评估 Play 政策（`MANAGE_EXTERNAL_STORAGE` 属敏感权限）。
 
 ## 已知偏差 / 待验证项
 
