@@ -134,6 +134,10 @@ AgentLRay 实例在中继服务器上的身份，首启生成 25519 密钥对落
 **连接来源（via）**：
 inbound peer 快照每项标注的连接方式来源：`ssh`（连接方 ssh 上报 + 心跳）或 `dsh`（ds-harness-remote 被连接方从设备体系直接获知）。旧 peer 无 `via` 视为 `ssh`。前端「被 N 连」徽标与明细统一展示两种来源。
 
+**日志（Log）**：
+AgentLRay 记录自身启动/运行行为、落盘到 `~/.agentlray/logs/`（`AGENTLRAY_HOME` 基准）的持久化记录，**默认按天切分**。分**三类文件**（各自按天）：`boot-*.log`（每次启动，首次引导以一条 `first-run` 标记表达）、`app-*.log`（运行事件）、`access-*.log`（HTTP 访问）。基础设施**复用 dsh SafeLogger 的脱敏规则与接口契约**（`lib/logging.js` 照搬其规则自包含实现、**不 require dsh vendor**；内部适配层可快速切换实现，不引入 pino）；**additive** 接入（新增 logger 调用点、不改写既有 `console.*`）；写盘前对凭据（secret/密码/token）**脱敏**，写操作只记「动作 + 资源 id + 变更字段名」不记值（白名单）。配置**仅环境变量**（`AGENTLRAY_LOG_LEVEL` / `AGENTLRAY_LOG_KEEP_DAYS` / `AGENTLRAY_LOG_DIR` / `AGENTLRAY_LOG_CONSOLE`），不进 `settings.json`。full 与 thin 都初始化，CLI 离线命令不初始化。
+_Avoid_: 运行日志（歧义：原始诉求"运行日志"实为**运行事件**（app）与 **HTTP 访问**（access）两类，勿混为一谈）、日志库（泛指 pino 等具体依赖，非本方案——复用 SafeLogger，非落盘资产）
+
 **薄服务（Thin service）**：
 独立进程、只做远程连接的轻量网关（`bin/thin-server.js`，默认 `PORT=3801`），去除系统配置面，作为**移动端 APP 的 HTTP 后端**（ADR-0007 Q5）。跑在**连接方**去连远端完整 AgentLRay；本地只挂 proxy + hosts + dsh + version + mode + SPA，无 `local` 宿主，`GET /api/mode` 返回 `{mode:'thin'}`，系统配置面一律 403。与完整网关（full）是同一套代码的两种装配。
 _Avoid_: 瘦服务、迷你网关（易与「功能阉割」混淆；薄=仅连接，非功能少）
@@ -172,4 +176,5 @@ _Avoid_: Kotlin 薄服务（曾考虑的替代路径，R6 后废弃）、Android
 | --- | --- | --- |
 | 术语与既定实现一致 | ✅ 已核对 | 平台/会话/状态/多主机/dsh 术语均可在 `lib/` 与 `platforms/` 找到对应实现 |
 | Android 承载术语（PRoot / rootfs / app bundle） | 🟡 设计态，未实现 | ADR-0008（2026-11-21 修订）；`docs/.local/design-android-mobile-app.zh-CN.md` |
+| 日志（Log）术语 | ✅ 已实现 | `lib/logging.js` / `lib/routes/log-helper.js` / `test/logging.test.js`；ADR-0009（accepted）/ `docs/design/design-logging.zh-CN.md`（2026-11-21 已实现） |
 

@@ -33,3 +33,9 @@ if (process.env.AGENTLRAY_PROJECT_PLATFORMS_DIR === undefined) {
 
 // 注册 @agentlray/shared 裸名别名，幂等。
 require('../lib/platforms/shared-alias').installSharedAlias();
+
+// 日志：测试期间关闭控制台镜像（避免 app 运行事件刷屏测试输出）。仅设日志专用变量，
+// 不改 AGENTLRAY_HOME/HOME（各用例自建隔离家目录）。logging.test.js 用例内自行覆盖。
+if (process.env.AGENTLRAY_LOG_CONSOLE === undefined) {
+  process.env.AGENTLRAY_LOG_CONSOLE = '0';
+}

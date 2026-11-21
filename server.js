@@ -24,6 +24,7 @@ const mountInboundRoutes = require('./lib/routes/inbound');
 const mountDshRoutes = require('./lib/routes/dsh');
 const mountModeRoutes = require('./lib/routes/mode');
 const { startDshHostService, stopDshHostService } = require('./lib/dsh/host');
+const log = require('./lib/logging');
 const pkg = require('./package.json');
 
 const app = express();
@@ -40,6 +41,10 @@ const HAS_DIST = fs.existsSync(path.join(DIST_DIR, 'index.html'));
 // 也必须在 express.json 之前——远端转发需要原始 body 流（req.pipe），被 parser 消费则无法透传。
 mountProxyRoutes(app);
 
+// HTTP 访问日志（design-logging §5.8）：必须挂在 proxy 之后、路由之前——被 proxy 转发的
+// 远端请求不会走到后续中间件，故只记本机入口请求；耗时/status 由 res.on('finish') 采集。
+app.use(log.createAccessMiddleware());
+
 // Frontend staleness detection: the SPA polls this and prompts a reload
 // when the serving process (and thus possibly the code) has changed.
 // version 字段供多主机跨主机版本提示（design R3-Q3/P0）。
@@ -47,6 +52,9 @@ const SERVER_BOOT_ID = `${Date.now().toString(36)}-${process.pid}`;
 // 本机身份（连接方视角）：作为连接方主动向被连接方上报，供被连接方展示「被谁连接」。
 // peerId/label 已由 lib/hosts.js 默认为本机 hostname 短名，此处仅补充版本/启动标识。
 setSelfIdentity({ version: pkg.version, bootId: SERVER_BOOT_ID });
+// 日志初始化（design-logging §3.6）：建 logs/、首次创建时写 first-run 标记。必须在任何
+// log.* 调用前执行，以便 first-run 标记带上版本与平台目录。
+log.init({ version: pkg.version, platforms: Object.keys(PLATFORMS) });
 app.get('/api/version', (req, res) => {
   res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
 });
@@ -98,11 +106,20 @@ app.get('*', (req, res) => {
 // 启动：加载状态时间配置注入 lib/status.js 与目录配置，最后监听端口。
 // 配置加载失败不阻塞启动（回退默认窗口）。
 async function boot() {
+  log.boot.info('boot', {
+    bootId: SERVER_BOOT_ID,
+    version: pkg.version,
+    mode: 'full',
+    host: HOST,
+    port: PORT,
+    platforms: Object.keys(PLATFORMS),
+  });
   try {
     setStatusConfig(await loadStatusConfig());
     loadDirsConfigSync();
-  } catch {
+  } catch (error) {
     // 配置加载异常 → 维持默认时间窗口，不阻塞服务。
+    log.app.warn('config load failed', { error: error?.message || String(error) });
   }
   // dsh 被连接方服务：角色含 host 时随进程常驻（design D7）——独立于「当前选中主机」，
   // 不占连接槽。启动失败（未配置账号 / 中继服务器不可达）不阻塞本地服务。
@@ -110,14 +127,22 @@ async function boot() {
     const { started, status } = await startDshHostService();
     if (started) {
       console.log(`  dsh 被连接方: ${status.serverUrl}（设备 ${status.deviceName}，放行端口 ${status.allowedPorts.join(',')}）`);
+      log.boot.info('dsh host', {
+        serverUrl: status.serverUrl,
+        deviceName: status.deviceName,
+        allowedPorts: status.allowedPorts,
+      });
     } else if (status.reason) {
       console.log(`  dsh 被连接方未启动: ${status.reason}`);
+      log.boot.info('dsh host skipped', { reason: status.reason });
     }
   } catch (error) {
     console.log(`  dsh 被连接方启动失败: ${error.message}`);
+    log.app.warn('dsh host start failed', { error: error?.message || String(error) });
   }
   app.listen(PORT, HOST, () => {
     console.log(`AgentLRay listening on http://${HOST}:${PORT}`);
+    const platformDirs = {};
     for (const [id, p] of Object.entries(PLATFORMS)) {
       let dir;
       try {
@@ -125,18 +150,39 @@ async function boot() {
       } catch {
         dir = null;
       }
-      if (dir) console.log(`  ${(p.label || id).padEnd(16)}: ${dir}`);
+      if (dir) {
+        platformDirs[id] = dir;
+        console.log(`  ${(p.label || id).padEnd(16)}: ${dir}`);
+      }
     }
+    log.boot.info('listening', { host: HOST, port: PORT, platforms: platformDirs });
   });
 }
 
 // 进程退出兜底：kill 所有 ssh 隧道子进程，防孤儿（design R4-Q1）；dsh 被连接方服务
-// 随进程关闭（连接与 loopback 端点一并释放）。
-process.on('exit', shutdownHosts);
+// 随进程关闭（连接与 loopback 端点一并释放）。日志句柄同步关闭（保证退出前落盘）。
+process.on('exit', () => {
+  shutdownHosts();
+  log.close();
+});
+// 未捕获异常 / 未处理 rejection（design-logging §5.5）：统一 error 落 app 日志，随后按
+// Node 默认语义（退出码 1）退出——加监听器会抑制默认崩溃，故显式退出以保留原行为。
+process.on('uncaughtException', (error) => {
+  log.app.error('uncaught exception', { error: error?.stack || String(error) });
+  log.close();
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  log.app.error('unhandled rejection', { error: reason instanceof Error ? reason.stack : String(reason) });
+  log.close();
+  process.exit(1);
+});
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
+    log.app.info('process exit', { signal: sig });
     shutdownHosts();
     void stopDshHostService();
+    log.close();
     process.exit(0);
   });
 }

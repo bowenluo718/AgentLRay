@@ -21,6 +21,7 @@ const mountProxyRoutes = require('../lib/routes/proxy');
 const mountHostsRoutes = require('../lib/routes/hosts');
 const mountDshRoutes = require('../lib/routes/dsh');
 const mountModeRoutes = require('../lib/routes/mode');
+const log = require('../lib/logging');
 const pkg = require('../package.json');
 
 const app = express();
@@ -35,9 +36,16 @@ const HAS_DIST = fs.existsSync(path.join(DIST_DIR, 'index.html'));
 // thin 选项开启系统配置面拦截（settings 全部 403、platforms 写面 403）。
 mountProxyRoutes(app, { thin: true });
 
+// HTTP 访问日志（design-logging §5.8）：挂在 proxy 之后、路由之前——被转发的远端请求
+// 不会走到这里，故只记本机入口请求；耗时/status 由 res.on('finish') 采集。
+app.use(log.createAccessMiddleware());
+
 // 本机身份 + 版本探测：薄服务作为连接方，也会向被连远端上报自身（inbound peers）。
 const SERVER_BOOT_ID = `${Date.now().toString(36)}-${process.pid}`;
 setSelfIdentity({ version: pkg.version, bootId: SERVER_BOOT_ID });
+// 日志初始化（design-logging §3.6）：薄服务是独立进程，也建 logs/ 并写 boot 日志；
+// 平台目录为空（薄服务不携带平台解析栈）。
+log.init({ version: pkg.version, platforms: [] });
 app.get('/api/version', (_req, res) => {
   res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
 });
@@ -79,29 +87,51 @@ app.get('*', (_req, res) => {
 app.listen(PORT, HOST, () => {
   console.log(`AgentLRay thin listening on http://${HOST}:${PORT}`);
   console.log('  薄服务：仅远程连接，不携带平台解析栈，系统配置面已关闭');
+  log.boot.info('boot', { bootId: SERVER_BOOT_ID, version: pkg.version, mode: 'thin', host: HOST, port: PORT });
   autoConnectThinHost()
     .then(({ ok, hostId, runtime }) => {
       if (!hostId) {
         console.log('  未配置远程主机：请在页面「添加主机」后连接');
+        log.boot.info('auto connect skipped', { reason: '未配置远程主机' });
         return;
       }
       if (ok) {
         const v = runtime?.version?.version ? ` (v${runtime.version.version})` : '';
         console.log(`  已自动连接主机 ${hostId}${v}`);
+        log.boot.info('auto connect', { hostId, ok: true, remoteVersion: runtime?.version?.version ?? null });
       } else {
         console.log(`  自动连接主机 ${hostId} 失败: ${runtime?.error ?? '未知错误'}`);
+        log.app.warn('auto connect failed', { hostId, error: runtime?.error ?? '未知错误' });
       }
     })
     .catch((error) => {
       console.log(`  自动连接失败: ${error.message}`);
+      log.app.warn('auto connect failed', { error: error?.message || String(error) });
     });
 });
 
-// 进程退出兜底：kill 所有 ssh/dsh 隧道子进程，防孤儿。
-process.on('exit', shutdownHosts);
+// 进程退出兜底：kill 所有 ssh/dsh 隧道子进程，防孤儿。日志句柄同步关闭（保证退出前落盘）。
+process.on('exit', () => {
+  shutdownHosts();
+  log.close();
+});
+// 未捕获异常 / 未处理 rejection（design-logging §5.5）：统一 error 落 app 日志，随后按
+// Node 默认语义（退出码 1）退出——加监听器会抑制默认崩溃，故显式退出以保留原行为。
+process.on('uncaughtException', (error) => {
+  log.app.error('uncaught exception', { error: error?.stack || String(error) });
+  log.close();
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  log.app.error('unhandled rejection', { error: reason instanceof Error ? reason.stack : String(reason) });
+  log.close();
+  process.exit(1);
+});
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
+    log.app.info('process exit', { signal: sig });
     shutdownHosts();
+    log.close();
     process.exit(0);
   });
 }

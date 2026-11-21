@@ -78,6 +78,12 @@
 | [design-thin-service.zh-CN.md](design-thin-service.zh-CN.md) | 方案设计 | 独立薄服务（thin service）：仅远程连接的连接方网关——`/api/mode` 运行时信号、无 `local`、dsh 强制 client、boot 自动连接、系统配置面不挂/不透传、前端 thin 裁剪；`agentlray thin` | ✅ 已实现 | 2026-11-20 |
 | [design-android-mobile-app.zh-CN.md](design-android-mobile-app.zh-CN.md) | 方案设计 | Android 移动端 App 工程蓝图：PRoot + Ubuntu + Node 22/24 承载 dsh-only 薄服务 + Capacitor WebView 套壳；仓库模块改造（hosts 守卫/lastHostId/mode capabilities/传输过滤/下载桥接）、`android/` 工程骨架、P1 最小壳、P2 导出桥接、P3 版本兼容已落地；P0 静态推断/16KB 量测见 [android/docs/p0-runtime-inference.zh-CN.md](../../android/docs/p0-runtime-inference.zh-CN.md)；debug APK 本机构建通过 | 🟡 部分实现（P0 真机验证待做；P4 部分实现） | 2026-11-21 |
 
+### 日志与运维
+
+| 文档 | 类型 | 说明 | 实现进度 | 更新日期 |
+| --- | --- | --- | --- | --- |
+| [design-logging.zh-CN.md](design-logging.zh-CN.md) | 方案设计 | 日志能力：`~/.agentlray/logs/` 三类按天（boot/app/access）+ 写盘脱敏 + 写操作白名单 + access 中间件 + 仅环境变量配置 | ✅ 已实现 | 2026-11-21 |
+
 ### 决策记录（ADR）
 
 | 文档 | 类型 | 说明 | 实现进度 | 更新日期 |
@@ -90,6 +96,7 @@
 | [adr-0006-dsh-host-connection.zh-CN.md](adr-0006-dsh-host-connection.zh-CN.md) | 决策记录 | 基于 ds-harness-remote 的 dsh 远程主机连接 D1–D11 | ✅ Accepted，已实现 | 2026-11-17 |
 | [adr-0007-thin-service.zh-CN.md](adr-0007-thin-service.zh-CN.md) | 决策记录 | 独立薄服务（thin service）Q1–Q27 决策收敛 | ✅ Accepted，已实现 | 2026-11-20 |
 | [adr-0008-android-mobile-app.zh-CN.md](adr-0008-android-mobile-app.zh-CN.md) | 决策记录 | Android 移动端 App：**PRoot + Ubuntu + Node 22/24** 承载 dsh-only 薄服务 + Capacitor WebView 套壳（grill R1–R6 收敛；2026-11-21 修订 R2，原 nodejs-mobile 因 Node 18 无法承载 dsh 被否决） | 🟡 Accepted，仓库改造已实现（P0 真机验证未完成） | 2026-11-21 |
+| [adr-0009-logging.zh-CN.md](adr-0009-logging.zh-CN.md) | 决策记录 | 日志能力：复用 SafeLogger 不引 pino、家目录 logs 三类按天、install 降级 first-run、additive 接入、脱敏白名单、仅环境变量配置（DIR 优先）、full/thin 初始化、require 零副作用 | ✅ Accepted，已实现 | 2026-11-21 |
 
 ### 参考
 
