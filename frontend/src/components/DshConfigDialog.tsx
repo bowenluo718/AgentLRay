@@ -121,27 +121,56 @@ export function DshConfigDialog({
     onOpenChange(next);
   }
 
-  const serverUrlChanged = (url: string) => {
-    setDraft({ ...draft, serverUrl: url });
-    setServerDirty(true);
+  // 当前 role 的实时引用：URL 变化触发的（防抖）重发现需要拿到「当前」角色，
+  // 避免依赖 render 闭包里的旧值（尤其移动端，键盘/失焦时序不可靠）。
+  const roleRef = useRef<Draft['role']>('both');
+  useEffect(() => {
+    roleRef.current = draft.role;
+  }, [draft.role]);
+  const serverUrlRef = useRef('');
+  useEffect(() => {
+    serverUrlRef.current = draft.serverUrl;
+  }, [draft.serverUrl]);
+
+  // 防抖：地址连续编辑时只在停顿后真正发一次发现请求（URL/角色读实时 ref）。
+  const discoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleDiscover = () => {
+    if (discoverTimer.current) clearTimeout(discoverTimer.current);
+    discoverTimer.current = setTimeout(() => {
+      void discover(serverUrlRef.current, roleRef.current);
+    }, 400);
   };
-  // serverUrl 失焦后重新发现（D49）：从空变非空、或非空改非空都触发。
+  useEffect(() => {
+    return () => {
+      if (discoverTimer.current) clearTimeout(discoverTimer.current);
+    };
+  }, []);
+
+  const serverUrlChanged = (url: string) => {
+    setDraft((prev) => ({ ...prev, serverUrl: url }));
+    setServerDirty(true);
+    // 地址变化即重发现（移动端失焦不可靠）：确保针对当前编辑值访问服务器、拿到扫码方式。
+    scheduleDiscover();
+  };
+  // serverUrl 失焦后立即重新发现（D49）：从空变非空、或非空改非空都触发（防抖的即时兜底）。
   const onServerBlur = () => {
     if (!loggedIn && serverDirty) {
       setServerDirty(false);
-      void discover(draft.serverUrl, draft.role);
+      if (discoverTimer.current) clearTimeout(discoverTimer.current);
+      void discover(serverUrlRef.current, roleRef.current);
     }
   };
 
   // role 变化：both → 不发现（清 provider）；host/client 且 serverUrl 非空 → 发现。
+  // serverUrl 读实时引用（serverUrlRef），避免与刚输入的地址不同步。
   const roleChanged = (role: Draft['role']) => {
-    const next = { ...draft, role };
-    setDraft(next);
+    const currentUrl = serverUrlRef.current.trim();
+    setDraft((prev) => ({ ...prev, role }));
     if (role === 'both') {
       setProviders([]);
       setActiveTab('password');
-    } else if (next.serverUrl.trim()) {
-      void discover(next.serverUrl, role);
+    } else if (currentUrl) {
+      void discover(currentUrl, role);
     }
   };
 

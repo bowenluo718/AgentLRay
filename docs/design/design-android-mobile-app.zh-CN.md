@@ -362,6 +362,11 @@ node android/scripts/bundle-app.mjs
 ### 6.3 Android 构建
 
 ```bash
+# 一键（仓库根；rootfs 与 PRoot 二进制已就绪）
+npm run build:apk            # debug
+npm run build:apk:release    # release（未注入 keystore 时回退 debug 签名）
+
+# 等价手工步骤
 cd android
 npm install && npx cap sync
 ./gradlew assembleRelease     # APK/AAB
@@ -560,6 +565,7 @@ Application.onCreate / Service.onCreate
 | --- | --- | --- |
 | 决策收敛（ADR-0008，R2 修订为 PRoot） | ✅ 已完成（待 P0 验证） | [adr-0008](adr-0008-android-mobile-app.zh-CN.md) |
 | 完整工程蓝图（本文件） | ✅ 已完成 | 本文档 |
+| 一键 APK 打包 | ✅ 已实现（本机 debug/release 构建通过） | `android/scripts/build-apk.sh`（前端 → app-bundle → assets 同步 + rootfs SHA-256 校验 → cap sync → Gradle → APK 条目自检）+ 根 `package.json` 的 `build:apk`/`build:apk:release`；`android/README.md` 同步说明 |
 | §5 仓库模块改造（hosts 守卫/lastHostId/mode capabilities/前端传输过滤/下载桥接） | ✅ 已实现 | `lib/hosts.js`（`sshDisabled`/`assertTransportAllowed`/`getLastHostId`/`setLastHostId`、`resolveThinBootHost` 优先 lastHostId + DISABLE_SSH 过滤）、`lib/routes/hosts.js`（GET `{lastHostId,hosts}`、PUT 透传、connect 写盘）、`lib/routes/mode.js`（capabilities）、`frontend/src/api/{types,client}.ts`、`frontend/src/store.ts`（`modeCapabilities`）、`frontend/src/components/HostFormDialog.tsx`（传输按 capabilities 过滤/默认）、`frontend/src/lib/download.ts`（nativeSave 桥接）+ 3 处调用（`exports.ts`/`promptsLib.ts`/`ReviewTransferPanel.tsx`）；测试 `test/thin-android-guards.test.js`（12 例），全量 **757/757** 通过（本轮新增版本兼容 6 例），`npm run build:ui` 通过 |
 | Android 工程骨架（`android/`） | 🟡 已落地，**本机 debug APK 构建通过**（真机未验） | `android/{package.json,capacitor.config.ts,www/,README.md}`、`android/android/app/src/main/java/com/agentlray/app/{App,MainActivity,NodeRuntimeManager,RootfsInstaller,RuntimeLogRing,RuntimeWatchdog,SecurityConfig,SaveFilePlugin}.kt`、`AndroidManifest.xml`、`res/xml/{network_security_config,data_extraction_rules,file_paths}.xml`、`android/android/{build.gradle,settings.gradle,variables.gradle,app/build.gradle}`、`android/scripts/{build-rootfs.sh,bundle-app.mjs,package-runtime.mjs,fetch-proot.sh}`、`jniLibs/arm64-v8a/{libproot,libproot-loader}.so`、`assets/runtime/{rootfs-arm64.tgz,app-bundle.tgz}`；JDK 21 + Gradle 8.11 + AGP 8.7.2 本机 `:app:assembleDebug` 成功（`app-debug.apk` 96MB）|
 | P0 运行时/打包/生命周期/能力面/安全基线 | 🟡 APK 可构建 + 静态量测（真机待验） | 工程闭环见 `android/`；推断/量测与两处高险（exec、16KB 设备行为；zstd-jni ABI 已改 gzip 消除）见 `android/docs/p0-runtime-inference.zh-CN.md`；真机必验清单同上 |

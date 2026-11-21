@@ -7,7 +7,7 @@ import { Sidebar } from '@/components/Sidebar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { HostConnectingView } from '@/components/HostConnectingView';
 import { HostCompatBanner } from '@/components/HostCompatBanner';
-import { HostFormDialog } from '@/components/HostFormDialog';
+import { HostsDialog } from '@/components/HostsDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
@@ -57,8 +57,9 @@ export default function App() {
   const queryClient = useQueryClient();
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // 薄服务空态「添加主机」表单（主区无数据面时直接打开 HostFormDialog）。
-  const [thinFormOpen, setThinFormOpen] = useState(false);
+  // 薄服务空态「添加主机」：点击打开远程主机配置弹框（HostsDialog），
+  // 由其中「添加主机」/「dsh 配置」入口进一步打开对应表单/配置。
+  const [thinHostsOpen, setThinHostsOpen] = useState(false);
   // 首帧主机列表是否已拉取完成（区分「加载中」与「确无主机」，thin 空态判断用）。
   const [hostsLoaded, setHostsLoaded] = useState(false);
   // 刷新后重连记忆的远端主机（问题 1/2）。只跑一次：hosts 首帧拉取到位后，
@@ -240,17 +241,17 @@ export default function App() {
             </p>
             <button
               type="button"
-              onClick={() => setThinFormOpen(true)}
+              onClick={() => setThinHostsOpen(true)}
               className="rounded-md border border-primary/50 bg-primary/10 px-4 py-2 text-sm font-medium text-primary hover:bg-primary/20"
             >
               添加主机
             </button>
-            <HostFormDialog
-              open={thinFormOpen}
+            <HostsDialog
+              open={thinHostsOpen}
               onOpenChange={(o) => {
-                setThinFormOpen(o);
+                setThinHostsOpen(o);
                 if (!o) {
-                  // 新增后刷新主机列表；有主机则连接首台（服务端尚未连接新加主机）。
+                  // 关闭后刷新主机列表；有主机则连接首台（新增主机由 HostsDialog 内表单完成）。
                   getHosts()
                     .then((res) => {
                       setHosts(res.hosts);
@@ -259,7 +260,6 @@ export default function App() {
                     .catch(() => {});
                 }
               }}
-              editing={null}
             />
           </div>
         </TooltipProvider>

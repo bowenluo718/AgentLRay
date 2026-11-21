@@ -134,7 +134,7 @@
 
 - `DshConfigDialog`：状态机（未登录/已登录）+ 配置字段 + 布局。登录方式页签**内联**在 `DshConfigDialog`（不再单列 `DshLoginTabs` 子组件，与实际实现对齐）。
 - 子组件：`PasswordLoginPanel`（email/password + 登录按钮）、`QrLoginPanel`（provider 子 tab + 二维码 + 跳转链接 + 轮询，接收 `role`/`provider`/**`serverUrl`**）、`DshLoggedInView`（只读摘要 + 角色 + 退出）。
-- provider 发现触发时机：**已登录不调用**；未登录时 serverUrl 非空 → 打开即发现；serverUrl 为空 → 填完**失焦后**发现；失焦重发现在 serverUrl **变化**时；退出登录后重新发现。both 不发现。发现请求带 **draft.serverUrl**（Q2）。
+- provider 发现触发时机：**已登录不调用**；未登录时 serverUrl 非空 → 打开即发现；serverUrl 为空 → 填完**失焦后**发现；**地址变化即重发现（400ms 防抖）**——移动端失焦不可靠，修改中继服务器地址后立即针对当前编辑值访问服务器拿到扫码方式；失焦作为防抖的即时兜底；退出登录后重新发现。both 不发现。发现请求带 **draft.serverUrl**（Q2）；URL/角色读取实时 ref，避免 render 闭包旧值（移动端键盘/失焦时序）。
 - 发现失败/无 provider → 只显示账号密码 tab（单方式直显）。
 
 ## 测试
