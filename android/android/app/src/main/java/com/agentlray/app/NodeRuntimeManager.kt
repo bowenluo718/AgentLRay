@@ -70,7 +70,7 @@ class NodeRuntimeManager(
     // ---- 内部：spawn + 探测 ----
 
     private fun spawnAndAwait() {
-        val layout = try {
+        var layout = try {
             layoutProvider()
         } catch (e: Exception) {
             Log.e(TAG, "运行时布局/解压失败", e)
@@ -78,8 +78,22 @@ class NodeRuntimeManager(
             return
         }
         if (!layout.nodeBin.isFile) {
-            onError?.invoke("rootfs 内缺少 node：${layout.nodeBin}")
-            return
+            // 自愈：陈旧/残缺 rootfs（历史竞态、进程被杀、磁盘不足）删除后重建一次。
+            val facts = describeRootfs(layout)
+            logRing.append("", "rootfs 缺 node，尝试重建：$facts")
+            layout.runtimeDir.resolve("rootfs").deleteRecursively()
+            layout.runtimeDir.resolve(".rootfs.version").delete()
+            val repaired = try {
+                layoutProvider()
+            } catch (e: Exception) {
+                onError?.invoke("运行时解压失败：${e.message}")
+                return
+            }
+            layout = repaired
+            if (!repaired.nodeBin.isFile) {
+                onError?.invoke("rootfs 内缺少 node：${repaired.nodeBin}\n$facts")
+                return
+            }
         }
         val nativeDir = context.applicationInfo.nativeLibraryDir
         val proot = File(nativeDir, PROOT_NAME)
@@ -159,6 +173,15 @@ class NodeRuntimeManager(
      * 取子进程 pid：Android 的 `java.lang.Process` 未公开 `pid()`（仅桌面 JDK 有），
      * 反射 libcore `ProcessImpl.pid` 字段；失败返回 -1（watchdog 会跳过该 pid 文件）。
      */
+    /** 失败诊断：rootfs 顶层条目与大小，便于区分「没解压」与「解压残缺」。 */
+    private fun describeRootfs(layout: RootfsInstaller.Layout): String {
+        val dir = layout.rootfsDir
+        val names = dir.list()?.sorted()?.take(12) ?: emptyList()
+        val sizeMb = dir.walkTopDown().filter { it.isFile }.sumOf { it.length() } / (1024.0 * 1024.0)
+        return "rootfs=${dir.absolutePath} exists=${dir.isDirectory} " +
+            "sizeMB=${"%.1f".format(sizeMb)} entries=$names"
+    }
+
     private fun pidOf(p: Process): Long {
         return try {
             val f = p.javaClass.getDeclaredField("pid").apply { isAccessible = true }

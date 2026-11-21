@@ -11,6 +11,7 @@
 | --- | --- | --- |
 | v1.0 | 2026-11-20 | 初稿：nodejs-mobile 承载 dsh-only 薄服务 + Capacitor WebView 套壳。 |
 | v1.1 | 2026-11-21 | 评审整改：①承载由 nodejs-mobile 改为 **PRoot + Ubuntu + Node 22/24**（原方案受 Node 18 限制无法运行 dsh 栈）；②补齐打包路径、进程生命周期、能力面、发布合规与测试策略；③token 鉴权 / 接口鉴权 / 固定端口风险记入 §11「暂缓事项」，本期不实现。 |
+| v1.2 | 2026-11-21 | 构建实测整改：①debug APK 已在本机产出（JDK21+Gradle8.11+AGP8.7.2+SDK35）；②zstd-jni 无 Android ABI，运行时层改 `.tgz` + 内置 `GZIPInputStream`（偏差②）；③真机首启报「rootfs 内缺少 node」，定位为 `ensure()` 并发竞态（onCreate 后台线程 × onStart 双跑共用 tmp），修复见 §7.1（`@Synchronized` + 哨兵校验 + 自愈）；④资产扩展名取 `.tgz` 因 aapt2 会解压并改写 `assets/**.gz` 名（偏差④）。 |
 
 本文档是 ADR-0008 的**可落地工程蓝图**：把已收敛的决策展开为架构图、工程结构、模块改造、构建打包、生命周期状态机、分阶段实施计划与验收标准。**决策本身以 ADR-0008 为准，本文件只回答"怎么做"。**
 
@@ -402,6 +403,7 @@ Application.onCreate / Service.onCreate
 | 隧道断开 | 薄服务 hostReady 置 false，web 端显示断线占位；重连由 `autoConnectThinHost` 或用户操作触发。 |
 
 - **不要在 `onStart` 时与 `onStop` 的回收竞态**：`start()` 前必须 `await` 旧进程完全回收（SIGTERM 后至多 3s 的 `SIGKILL` 完成）再 spawn 新进程；否则快速前后台切换会同时存在新旧进程，撞 `3801` 端口 `EADDRINUSE`。`NodeRuntimeManager.start()` 内部串行化：任何时刻至多一个 proot 子进程存活。
+- **`ensure()` 必须单飞**：`Application.onCreate` 的后台线程与 `MainActivity.onStart → start()` 会**并发**调用 `RootfsInstaller.ensure()`。若不加锁，两条路径共用 `runtime/rootfs.tmp`，会互相删除 tmp/目标目录，产生「流程正常返回但 rootfs 残缺（缺 `usr/local/bin/node`）」的竞态——真机实测即报「rootfs 内缺少 node」。修复：`ensure()` 加 `@Synchronized`；解压后按哨兵（rootfs 的 `usr/local/bin/node`、app 的 `bin/thin-server.js`）校验，残缺即抛错；`spawnAndAwait` 与 `ensureLayout` 的缓存也过哨兵，命中残缺目录则删除重建（自愈）。
 
 - **不要用 `onPause`**：对话框、通知栏、权限弹窗都可能触发，会误停服务。
 - 旋转/多窗口：`android:configChanges` 避免 Activity 重建；进程管理放在 Application/Service 单例，不绑定 Activity 生命周期。

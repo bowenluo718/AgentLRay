@@ -172,6 +172,17 @@ SSE 连续 5 分钟（P0-A 验收原文）。
     导致 `RootfsInstaller` 找不到资产 → 资产统一改名为 `.tgz`。
 - 工具链获取脚本：`android/scripts/fetch-proot.sh`（Termux aarch64 预编译 proot/loader/libtalloc/
   libandroid-shmem，幂等）。
+- **真机首启（2026-11-21，用户实测）**：APK 安装启动后弹「本地薄服务启动失败 / rootfs 内缺少
+  node：/data/user/0/com.agentlray.app/files/runtime/rootfs/usr/local/bin/node」。
+  - 定位：`RootfsInstaller.ensure()` 未加锁，而 `App.onCreate` 后台线程与 `MainActivity.onStart →
+    runtime.start()` **并发双跑**，共用 `runtime/rootfs.tmp` 互相删除 tmp/目标目录 → 解压流程正常
+    返回但 rootfs 残缺；且 `isReady` 只看版本标记，半成品目录会被判为就绪。
+  - 本机复核：用 JDK + commons-compress 1.27 对同一 `.tgz` 跑等价解压，**8274 条目 /
+    node 118,321,040B / exec=true**，证明资产与解压代码本身无误，问题在并发/就绪判定。
+  - 修复：`ensure()` 加 `@Synchronized` 单飞；解压后按哨兵校验（rootfs=`usr/local/bin/node`、
+    app=`bin/thin-server.js`），残缺抛错；`isReady`、`App.ensureLayout` 缓存、`spawnAndAwait`
+    均过哨兵，命中残缺目录则删除重建（自愈）；解压进度/条目数/耗时写入日志环供错误屏展示。
+  - **待复验**：重装 APK 后首启应直接进入 UI；若仍失败，错误屏会带 rootfs 顶层条目与体积。
 
 ---
 

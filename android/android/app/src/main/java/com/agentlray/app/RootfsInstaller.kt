@@ -7,6 +7,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.util.zip.GZIPInputStream
 import org.json.JSONObject
 import java.io.File
+import java.io.BufferedInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.security.MessageDigest
@@ -31,6 +32,8 @@ import java.security.MessageDigest
 class RootfsInstaller(
     private val context: Context,
     private val filesDir: File,
+    /** 进度/失败诊断输出（接入 RuntimeLogRing，供错误屏展示）。 */
+    private val logger: (String) -> Unit = {},
 ) {
     private val abi: String = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
     private val assetAbi: String = when {
@@ -49,7 +52,14 @@ class RootfsInstaller(
         val thinServerEntry: File get() = File(appDir, "bin/thin-server.js")
     }
 
-    /** 计算布局并确保 rootfs/app 已解压到目标版本（仅在首次或升级执行）。 */
+    /**
+     * 计算布局并确保 rootfs/app 已解压到目标版本（仅在首次或升级执行）。
+     *
+     * `@Synchronized` 单飞：`App.onCreate` 的后台线程与 `MainActivity.onStart → runtime.start()`
+     * 会并发调用本方法；若不加锁，两条路径共用 `runtime/rootfs.tmp`，会互相删除 tmp/目标目录，
+     * 产生「解压流程正常返回但 target 体积残缺（如缺 usr/local/bin/node）」的竞态。
+     */
+    @Synchronized
     fun ensure(): Layout {
         val runtimeDir = File(filesDir, "runtime").apply { mkdirs() }
         val rootfsDir = File(runtimeDir, "rootfs")
@@ -62,7 +72,9 @@ class RootfsInstaller(
         copyNativeLibs(libDir)
 
         val version = buildVersionTag()
-        if (!isReady(rootfsDir, version)) {
+        // 就绪判定除版本标记外，还要求关键路径存在：陈旧/半成品目录（历史竞态或进程被杀）
+        // 会被判定为「未就绪」并自动重建，而不是把残缺 rootfs 交给运行时。
+        if (!isReady(rootfsDir, version, File(rootfsDir, NODE_REL))) {
             extractLayer(
                 target = rootfsDir,
                 versionMarker = File(runtimeDir, ".rootfs.version"),
@@ -70,7 +82,7 @@ class RootfsInstaller(
                 assetNames = listOf("rootfs-$assetAbi.tgz", "rootfs-$assetAbi.manifest.json"),
             )
         }
-        if (!isReady(appDir, version)) {
+        if (!isReady(appDir, version, File(appDir, THIN_SERVER_REL))) {
             extractLayer(
                 target = appDir,
                 versionMarker = File(appDir, ".version"),
@@ -123,24 +135,35 @@ class RootfsInstaller(
         return "$name-$code-$assetAbi"
     }
 
-    private fun isReady(target: File, version: String): Boolean {
+    private fun isReady(target: File, version: String, required: File): Boolean {
         val marker = if (target.name == "rootfs") File(target.parentFile, ".rootfs.version") else File(target, ".version")
         return target.isDirectory && target.list()?.isNotEmpty() == true &&
-            marker.isFile && marker.readText().trim() == version
+            marker.isFile && marker.readText().trim() == version &&
+            required.isFile
     }
 
     private fun extractLayer(target: File, versionMarker: File, version: String, assetNames: List<String>) {
         val tarName = assetNames[0]
         val manifestName = assetNames[1]
+        val required = requiredPathFor(tarName)
         Log.i(TAG, "解压运行时层 $tarName → $target")
+        logger("解压 $tarName → ${target.name}")
         val manifest = readManifest(manifestName)
         verifySha256(tarName, manifest.optString("sha256"))
 
         val tmp = File(target.parentFile, "${target.name}.tmp")
         if (tmp.exists()) tmp.deleteRecursively()
         tmp.mkdirs()
+        val startedAt = System.currentTimeMillis()
         try {
-            untarGzip(tarName, tmp)
+            val entries = untarGzip(tarName, tmp)
+            val secs = (System.currentTimeMillis() - startedAt) / 1000.0
+            logger("解压 $tarName 完成：$entries 条目 / ${"%.1f".format(secs)}s")
+            // 解压后校验：防止「流程正常结束但内容残缺」（磁盘/流异常、并发残留）静默通过。
+            val sentinel = File(tmp, required)
+            if (!sentinel.isFile) {
+                throw IllegalStateException("解压结果残缺：$tarName 缺少 $required（$entries 条目）")
+            }
             // 原子替换
             if (target.exists()) target.deleteRecursively()
             if (!tmp.renameTo(target)) {
@@ -150,12 +173,18 @@ class RootfsInstaller(
             }
             versionMarker.parentFile?.mkdirs()
             versionMarker.writeText(version)
+            logger("运行时层就绪：${target.name}（$entries 条目）")
         } catch (e: Exception) {
             Log.e(TAG, "解压失败：$tarName", e)
+            logger("解压失败 $tarName：${e.message}")
             tmp.deleteRecursively()
             throw IllegalStateException("运行时解压失败：$tarName（${e.message}）", e)
         }
     }
+
+    /** 各层的完整性哨兵（相对 target 根）。 */
+    private fun requiredPathFor(assetName: String): String =
+        if (assetName.startsWith("rootfs-")) NODE_REL else THIN_SERVER_REL
 
     private fun readManifest(name: String): JSONObject {
         return context.assets.open("runtime/$name").use { input ->
@@ -185,16 +214,22 @@ class RootfsInstaller(
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** 解压 .tgz 到 dest；保留目录/文件/符号链接/硬链接与 POSIX 权限。 */
-    private fun untarGzip(assetName: String, dest: File) {
+    /** 解压 .tgz 到 dest；保留目录/文件/符号链接/硬链接与 POSIX 权限。返回条目数。 */
+    private fun untarGzip(assetName: String, dest: File): Int {
         val destCanonical = dest.canonicalFile
+        // 1MB 缓冲：逐字节读 AssetInputStream 会显著拖慢 76MB 资产的首启解压。
         context.assets.open("runtime/$assetName").use { raw ->
-            GZIPInputStream(raw).use { gz ->
-                TarArchiveInputStream(gz).use { tar ->
-                    var entry: TarArchiveEntry? = tar.nextEntry as? TarArchiveEntry
-                    while (entry != null) {
-                        extractEntry(tar, entry, destCanonical)
-                        entry = tar.nextEntry as? TarArchiveEntry
+            BufferedInputStream(raw, 1 shl 20).use { buf ->
+                GZIPInputStream(buf).use { gz ->
+                    TarArchiveInputStream(gz).use { tar ->
+                        var entry: TarArchiveEntry? = tar.nextEntry as? TarArchiveEntry
+                        var count = 0
+                        while (entry != null) {
+                            extractEntry(tar, entry, destCanonical)
+                            count++
+                            entry = tar.nextEntry as? TarArchiveEntry
+                        }
+                        return count
                     }
                 }
             }
@@ -247,5 +282,11 @@ class RootfsInstaller(
 
     companion object {
         private const val TAG = "AgentLRayRootfs"
+
+        /** rootfs 完整性哨兵：node 二进制（启动前置检查同样依赖它）。 */
+        private const val NODE_REL = "usr/local/bin/node"
+
+        /** app bundle 完整性哨兵：薄服务入口。 */
+        private const val THIN_SERVER_REL = "bin/thin-server.js"
     }
 }

@@ -2,6 +2,7 @@ package com.agentlray.app
 
 import android.app.Application
 import android.util.Log
+import java.io.File
 import java.util.concurrent.Executors
 
 /**
@@ -27,7 +28,7 @@ class App : Application() {
         logRing = RuntimeLogRing()
         // P4 崩溃基线：未捕获异常 → 堆栈 + 运行时日志尾部落盘（Sentry 接入点，§7.5）。
         CrashLog.install(this, logRing)
-        installer = RootfsInstaller(this, filesDir)
+        installer = RootfsInstaller(this, filesDir) { msg -> logRing.append("", msg) }
         runtime = NodeRuntimeManager(this, logRing) {
             // 惰性求值：ensure() 完成后才有稳定布局；manager 每次 spawn 前重新取，兼弱升级。
             ensureLayout()
@@ -49,9 +50,17 @@ class App : Application() {
 
     private var cachedLayout: RootfsInstaller.Layout? = null
 
+    /**
+     * 取运行时布局（解压单飞在 `RootfsInstaller.ensure()` 内）。
+     *
+     * 缓存需通过哨兵校验：残缺 rootfs/app（历史竞态、进程被杀）不能因缓存命中而跳过重建。
+     */
     @Synchronized
     fun ensureLayout(): RootfsInstaller.Layout {
-        cachedLayout?.let { return it }
+        cachedLayout?.let { layout ->
+            if (layout.nodeBin.isFile && File(layout.appDir, "bin/thin-server.js").isFile) return layout
+            cachedLayout = null
+        }
         val layout = installer.ensure()
         cachedLayout = layout
         return layout
