@@ -118,6 +118,22 @@ proot --kill-on-exit -0 -r <filesDir>/runtime/rootfs \
 - [ ] 备份不含 `.agentlray`；非 127.0.0.1 明文被拒；占用 3801 时不加载 WebView；
 - [ ] APK 体积与首启解压后 filesDir 占用记录（预算 APK ≤350MB）。
 
+## 调试入口：导出用户配置
+
+debug 构建在界面右下角悬浮「同步配置」按钮（`MainActivity.installSyncFab`）：点击后把应用私有目录
+`filesDir/.agentlray`（`hosts.json`/`settings.json`/`secret`/dsh 凭据）**递归同步**到
+
+```
+/sdcard/Android/data/com.agentlray.app/files/agentlray
+```
+
+- 选**应用专属外部目录**（`Context.getExternalFilesDir(null)`）：免任何存储权限，且手机文件管理器
+  可直接浏览 `Android/data/<pkg>/files/`（无需 adb `run-as`）。
+- 实现：`DataDirSyncer`（镜像覆盖拷贝，不删目标侧多余文件；符号链接/特殊文件跳过），结果计数
+  与失败项经 Toast 展示，同时写入运行日志环。
+- 拷贝在后台线程执行（`agentlray-sync`），完成后回主线程提示。
+- `secret` 为 AES-256-GCM 密文，导出后仍是密文（设计如此）。
+
 ## 已知偏差 / 待验证项
 
 1. **目录布局**：design §3 的扁平树按标准 Capacitor 布局落在 `android/android/`（`cap sync` 要求）。

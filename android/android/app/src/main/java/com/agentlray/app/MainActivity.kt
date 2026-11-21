@@ -1,9 +1,15 @@
 package com.agentlray.app
 
 import android.app.AlertDialog
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.widget.Toast
 import com.getcapacitor.BridgeActivity
 
 /**
@@ -16,6 +22,10 @@ import com.getcapacitor.BridgeActivity
  * - 失败：弹出含日志尾部的错误对话框，可「重试」重启运行时。
  *
  * 注意（§7.2）：不用 onPause（权限弹窗/通知栏会误停）；旋转不重建（configChanges 见 Manifest）。
+ *
+ * 调试入口：debug 构建在右下角悬浮「同步配置」按钮，把 `filesDir/.agentlray` 递归同步到
+ * 应用专属外部目录 `/sdcard/Android/data/<pkg>/files/agentlray`（见 [DataDirSyncer]，
+ * 免存储权限），供手机文件管理器直接查看用户配置。
  */
 class MainActivity : BridgeActivity() {
 
@@ -29,6 +39,7 @@ class MainActivity : BridgeActivity() {
         super.onCreate(savedInstanceState)
         // 本地插件注册（Capacitor 7：super 之后注册）。
         registerPlugin(SaveFilePlugin::class.java)
+        if (BuildConfig.DEBUG) installSyncFab()
 
         val runtime = App.instance.runtime
         runtime.onReady = { runOnUiThread { loadThinUi() } }
@@ -54,6 +65,56 @@ class MainActivity : BridgeActivity() {
         errorDialog?.dismiss()
         if (isFinishing) App.instance.runtime.killNow()
         super.onDestroy()
+    }
+
+    // ---- 调试：同步 .agentlray 到 /sdcard/agentlray ----
+
+    /** 右下角悬浮按钮（debug 构建才有）。 */
+    private fun installSyncFab() {
+        val density = resources.displayMetrics.density
+        val size = (56 * density).toInt()
+        val margin = (16 * density).toInt()
+        val fab = TextView(this).apply {
+            text = "同步\n配置"
+            setTextColor(Color.WHITE)
+            textSize = 11f
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(0xFF2E7D6B.toInt())
+            }
+            elevation = 6 * density
+            contentDescription = "同步 .agentlray 到 /sdcard/agentlray"
+            setOnClickListener { onSyncClicked() }
+        }
+        val lp = FrameLayout.LayoutParams(size, size, Gravity.END or Gravity.BOTTOM).apply {
+            setMargins(margin, margin, margin, margin + (72 * density).toInt())
+        }
+        addContentView(fab, lp)
+    }
+
+    private fun onSyncClicked() = startSync()
+
+    private fun startSync() {
+        val dst = DataDirSyncer.targetDir(this)
+        Toast.makeText(this, "开始同步 .agentlray → $dst", Toast.LENGTH_SHORT).show()
+        // 拷贝可能涉及较多文件，放后台线程；结果回主线程提示并写日志环。
+        Thread({
+            val result = try {
+                DataDirSyncer.sync(this)
+            } catch (e: Exception) {
+                DataDirSyncer.Result(0, 0, 0, listOf("同步异常：${e.message}"))
+            }
+            val missing = if (result.ok) DataDirSyncer.verify(this) else emptyList()
+            val text = buildString {
+                append(result.summary())
+                if (missing.isNotEmpty()) append("\n校验缺失：${missing.joinToString("、")}")
+            }
+            App.instance.logRing.append("", text)
+            runOnUiThread {
+                Toast.makeText(this, text, Toast.LENGTH_LONG).show()
+            }
+        }, "agentlray-sync").apply { isDaemon = true }.start()
     }
 
     /** 就绪后加载本地薄服务页面（仅当 url 不是薄服务时才导航，避免每次 onStart 重载闪烁）。 */
