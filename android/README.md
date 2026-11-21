@@ -23,38 +23,49 @@ android/
 │   │       ├── java/com/agentlray/app/   # Kotlin：App/MainActivity/NodeRuntimeManager/RootfsInstaller/
 │   │       │                            #         RuntimeLogRing/RuntimeWatchdog/SecurityConfig/SaveFilePlugin
 │   │       ├── res/xml/{network_security_config,data_extraction_rules,file_paths}.xml
-│   │       ├── assets/runtime/           # rootfs-<abi>.tar.zst + app-bundle.tar.zst（脚本产出，不入库）
+│   │       ├── assets/runtime/           # rootfs-<abi>.tgz + app-bundle.tgz（脚本产出，不入库）
 │   │       └── jniLibs/arm64-v8a/        # libproot.so / libproot-loader.so（P0 产出，不入库）
 └── scripts/
-    ├── build-rootfs.sh                   # debootstrap + Node tarball → rootfs-<abi>.tar.zst
-    ├── bundle-app.mjs                    # 收集 bin/lib/frontend/dist/node_modules → app-bundle.tar.zst
+    ├── build-rootfs.sh                   # debootstrap + Node tarball → rootfs-<abi>.tgz
+    ├── bundle-app.mjs                    # 收集 bin/lib/frontend/dist/node_modules → app-bundle.tgz
     └── package-runtime.mjs               # tar+zstd 压缩 + SHA-256 清单（供 RootfsInstaller 校验）
 ```
 
 ## 构建步骤
 
+> **环境**：JDK 21（Capacitor 7 的 `capacitor-android` 要求 Java 21）+ Android SDK（compileSdk 35 / build-tools 35）。
+> 本仓库的 `app/build.gradle` 自行设置 Kotlin/Java 17，但 Gradle 进程需 JDK 21。
+
 ```bash
 # 0) 仓库根：构建前端 dist（app bundle 依赖它）
 cd <repo> && npm run build:ui
 
-# 1) 前端运行时闭包 → app-bundle.tar.zst（本机已可运行）
+# 1) 前端运行时闭包 → app-bundle.tgz（本机已可运行）
 node android/scripts/bundle-app.mjs
-#   产物：android/build/app-bundle/{staging,app-bundle.tar.zst,app.manifest.json}
+#   产物：android/build/app-bundle/{staging,app-bundle.tgz,app.manifest.json}
 
-# 2) rootfs（需 Linux + root/debootstrap；交叉架构需 qemu-user）
-bash android/scripts/build-rootfs.sh arm64
-#   产物：android/android/app/src/main/assets/runtime/rootfs-arm64.tar.zst(+manifest)
+# 2) rootfs：二选一
+#    a) 有 root/debootstrap/qemu-user：bash android/scripts/build-rootfs.sh arm64
+#    b) 无 root（推荐 CI/开发机）：下载 Ubuntu base arm64 + Node 官方 arm64，手工组装
+#       curl -O https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/ubuntu-base-22.04.5-base-arm64.tar.gz
+#       tar -xzf ubuntu-base-22.04.5-base-arm64.tar.gz -C rootfs/
+#       tar -xJf node-v22.15.0-linux-arm64.tar.xz -C rootfs/usr/local --strip-components=1
+#       # 补 ca-certificates（Mozilla bundle）与 tzdata，再：
+#       node android/scripts/package-runtime.mjs --src rootfs --out .../rootfs-arm64.tgz \
+#         --manifest .../rootfs-arm64.manifest.json --version node22.15.0-arm64
 
-# 3) PRoot 二进制（P0：从源码重编译，放入 jniLibs/arm64-v8a/libproot.so + libproot-loader.so）
-#    需 -Wl,-z,max-page-size=16384（Android 15+ 16KB 页）
+# 3) PRoot 二进制：Termux 官方 aarch64 预编译（无 NDK 交叉编译链时）
+bash android/scripts/fetch-proot.sh arm64
+#   → jniLibs/arm64-v8a/libproot.so + libproot-loader.so
+#   → assets/runtime/lib/{libtalloc.so.2,libandroid-shmem.so}
 
-# 4) 把 bundle 放到 assets/runtime 并同步 Capacitor 原生工程
-cp android/build/app-bundle/app-bundle.tar.zst android/build/app-bundle/app.manifest.json \
+# 4) 把 bundle/rootfs 放到 assets/runtime 并同步 Capacitor 原生工程
+cp android/build/app-bundle/app-bundle.tgz android/build/app-bundle/app.manifest.json \
    android/android/app/src/main/assets/runtime/
 cd android && npm install && npx cap sync android
 
-# 5) 构建 APK（需 Android SDK / JDK 17）
-cd android/android && ./gradlew assembleRelease    # 或 assembleDebug
+# 5) 构建 APK（需 Android SDK / build-tools 35 / **JDK 21**）
+cd android/android && ./gradlew assembleDebug     # 或 assembleRelease
 
 # 6) P4 正式签名（可选）：release 会经环境变量注入 keystore（不入库）
 #    AGENTLRAY_KEYSTORE=... AGENTLRAY_KEYSTORE_PASSWORD=... \
@@ -109,9 +120,10 @@ proot --kill-on-exit -0 -r <filesDir>/runtime/rootfs \
 ## 已知偏差 / 待验证项
 
 1. **目录布局**：design §3 的扁平树按标准 Capacitor 布局落在 `android/android/`（`cap sync` 要求）。
-2. **解压实现**：`RootfsInstaller` 用 `org.apache.commons:commons-compress` + `com.github.luben:zstd-jni`
-   解压 `.tar.zst`（支持符号/硬链接与权限位）。**zstd-jni 的 Android ABI 兼容性需 P0 验证**；
-   若不兼容，改用随包静态 `zstd`/`tar` 或改存未压缩 tar。
+2. **解压实现**：`RootfsInstaller` 用 `org.apache.commons:commons-compress` + Android 内置 `GZIPInputStream`
+   解压 `.tgz`（支持符号/硬链接与权限位）。原设计为 `.tar.zst` + `zstd-jni`，但 zstd-jni
+   **无 Android ABI 分类器**（`linux_aarch64` 为 glibc 链接，bionic 无法 `dlopen`），按 design 的
+   「解压兼容性兜底」改为 gzip：零原生依赖、APK 增大约 20MB（rootfs 52MB→约 70MB）。
 3. **服务端导出桥接**：Android WebView 不支持 `<a href>` 服务端附件下载，`runExport` 的 md/html
    分支在 `nativeSave` 时改走 `fetch(exportUrl) → saveTextFile`（`frontend/src/views/sessions/exports.ts`）；
    桌面/常规浏览器仍走浏览器下载。

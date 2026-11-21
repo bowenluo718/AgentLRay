@@ -114,7 +114,7 @@ class NodeRuntimeManager(
             process = proc
             running.set(true)
         }
-        writePid(proc.pid())
+        writePid(pidOf(proc))
 
         // 读 stdout/stderr → 环形缓冲（独立线程，直到流关闭）。
         Thread({
@@ -155,8 +155,25 @@ class NodeRuntimeManager(
         }
     }
 
+    /**
+     * 取子进程 pid：Android 的 `java.lang.Process` 未公开 `pid()`（仅桌面 JDK 有），
+     * 反射 libcore `ProcessImpl.pid` 字段；失败返回 -1（watchdog 会跳过该 pid 文件）。
+     */
+    private fun pidOf(p: Process): Long {
+        return try {
+            val f = p.javaClass.getDeclaredField("pid").apply { isAccessible = true }
+            (f.get(p) as? Number)?.toLong() ?: -1L
+        } catch (e: Exception) {
+            Log.w(TAG, "读取子进程 pid 失败：${e.message}")
+            -1L
+        }
+    }
+
     private fun buildCommand(layout: RootfsInstaller.Layout, proot: File): List<String> {
         val n = layout.nodeBin
+        // proot 的 DT_RUNPATH 指向 Termux 前缀（宿主不存在）；用 LD_LIBRARY_PATH 指向
+        // filesDir/runtime/lib（libtalloc/libandroid-shmem，RootfsInstaller 已拷）。
+        val libDir = File(layout.runtimeDir, "lib").absolutePath
         return listOf(
             proot.absolutePath,
             "--kill-on-exit",
@@ -169,6 +186,7 @@ class NodeRuntimeManager(
             "-b", "/sys",
             "-w", "/opt/agentlray",
             "/usr/bin/env",
+            "LD_LIBRARY_PATH=$libDir",
             "AGENTLRAY_HOME=/home/agentlray",
             "AGENTLRAY_DISABLE_SSH=1",
             "AGENTLRAY_NATIVE_SAVE=1",

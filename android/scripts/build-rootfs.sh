@@ -5,7 +5,7 @@
 #   bash scripts/build-rootfs.sh arm64
 #   bash scripts/build-rootfs.sh x86_64
 #
-# 产物：android/build/rootfs/<abi>/ 与 assets/runtime/rootfs-<abi>.tar.zst(+manifest)
+# 产物：android/build/rootfs/<abi>/ 与 assets/runtime/rootfs-<abi>.tgz(+manifest)
 #
 # 说明：
 # - Ubuntu bookworm minbase + Node 官方 linux-<arch> tarball（Node ≥22.15，满足 require(esm)
@@ -62,13 +62,13 @@ echo "==> ldd /usr/local/bin/node"
 chroot "$ROOTFS" ldd /usr/local/bin/node > "$BUILD_DIR/ldd-node.txt" || true
 cat "$BUILD_DIR/ldd-node.txt"
 
-# 6) 打包（tar + zstd；manifest sha256 供 RootfsInstaller 校验）
+# 6) 打包（tar + gzip；manifest sha256 供 RootfsInstaller 校验）
 mkdir -p "$ASSETS"
 node "$REPO_ROOT/android/scripts/package-runtime.mjs" \
   --src "$ROOTFS" \
-  --out "$ASSETS/rootfs-${ABI}.tar.zst" \
+  --out "$ASSETS/rootfs-${ABI}.tgz" \
   --manifest "$ASSETS/rootfs-${ABI}.manifest.json" \
   --version "node${NODE_VERSION}-${UBUNTU_SUITE}-${ABI}"
 
-echo "==> 完成：$ASSETS/rootfs-${ABI}.tar.zst"
-du -sh "$ASSETS/rootfs-${ABI}.tar.zst" || true
+echo "==> 完成：$ASSETS/rootfs-${ABI}.tgz"
+du -sh "$ASSETS/rootfs-${ABI}.tgz" || true

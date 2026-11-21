@@ -3,7 +3,7 @@
 // - minSdk 26（Android 8.0+），ABI arm64-v8a 为主；
 // - useLegacyPackaging=true → 安装时把 jniLibs（libproot.so / libproot-loader.so）解压到
 //   nativeLibraryDir，绕过 Android 10+ 可写目录 exec 限制（§4.3）；
-// - commons-compress + zstd-jni 用于运行时 .tar.zst 解压（RootfsInstaller）。
+// - commons-compress 用于运行时 .tgz 解压（RootfsInstaller）。
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
@@ -84,7 +84,8 @@ dependencies {
     implementation "androidx.core:core-ktx:$androidxCoreVersion"
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
 
-    // 运行时解压：zstd 解压 + tar 解析（支持符号/硬链接与权限位）。
-    implementation "com.github.luben:zstd-jni:$zstdVersion"
+    // 运行时解压：gzip（Android 内置 GZIPInputStream）+ commons-compress tar 解析。
+    // 原设计用 zstd-jni，但其无 Android ABI 分类器（linux_aarch64 为 glibc，bionic 无法加载），
+    // 按 design「解压兼容性兜底」改用 gzip。
     implementation "org.apache.commons:commons-compress:$commonsCompressVersion"
 }

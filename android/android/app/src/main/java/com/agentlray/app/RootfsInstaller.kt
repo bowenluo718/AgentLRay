@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import com.github.luben.zstd.ZstdInputStream
+import java.util.zip.GZIPInputStream
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -20,13 +20,13 @@ import java.security.MessageDigest
  *   app/           AgentLRay 运行时闭包（package.json/bin/lib/frontend/dist/node_modules）
  *   .agentlray/    持久数据（hosts.json/secret/dsh 凭据），升级永不覆盖
  *
- * 解压来源为 APK assets/runtime/ 下的 `.tar.zst` + `.manifest.json`：
+ * 解压来源为 APK assets/runtime/ 下的 `.tgz` + `.manifest.json`：
  *   - SHA-256 校验（防解压损坏/篡改），失败重建；
  *   - 「临时目录 + rename」原子替换，避免半包；
  *   - 保留 POSIX 权限位与符号/硬链接（Ubuntu 合并 /usr 依赖链接；node 二进制需可执行）。
  *
- * 说明：解压用 Commons Compress（TarArchiveInputStream）+ zstd-jni（ZstdInputStream）实现，
- * 不依赖系统 tar/zstd（Android 无 zstd，toybox tar 不可靠）。
+ * 说明：解压用 Commons Compress（TarArchiveInputStream）+ 内置 GZIPInputStream 实现，
+ * 不依赖系统 tar/gzip 命令（toybox tar 不可靠；gzip 解压走 JDK）。
  */
 class RootfsInstaller(
     private val context: Context,
@@ -56,13 +56,18 @@ class RootfsInstaller(
         val appDir = File(filesDir, "app")
         val dataDir = File(filesDir, ".agentlray").apply { mkdirs() }
 
+        // PRoot 运行库（libtalloc/libandroid-shmem，文件名含 .2，jniLibs 不收）→ filesDir/runtime/lib，
+        // NodeRuntimeManager 设 LD_LIBRARY_PATH 指向此处。
+        val libDir = File(runtimeDir, "lib")
+        copyNativeLibs(libDir)
+
         val version = buildVersionTag()
         if (!isReady(rootfsDir, version)) {
             extractLayer(
                 target = rootfsDir,
                 versionMarker = File(runtimeDir, ".rootfs.version"),
                 version = version,
-                assetNames = listOf("rootfs-$assetAbi.tar.zst", "rootfs-$assetAbi.manifest.json"),
+                assetNames = listOf("rootfs-$assetAbi.tgz", "rootfs-$assetAbi.manifest.json"),
             )
         }
         if (!isReady(appDir, version)) {
@@ -70,13 +75,36 @@ class RootfsInstaller(
                 target = appDir,
                 versionMarker = File(appDir, ".version"),
                 version = version,
-                assetNames = listOf("app-bundle.tar.zst", "app.manifest.json"),
+                assetNames = listOf("app-bundle.tgz", "app.manifest.json"),
             )
         }
         // bind target 预创建（PRoot -b 目标必须存在；见 §4.2）。
         File(rootfsDir, "opt/agentlray").mkdirs()
         File(rootfsDir, "home/agentlray/.agentlray").mkdirs()
         return Layout(rootfsDir, appDir, dataDir, runtimeDir)
+    }
+
+    private fun copyNativeLibs(libDir: File) {
+        val names = try {
+            context.assets.list("runtime/lib") ?: emptyArray()
+        } catch (e: Exception) {
+            emptyArray()
+        }
+        if (names.isEmpty()) return
+        libDir.mkdirs()
+        for (name in names) {
+            val dest = File(libDir, name)
+            if (dest.isFile && dest.length() > 0) continue
+            try {
+                context.assets.open("runtime/lib/$name").use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out) }
+                }
+                dest.setExecutable(false, false)
+                dest.setReadable(true, false)
+            } catch (e: Exception) {
+                Log.w(TAG, "拷贝运行库失败：$name", e)
+            }
+        }
     }
 
     private fun buildVersionTag(): String {
@@ -112,7 +140,7 @@ class RootfsInstaller(
         if (tmp.exists()) tmp.deleteRecursively()
         tmp.mkdirs()
         try {
-            untarZst(tarName, tmp)
+            untarGzip(tarName, tmp)
             // 原子替换
             if (target.exists()) target.deleteRecursively()
             if (!tmp.renameTo(target)) {
@@ -157,19 +185,15 @@ class RootfsInstaller(
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    /** 解压 .tar.zst 到 dest；保留目录/文件/符号链接/硬链接与 POSIX 权限。 */
-    private fun untarZst(assetName: String, dest: File) {
+    /** 解压 .tgz 到 dest；保留目录/文件/符号链接/硬链接与 POSIX 权限。 */
+    private fun untarGzip(assetName: String, dest: File) {
         val destCanonical = dest.canonicalFile
         context.assets.open("runtime/$assetName").use { raw ->
-            ZstdInputStream(raw).use { zstd ->
-                TarArchiveInputStream(zstd).use { tar ->
+            GZIPInputStream(raw).use { gz ->
+                TarArchiveInputStream(gz).use { tar ->
                     var entry: TarArchiveEntry? = tar.nextEntry as? TarArchiveEntry
                     while (entry != null) {
-                        try {
-                            extractEntry(tar, entry, destCanonical)
-                        } finally {
-                            tar.closeEntry()
-                        }
+                        extractEntry(tar, entry, destCanonical)
                         entry = tar.nextEntry as? TarArchiveEntry
                     }
                 }

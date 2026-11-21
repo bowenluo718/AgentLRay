@@ -8,7 +8,7 @@ local.properties
 
 # Capacitor 原生工程由 `npx cap add android` 生成；来源覆盖文件（Kotlin/Manifest/res/脚本）
 # 入库，生成物中仅保留我们维护的部分。以下为随 app 打包的运行时资产，由脚本产出：
-android/app/src/main/assets/runtime/*.tar.zst
+android/app/src/main/assets/runtime/*.tgz
 android/app/src/main/assets/runtime/*.manifest.json
 android/app/src/main/jniLibs/**/*.so
 
@@ -16,3 +16,15 @@ android/app/src/main/jniLibs/**/*.so
 *.keystore
 *.jks
 keystore.properties
+
+# Capacitor `cap sync`/`cap update` 生成物（非来源覆盖）
+android/app/capacitor.build.gradle
+android/capacitor.settings.gradle
+android/capacitor-cordova-android-plugins/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/app/src/main/res/xml/config.xml
+
+# PRoot 运行库（fetch-proot.sh 从 Termux 仓库获取；libtalloc/libandroid-shmem 名称含 .2 不入 jniLibs）
+android/app/src/main/assets/runtime/lib/

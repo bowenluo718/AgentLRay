@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 主题（design-android-mobile-app §4.6）：Capacitor 模板 AppTheme 的本地副本，
+     去掉 splash/自定义颜色依赖（本工程无启动图资源），用 AppCompat DayNight。
+     来源：@capacitor/cli assets/android-template 的 styles.xml 精简版。 -->
+<resources>
+
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+    </style>
+
+    <style name="AppTheme.NoActionBar" parent="AppTheme" />
+
+    <style name="AppTheme.NoActionBarLaunch" parent="AppTheme" />
+
+</resources>

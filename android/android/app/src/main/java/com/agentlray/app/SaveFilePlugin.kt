@@ -27,7 +27,7 @@ class SaveFilePlugin : Plugin() {
     fun saveFile(call: PluginCall) {
         val base64 = call.getString("base64", "")
         val rawName = call.getString("fileName", "export.bin")
-        val mimeType = call.getString("mimeType", "application/octet-stream")
+        val mimeType = call.getString("mimeType", "application/octet-stream") ?: "application/octet-stream"
         if (base64.isNullOrEmpty()) {
             call.reject("base64 必填")
             return

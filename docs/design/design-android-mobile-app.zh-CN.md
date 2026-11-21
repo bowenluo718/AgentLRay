@@ -143,8 +143,8 @@ android/
 │   │   ├── RuntimeWatchdog.kt           # 孤儿进程清理 / 退出重启退避
 │   │   └── SecurityConfig.kt            # 备份排除、WebView 加固、明文白名单
 │   ├── assets/runtime/
-│   │   ├── rootfs-arm64.tar.zst         # 最小 Ubuntu + Node（随 app 发布）
-│   │   └── app-bundle.tar.zst           # bin/lib/frontend/dist/node_modules/package.json
+│   │   ├── rootfs-arm64.tgz             # 最小 Ubuntu + Node（随 app 发布）
+│   │   └── app-bundle.tgz               # bin/lib/frontend/dist/node_modules/package.json
 │   ├── jniLibs/arm64-v8a/
 │   │   ├── libproot.so                  # proot 二进制（lib*.so 命名以绕过 Android 10+ exec 限制）
 │   │   └── libproot-loader.so           # proot loader
@@ -337,8 +337,8 @@ tar -xJf node-v22.x-linux-arm64.tar.xz -C rootfs/usr/local --strip-components=1
 mkdir -p rootfs/opt/agentlray rootfs/home/agentlray/.agentlray
 # 校验动态依赖
 chroot rootfs/ ldd /usr/local/bin/node
-# 打包
-tar --zstd -cf rootfs-arm64.tar.zst -C rootfs .
+# 打包（gzip；不用 .gz 后缀——aapt2 会解压 assets/**.gz 并改写文件名）
+tar -czf rootfs-arm64.tgz -C rootfs .
 ```
 
 - 记录 debootstrap 镜像快照/包清单、Node 版本与 SHA-256，产出 `rootfs.manifest.json`；
@@ -351,7 +351,7 @@ tar --zstd -cf rootfs-arm64.tar.zst -C rootfs .
 node android/scripts/bundle-app.mjs
 # 收集：package.json、bin/thin-server.js、lib/**（排除 lib/dsh/vendor/src）、
 #       frontend/dist/**、node_modules 运行时闭包
-# 产出：app-bundle.tar.zst + app.manifest.json（SHA-256 清单）
+# 产出：app-bundle.tgz + app.manifest.json（SHA-256 清单）
 ```
 
 **必须包含**：`package.json`（`bin/thin-server.js:24` 需要）、`frontend/dist`（`DIST_DIR` 依赖）、`@lukeburns/clatterjs` 及其嵌套依赖。
@@ -557,15 +557,15 @@ Application.onCreate / Service.onCreate
 | 决策收敛（ADR-0008，R2 修订为 PRoot） | ✅ 已完成（待 P0 验证） | [adr-0008](adr-0008-android-mobile-app.zh-CN.md) |
 | 完整工程蓝图（本文件） | ✅ 已完成 | 本文档 |
 | §5 仓库模块改造（hosts 守卫/lastHostId/mode capabilities/前端传输过滤/下载桥接） | ✅ 已实现 | `lib/hosts.js`（`sshDisabled`/`assertTransportAllowed`/`getLastHostId`/`setLastHostId`、`resolveThinBootHost` 优先 lastHostId + DISABLE_SSH 过滤）、`lib/routes/hosts.js`（GET `{lastHostId,hosts}`、PUT 透传、connect 写盘）、`lib/routes/mode.js`（capabilities）、`frontend/src/api/{types,client}.ts`、`frontend/src/store.ts`（`modeCapabilities`）、`frontend/src/components/HostFormDialog.tsx`（传输按 capabilities 过滤/默认）、`frontend/src/lib/download.ts`（nativeSave 桥接）+ 3 处调用（`exports.ts`/`promptsLib.ts`/`ReviewTransferPanel.tsx`）；测试 `test/thin-android-guards.test.js`（12 例），全量 **757/757** 通过（本轮新增版本兼容 6 例），`npm run build:ui` 通过 |
-| Android 工程骨架（`android/`） | 🟡 已落地（未构建/真机验证） | `android/{package.json,capacitor.config.ts,www/,README.md}`、`android/android/app/src/main/java/com/agentlray/app/{App,MainActivity,NodeRuntimeManager,RootfsInstaller,RuntimeLogRing,RuntimeWatchdog,SecurityConfig,SaveFilePlugin}.kt`、`AndroidManifest.xml`、`res/xml/{network_security_config,data_extraction_rules,file_paths}.xml`、`android/android/{build.gradle,settings.gradle,variables.gradle,app/build.gradle}`、`android/scripts/{build-rootfs.sh,bundle-app.mjs,package-runtime.mjs}`；`bundle-app.mjs` 本机实测产出 `app-bundle.tar.zst`（2.4MB）且 `require('@lukeburns/clatterjs'/'ws'/'express'/'zod')` 冒烟通过 |
-| P0 运行时/打包/生命周期/能力面/安全基线 | 🟡 源码就绪 + **静态推断**（真机待验） | 工程闭环见 `android/`；静态推断与三处高险（exec/16KB/zstd-jni ABI）见 `android/docs/p0-runtime-inference.zh-CN.md`；真机必验清单同上 |
+| Android 工程骨架（`android/`） | 🟡 已落地，**本机 debug APK 构建通过**（真机未验） | `android/{package.json,capacitor.config.ts,www/,README.md}`、`android/android/app/src/main/java/com/agentlray/app/{App,MainActivity,NodeRuntimeManager,RootfsInstaller,RuntimeLogRing,RuntimeWatchdog,SecurityConfig,SaveFilePlugin}.kt`、`AndroidManifest.xml`、`res/xml/{network_security_config,data_extraction_rules,file_paths}.xml`、`android/android/{build.gradle,settings.gradle,variables.gradle,app/build.gradle}`、`android/scripts/{build-rootfs.sh,bundle-app.mjs,package-runtime.mjs,fetch-proot.sh}`、`jniLibs/arm64-v8a/{libproot,libproot-loader}.so`、`assets/runtime/{rootfs-arm64.tgz,app-bundle.tgz}`；JDK 21 + Gradle 8.11 + AGP 8.7.2 本机 `:app:assembleDebug` 成功（`app-debug.apk` 96MB）|
+| P0 运行时/打包/生命周期/能力面/安全基线 | 🟡 APK 可构建 + 静态量测（真机待验） | 工程闭环见 `android/`；推断/量测与两处高险（exec、16KB 设备行为；zstd-jni ABI 已改 gzip 消除）见 `android/docs/p0-runtime-inference.zh-CN.md`；真机必验清单同上 |
 | P1 最小可运行壳 | 🟡 已实现（未真机构建/启动） | Capacitor 壳 + `MainActivity` 就绪门控 + `www/` 占位页 + `App` 单例启动 |
 | P2 dsh 连接闭环 | 🟡 已实现（未真机连远端验证） | dsh 登录/设备选择/隧道复用现有栈；**本轮补齐服务端导出桥接**：`frontend/src/views/sessions/exports.ts` 在 `nativeSave` 时 `fetch(exportUrl)→saveTextFile`，`serverExportFilename` 解析 `Content-Disposition` |
 | P3 健壮性 | 🟡 已实现（断线/版本兼容，SSE 真机待验） | 崩溃退避/前后台/孤儿清理/端口错误屏已落地；**本轮新增版本兼容**：`lib/version-compat.js`（单一真源判定）+ `/api/hosts` 序列化 `remoteVersion`/`compatible` + `HostCompatBanner.tsx` 升级提示；`test/version-compat.test.js`（6 例） |
 | P4 发布（签名/加固/Sentry/体积） | 🟡 部分实现 | **本轮**：release 签名经 env 注入（`app/build.gradle`）+ R8 压缩/混淆（`proguard-rules.pro`）+ 原生崩溃落盘基线（`CrashLog.kt`）；厂商加固 SDK / 正式 Sentry / AAB 分发链 / 体积实测待发布前完成 |
 | token 认证 / 接口鉴权 / 随机端口 | ⏸ 暂缓（§11） | — |
 
-> 实现偏差（记录在案）：①目录布局按标准 Capacitor 落在 `android/android/`（`cap sync` 要求），design §3 扁平树为其内容；②`.tar.zst` 解压用 `commons-compress` + `zstd-jni`（Android ABI 兼容性待 P0）；③前端下载桥接依赖 `window.Capacitor.Plugins.SaveFile` 探测，未引入 `@capacitor/core` 构建耦合。
+> 实现偏差（记录在案）：①目录布局按标准 Capacitor 落在 `android/android/`（`cap sync` 要求），design §3 扁平树为其内容；②原 `.tar.zst` + `zstd-jni` 方案经 Maven 核验**无 Android ABI 分类器**（`linux_aarch64` 为 glibc，bionic 无法加载），已改为 `.tgz` + Android 内置 `GZIPInputStream`（`commons-compress` 仅做 tar 解析）；③前端下载桥接依赖 `window.Capacitor.Plugins.SaveFile` 探测，未引入 `@capacitor/core` 构建耦合；④资产扩展名取 `.tgz` 而非 `.tar.gz`：aapt2 会解压 `assets/**.gz` 并把资产名改写为去后缀形式，导致运行时找不到文件。
 
 ---
 

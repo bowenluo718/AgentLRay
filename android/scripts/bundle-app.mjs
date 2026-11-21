@@ -6,13 +6,13 @@
 //
 // 用法：
 //   node scripts/bundle-app.mjs [--repo <AgentLRay 根>] [--staging <dir>]
-//       [--out <app-bundle.tar.zst>] [--manifest <app.manifest.json>] [--version <v>]
+//       [--out <app-bundle.tgz>] [--manifest <app.manifest.json>] [--version <v>]
 //
-// 输出：默认 <repo>/android/build/app-bundle/staging/ 与 <repo>/android/build/app-bundle/app-bundle.tar.zst。
+// 输出：默认 <repo>/android/build/app-bundle/staging/ 与 <repo>/android/build/app-bundle/app-bundle.tgz。
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compressToZstd, sha256, writeManifest } from './package-runtime.mjs';
+import { compressRuntime, sha256, writeManifest } from './package-runtime.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -98,7 +98,7 @@ async function main() {
   const repoRoot = path.resolve(args.repo ?? path.join(__dirname, '..', '..'));
   const buildDir = path.resolve(args.staging ?? path.join(repoRoot, 'android', 'build', 'app-bundle'));
   const staging = path.join(buildDir, 'staging');
-  const out = path.resolve(args.out ?? path.join(buildDir, 'app-bundle.tar.zst'));
+  const out = path.resolve(args.out ?? path.join(buildDir, 'app-bundle.tgz'));
   const manifestFile = path.resolve(args.manifest ?? path.join(buildDir, 'app.manifest.json'));
 
   const repoDist = path.join(repoRoot, 'frontend', 'dist');
@@ -124,12 +124,12 @@ async function main() {
   copyNodeModules(repoNodeModules, path.join(staging, 'node_modules'));
 
   // 压缩 + 清单
-  compressToZstd(staging, out);
+  compressRuntime(staging, out);
   const digest = await sha256(out);
   const repoVersion = readJson(path.join(repoRoot, 'package.json')).version ?? 'dev';
   const version = args.version && args.version !== 'true' ? args.version : repoVersion;
   await writeManifest(manifestFile, { version, sha256: digest, size: fs.statSync(out).size });
-  console.log(`✔ app-bundle.tar.zst  ${digest}  ${(fs.statSync(out).size / 1e6).toFixed(1)}MB`);
+  console.log(`✔ app-bundle.tgz  ${digest}  ${(fs.statSync(out).size / 1e6).toFixed(1)}MB`);
   console.log(`  staging: ${staging}`);
 }
 

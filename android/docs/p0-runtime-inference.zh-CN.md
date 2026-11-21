@@ -1,9 +1,9 @@
 # P0 运行时可行性推断（Android 移动端 App）
 
-> 类型：P0 门禁的**静态推断分析**。当前开发环境无 Android SDK/真机，无法做 APK 构建与真机冒烟；
-> 本文件基于既有源码证据、Android 平台机制与 PRoot/Node 官方产物，逐项推断 P0-A~P0-E 的可行性、
-> 风险与真机必验项。**推断 ≠ 验证**：每项结论都标注[证据]/[机制]/[推断]，真机实测前不得把推断
-> 当已通过。
+> 类型：P0 门禁的**静态推断 + 本机构建记录**。构建环境已自举（JDK 21 + Gradle 8.11 + Android SDK 35），
+> **debug APK 已产出**（见 §7）；仍**无 arm64 真机**，运行时行为（exec/16KB 设备行为/PRoot 启动）
+> 未实测。本文件基于源码证据、Android 平台机制与 PRoot/Node 官方产物逐项推断 P0-A~P0-E，
+> 标注[证据]/[机制]/[推断]/[实测]；真机实测前不得把推断当已通过。
 > 关联：[`docs/design/design-android-mobile-app.zh-CN.md`](../../docs/design/design-android-mobile-app.zh-CN.md)
 > （v1.1，§4 运行时 / §6 打包 / §7 生命周期 / §8 安全 / §9 P0 门禁）、[`adr-0008`](../../docs/design/adr-0008-android-mobile-app.zh-CN.md)。
 
@@ -13,12 +13,12 @@
 
 | P0 项 | 推断 | 确定性 | 真机必验 |
 | --- | --- | --- | --- |
-| P0-A 运行时可行性（exec/16KB/proot/rootfs） | **可行但有三处高险**：exec 限制、16KB 对齐、zstd-jni ABI | 中 | 必验，决定 go/no-go |
+| P0-A 运行时可行性（exec/16KB/proot/rootfs） | **可行，两处高险**：exec 限制（待真机）、16KB 设备行为（对齐已量测通过）；zstd-jni ABI 风险**已消除**（改 gzip） | 中 | 必验，决定 go/no-go |
 | P0-B 打包闭环（assets→filesDir/分层/升级） | **工程已闭环**，代码路径完整 | 高 | 全新/覆盖/清数据三路径 |
 | P0-C 生命周期（spawn/前后台/崩溃/孤儿/旋转） | **工程已闭环**，逻辑完整 | 高 | 前后台/崩溃/旋转/端口 |
 | P0-D 能力面（transports/nativeSave/导出桥接） | **工程已闭环** + 本轮补齐服务端导出桥接 | 高 | Android 下 ssh 隐藏 + 400 |
 | P0-E 安全基线（备份/明文/加固/端口错误屏） | **工程已闭环** | 高 | 备份排除/明文拒绝/端口占用 |
-| go/no-go 结论 | **代码侧可进入 P1–P4**；但 exec/16KB/zstd-jni 三处高险未实测前，发布链路仍阻塞 | — | 见 §8 |
+| go/no-go 结论 | **代码侧可进入 P1–P4 且 APK 可构建**；exec 与 16KB 真机行为未实测前，发布链路仍阻塞 | — | 见 §8 |
 
 ---
 
@@ -48,23 +48,36 @@
 **[证据]** 设计 §4.3 要求 proot 重编译加 `-Wl,-z,max-page-size=16384`；`jniLibs/README.md` 记录了
 该编译参数；`app/build.gradle` 以注释保留该约束。
 
-**[推断]** Node 官方 linux-arm64 二进制是否 16KB 对齐**未知**（官方 tarball 面向通用 Linux，
-未承诺 Android 16KB 页）。若 Node 或 proot 未对齐，16KB 设备上会启动失败。**必验**：在 16KB
-设备（如 Pixel 设备 API 35+）实测；或改用 16KB 对齐的 Node 构建。这是**高险**之一。
+**[实测]** 本机 `readelf -lW` 量测（2026-11-21）：
+- `libproot.so` LOAD `Align 0x4000`（16KB）、`libproot-loader.so` LOAD `Align 0x4000`；
+- rootfs 内 `usr/local/bin/node`、`libc.so.6`、`ld-linux-aarch64.so.1` 的 LOAD 均为 `Align 0x10000`（64KB）。
+
+即打包进 APK 的原生库与 guest 关键 ELF 均满足 16KB 页对齐要求。**剩余风险**：16KB 内核下
+PRoot ptrace 与 loader 映射行为仍需真机实测（对齐不等于可运行）。
+
+**[证据]** 量测命令：`readelf -lW app/src/main/jniLibs/arm64-v8a/libproot.so`、
+`readelf -lW <rootfs>/usr/local/bin/node`。
 
 ### 1.3 PRoot / rootfs / Node
 
 **[机制]** PRoot 用 ptrace 做系统调用拦截，把 guest rootfs 的路径/权限映射到 host；不要求真实 root。
 rootfs 用 debootstrap minbase + Node 官方 tarball。
 
-**[证据]** `build-rootfs.sh`（arm64/x86_64 双 ABI）、`RootfsInstaller`（zstd+tar 解压、符号/硬链接、
-权限位、原子替换）均已落地；`bundle-app.mjs` 本机实测产出 `app-bundle.tar.zst`（2.4MB）且
+**[证据]** `build-rootfs.sh`（arm64/x86_64 双 ABI）、`RootfsInstaller`（tgz+tar 解压、符号/硬链接、
+权限位、原子替换）均已落地；`bundle-app.mjs` 本机实测产出 `app-bundle.tgz`（5.1MB）且
 `require('@lukeburns/clatterjs'/'ws'/'express'/'zod')` 冒烟通过。
 
-**[推断]** 可行性高。**风险**：
-- **zstd-jni ABI 兼容性**：`com.github.luben:zstd-jni` 是否有 `arm64-v8a` 的 Android ABI 变体未验证
-  （设计 §12 偏差②已记录）。若不兼容 → 改随包静态 zstd/tar 或未压缩 tar（`RootfsInstaller` 已留扩展点）。
-- rootfs 体积/冷启动/内存未实测（预算 150–250MB）。
+**[实测]** rootfs（Ubuntu base 22.04 arm64 + Node 22.15.0 + CA/tzdata）194 万字节级内容：
+未压缩 tar 247MB、gzip 76MB，6047 文件 / 1281 目录 / 735 硬链接 / 211 符号链接；
+`RootfsInstaller` 逐一保留四种条目类型与 POSIX 权限位。
+
+**[已消除风险] zstd-jni ABI**：Maven Central 上 `com.github.luben:zstd-jni` **无 Android 分类器**
+（仅 `linux_aarch64` 等 glibc 变体，bionic 无法 `dlopen`；版本号亦为 `1.5.6-4` 连字符格式）。
+已按设计 §12 偏差②的兜底改为 **gzip**（Android 内置 `GZIPInputStream`，零原生依赖），
+`zstdVersion`/依赖已移除；代价是 rootfs 资产 52MB→76MB、APK 约 96MB（预算 ≤350MB 内）。
+
+**[推断]** 可行性高。**剩余风险**：
+- rootfs 冷启动/解压耗时未实测（真机首启解压 247MB）。
 - 部分内核对 seccomp 敏感：已预留 `PROOT_NO_SECCOMP=1`、`PROOT_TMP_DIR`（`NodeRuntimeManager`），真机验证。
 
 ### 1.4 dsh 握手 / SSE
@@ -148,6 +161,17 @@ SSE 连续 5 分钟（P0-A 验收原文）。
 - 前端：`npm run build:ui`（tsc -b + vite）通过；服务端导出桥接与 compat banner 编译无误。
 - 后端：`npm test` **757/757** 通过（含新增 `test/version-compat.test.js` 6 例）。
 - `test/thin-android-guards.test.js`、`test/thin-service.test.js` 未改动即通过（无回归）。
+- **APK 构建（本机自举，2026-11-21）**：JDK 21（华为镜像 OpenJDK 21+35）+ Gradle 8.11 +
+  AGP 8.7.2 + compileSdk 35 / build-tools 35 → `:app:assembleDebug` BUILD SUCCESSFUL，
+  `app-debug.apk` **96MB**（debug 签名）。
+  - APK 内资产：`assets/runtime/{rootfs-arm64.tgz 78,954,685 B, app-bundle.tgz 5,254,853 B}`，
+    与 `*.manifest.json` 的 sha256 逐字节一致；
+  - APK 内原生库：`lib/arm64-v8a/{libproot.so 259,832 B, libproot-loader.so 18,136 B}` +
+    `assets/runtime/lib/{libtalloc.so.2, libandroid-shmem.so}`；
+  - **坑**：AGP/aapt2 会对 `assets/**.gz` 解压并去掉 `.gz` 后缀（资产名变 `rootfs-arm64.tar`），
+    导致 `RootfsInstaller` 找不到资产 → 资产统一改名为 `.tgz`。
+- 工具链获取脚本：`android/scripts/fetch-proot.sh`（Termux aarch64 预编译 proot/loader/libtalloc/
+  libandroid-shmem，幂等）。
 
 ---
 
@@ -156,14 +180,14 @@ SSE 连续 5 分钟（P0-A 验收原文）。
 **代码侧判定：可进入 P1–P4**（工程骨架 + 能力面 + 生命周期 + 打包 + 本轮 P2/P3/P4 均已落地并通过
 后端/前端验证）。
 
-**但发布链路仍有三处高险，未实测前不得视为通过**：
+**发布链路仍有两处高险，未实测前不得视为通过**（第三项 zstd-jni ABI 已由 gzip 方案消除）：
 1. Android 10+ `exec` 限制（`jniLibs` + `useLegacyPackaging`）——API 29/33/35 真机；
-2. 16KB page size——Android 15+ 16KB 设备（Node/proot 是否 16KB 对齐）；
-3. `zstd-jni` Android ABI——`RootfsInstaller` 解压路径。
+   本机无 adb 设备，`nativeLibraryDir` 下 `lib*.so` 的 `execve` 行为未验；
+2. 16KB page size——对齐已量测通过（§1.2），但 16KB 设备上 PRoot ptrace/loader 行为未验。
 
 **真机必验（对照设计 §9 P0 验收原文）**：
 - [ ] arm64 真机（API 26/29/33/35）`/api/version` 200；dsh 握手连通；会话列表可见；SSE 连续 5 分钟；
-- [ ] `exec` 限制与 16KB 结论；
+- [ ] `exec` 限制结论；16KB 设备上 PRoot 启动（对齐已通过，行为待验）；
 - [ ] rootfs/app bundle 全新安装 / 覆盖升级 / 清除数据三路径；
 - [ ] 前后台往返 ≥3、崩溃自动重启、旋转不重载、无残留进程占 3801；
 - [ ] 备份不含 `.agentlray`；非 127.0.0.1 明文被拒；占用 3801 时不加载 WebView；
