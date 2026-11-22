@@ -25,6 +25,7 @@ const { HOME: HOME_DIR } = require('./lib/config');
 const { isRemoteHost } = require('./lib/routes/proxy');
 const mountHostsRoutes = require('./lib/routes/hosts');
 const mountInboundRoutes = require('./lib/routes/inbound');
+const mountNetworkRoutes = require('./lib/routes/network');
 const mountDshRoutes = require('./lib/routes/dsh');
 const mountModeRoutes = require('./lib/routes/mode');
 const { startDshHostService, stopDshHostService } = require('./lib/dsh/host');
@@ -117,6 +118,8 @@ mountSettingsRoutes(app, { status: { setStatusConfig } });
 mountPlatformsRoutes(app);
 mountHostsRoutes(app);
 mountInboundRoutes(app);
+// 宿主网络状态上报（D-1）：本机资源；完整实例同样挂载（桌面端无原生上报 → 空状态）。
+mountNetworkRoutes(app);
 mountDshRoutes(app);
 
 // SPA fallback: unknown paths render the React UI shell

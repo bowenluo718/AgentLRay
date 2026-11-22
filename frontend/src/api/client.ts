@@ -786,3 +786,28 @@ export function connectHost(id: string): Promise<HostTestResult> {
 export function disconnectHost(id: string): Promise<{ id: string; status: string }> {
   return requestJson(`/api/hosts/${encodeURIComponent(id)}/disconnect`, 'POST', undefined, { local: true });
 }
+
+/** DELETE /api/hosts/:id/trust — 忘记此主机（A-6）：清除 dsh 设备身份钉扎。
+ *  对端公钥变化（KEY_CHANGED）时 fail-closed，用户确认后清除信任再重连。 */
+export function forgetHostTrust(
+  id: string
+): Promise<{ id: string; deviceId: string; removed: number }> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}/trust`, 'DELETE', undefined, {
+    local: true,
+  });
+}
+
+/** 宿主网络状态（D-1）：原生壳最近一次上报 + 服务端时间。 */
+export interface NetworkStatus {
+  transport: string | null;
+  blocked: boolean | null;
+  dnsChanged: boolean;
+  reportedAt: number;
+  serverTime: number;
+}
+
+/** GET /api/network/status — 本机资源（local: true），读取原生壳最近一次网络上报。
+ *  从未上报（桌面端/浏览器）返回 status: null。 */
+export function getNetworkStatus(): Promise<{ status: NetworkStatus | null; serverTime: number }> {
+  return fetchJson('/api/network/status', { local: true });
+}

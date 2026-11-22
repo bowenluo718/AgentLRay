@@ -85,23 +85,32 @@ object ResolvConf {
     /**
      * 将宿主 DNS 写入 rootfs 的 /etc/resolv.conf（普通文件）。返回写入的服务器列表；
      * 读不到系统 DNS 时不覆盖（保留构建期兜底），返回空列表。
+     *
+     * @param source 调用来源（`start` = 进程启动前注入；`network` = 系统网络变化回调）：
+     *   仅用于日志，便于区分「首发注入」与「切网后重写」；内容相同则跳过写盘（去重）。
      */
-    fun apply(context: Context, rootfsDir: File): List<String> {
+    @Synchronized
+    fun apply(context: Context, rootfsDir: File, source: String = "start"): List<String> {
         val servers = sanitize(systemDnsServers(context))
         if (servers.isEmpty()) {
-            Log.i(TAG, "未读到系统 DNS，保留 rootfs 内兜底 resolv.conf")
+            Log.i(TAG, "[$source] 未读到系统 DNS，保留 rootfs 内兜底 resolv.conf")
             return emptyList()
         }
         val target = File(rootfsDir, "etc/resolv.conf")
+        val rendered = renderResolvConf(servers)
         try {
             target.parentFile?.mkdirs()
             // 若为符号链接（历史 rootfs）先删除，避免写到链接目标。
             // java.io.File 无 isSymbolicLink；用 NIO（API 26+，与 minSdk 一致）。
             if (Files.isSymbolicLink(target.toPath())) target.delete()
-            target.writeText(renderResolvConf(servers))
-            Log.i(TAG, "已写入 rootfs resolv.conf：$servers")
+            // 切网回调可能频繁触发：内容相同则跳过写盘（避免无意义的 IO 与日志噪声）。
+            if (target.isFile && runCatching { target.readText() }.getOrNull() == rendered) {
+                return servers
+            }
+            target.writeText(rendered)
+            Log.i(TAG, "[$source] 已写入 rootfs resolv.conf：$servers")
         } catch (e: Exception) {
-            Log.w(TAG, "写入 resolv.conf 失败：${e.message}")
+            Log.w(TAG, "[$source] 写入 resolv.conf 失败：${e.message}")
         }
         return servers
     }

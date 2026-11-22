@@ -35,6 +35,8 @@ class NodeRuntimeManager(
     var onReady: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
     var onExit: ((Int) -> Unit)? = null
+    /** 首启解压进度（D-2）：转发给 Activity 注入占位页（百分比 + 剩余时间）。 */
+    var onProgress: ((RootfsInstaller.Progress) -> Unit)? = null
 
     private var restartCount = 0
     private var userStopped = false
@@ -182,6 +184,9 @@ class NodeRuntimeManager(
         val ready = awaitHealthy(20_000)
         if (ready) {
             restartCount = 0
+            // D-1/A-4：服务端已起来 → 补报一次当前网络状态（壳启动期间的首次上报会因 3801
+            // 未监听而失败）；若此刻正处于系统阻断状态，前端横幅会立即出现。
+            runCatching { NetworkWatch.reportCurrent() }
             onReady?.invoke()
         } else if (running.get()) {
             onError?.invoke("运行时启动超时（20s 内 /api/version 不可达）")

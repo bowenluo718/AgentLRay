@@ -35,6 +35,42 @@ class RootfsInstaller(
     /** 进度/失败诊断输出（接入 RuntimeLogRing，供错误屏展示）。 */
     private val logger: (String) -> Unit = {},
 ) {
+    /**
+     * 解压进度监听（D-2 首启进度可见）：条目数 + 字节数 + 耗时，供占位页展示百分比/剩余时间。
+     * 可后置设置（MainActivity.onCreate 晚于 App.onCreate 的解压启动，早期进度会丢失）。
+     */
+    @Volatile
+    var progressListener: ((Progress) -> Unit)? = null
+
+    /**
+     * 解压进度快照（D-2）。`bytesTotal` 来自 manifest 的 size（压缩包大小），为 0 时
+     * 只能展示条目数进度（不显示百分比/剩余时间），由占位页降级处理。
+     */
+    data class Progress(
+        val layer: String,
+        val entries: Int,
+        val bytesDone: Long,
+        val bytesTotal: Long,
+        val elapsedMs: Long,
+    ) {
+        /** 0..1；总量未知时返回 null。 */
+        val fraction: Double?
+            get() = if (bytesTotal > 0) (bytesDone.toDouble() / bytesTotal).coerceIn(0.0, 1.0) else null
+
+        /** 预计剩余毫秒；总量未知或尚未有进展时返回 null。 */
+        val etaMs: Long?
+            get() {
+                val f = fraction ?: return null
+                if (f <= 0.02 || elapsedMs <= 0) return null
+                val total = elapsedMs / f
+                return (total - elapsedMs).toLong().coerceAtLeast(0)
+            }
+    }
+
+    /** 最近一次 ensure() 得出的布局（网络回调在 rootfs 就绪后重写 DNS 时需要）。 */
+    @Volatile
+    var lastLayout: Layout? = null
+        private set
     private val abi: String = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
     private val assetAbi: String = when {
         abi.startsWith("arm64") -> "arm64"
@@ -90,7 +126,9 @@ class RootfsInstaller(
         // bind target 预创建（PRoot -b 目标必须存在；见 §4.2）。
         File(rootfsDir, "opt/agentlray").mkdirs()
         File(rootfsDir, "home/agentlray/.agentlray").mkdirs()
-        return Layout(rootfsDir, appDir, dataDir, runtimeDir)
+        val layout = Layout(rootfsDir, appDir, dataDir, runtimeDir)
+        lastLayout = layout
+        return layout
     }
 
     private fun buildVersionTag(): String {
@@ -124,13 +162,14 @@ class RootfsInstaller(
         logger("解压 $tarName → ${target.name}")
         val manifest = readManifest(manifestName)
         verifySha256(tarName, manifest.optString("sha256"))
+        val totalBytes = manifest.optLong("size", 0L)
 
         val tmp = File(target.parentFile, "${target.name}.tmp")
         if (tmp.exists()) tmp.deleteRecursively()
         tmp.mkdirs()
         val startedAt = System.currentTimeMillis()
         try {
-            val entries = untarGzip(tarName, tmp)
+            val entries = untarGzip(tarName, tmp, totalBytes)
             val secs = (System.currentTimeMillis() - startedAt) / 1000.0
             logger("解压 $tarName 完成：$entries 条目 / ${"%.1f".format(secs)}s")
             // 解压后校验：防止「流程正常结束但内容残缺」（磁盘/流异常、并发残留）静默通过。
@@ -189,25 +228,74 @@ class RootfsInstaller(
     }
 
     /** 解压 .tgz 到 dest；保留目录/文件/符号链接/硬链接与 POSIX 权限。返回条目数。 */
-    private fun untarGzip(assetName: String, dest: File): Int {
+    private fun untarGzip(assetName: String, dest: File, totalBytes: Long): Int {
         val destCanonical = dest.canonicalFile
+        val startedAt = System.currentTimeMillis()
+        var entries = 0
+        var lastReportedAt = 0L
+        var lastReportedBytes = 0L
         // 1MB 缓冲：逐字节读 AssetInputStream 会显著拖慢 76MB 资产的首启解压。
         context.assets.open("runtime/$assetName").use { raw ->
-            BufferedInputStream(raw, 1 shl 20).use { buf ->
+            val counting = CountingInputStream(raw)
+            BufferedInputStream(counting, 1 shl 20).use { buf ->
                 GZIPInputStream(buf).use { gz ->
                     TarArchiveInputStream(gz).use { tar ->
                         var entry: TarArchiveEntry? = tar.nextEntry as? TarArchiveEntry
-                        var count = 0
                         while (entry != null) {
                             extractEntry(tar, entry, destCanonical)
-                            count++
+                            entries++
+                            // 每 64 条目或每 500ms 回报一次，避免高频回调拖慢解压。
+                            val now = System.currentTimeMillis()
+                            val bytes = counting.count
+                            if (entries % 64 == 0 || now - lastReportedAt >= 500) {
+                                lastReportedAt = now
+                                lastReportedBytes = bytes
+                                progressListener?.invoke(
+                                    Progress(
+                                        layer = assetName,
+                                        entries = entries,
+                                        bytesDone = bytes,
+                                        bytesTotal = totalBytes,
+                                        elapsedMs = now - startedAt,
+                                    )
+                                )
+                            }
                             entry = tar.nextEntry as? TarArchiveEntry
                         }
-                        return count
+                        progressListener?.invoke(
+                            Progress(
+                                layer = assetName,
+                                entries = entries,
+                                bytesDone = counting.count.coerceAtLeast(lastReportedBytes),
+                                bytesTotal = totalBytes,
+                                elapsedMs = System.currentTimeMillis() - startedAt,
+                            )
+                        )
+                        return entries
                     }
                 }
             }
         }
+    }
+
+    /** 统计已读取字节数（进度展示用；不改变读取语义）。 */
+    private class CountingInputStream(private val delegate: InputStream) : InputStream() {
+        var count: Long = 0L
+            private set
+
+        override fun read(): Int {
+            val b = delegate.read()
+            if (b >= 0) count++
+            return b
+        }
+
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            val n = delegate.read(b, off, len)
+            if (n > 0) count += n
+            return n
+        }
+
+        override fun close() = delegate.close()
     }
 
     private fun extractEntry(tar: TarArchiveInputStream, entry: TarArchiveEntry, destCanonical: File) {

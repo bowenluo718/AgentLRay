@@ -77,7 +77,7 @@
 | [design-dsh-login-methods.zh-CN.md](design-dsh-login-methods.zh-CN.md) | 方案设计 | dsh 多登录方式（扫码 + 账号密码） | ✅ 已实现 | 2026-11-19 |
 | [design-thin-service.zh-CN.md](design-thin-service.zh-CN.md) | 方案设计 | 独立薄服务（thin service）：仅远程连接的连接方网关——`/api/mode` 运行时信号、无 `local`、dsh 强制 client、boot 自动连接、系统配置面不挂/不透传、前端 thin 裁剪；`agentlray thin` | ✅ 已实现 | 2026-11-20 |
 | [design-android-mobile-app.zh-CN.md](design-android-mobile-app.zh-CN.md) | 方案设计 | Android 移动端 App 工程蓝图：PRoot + Ubuntu + Node 22/24 承载 dsh-only 薄服务 + Capacitor WebView 套壳；仓库模块改造（hosts 守卫/lastHostId/mode capabilities/传输过滤/下载桥接）、`android/` 工程骨架、P1 最小壳、P2 导出桥接、P3 版本兼容已落地；P0 静态推断/16KB 量测见 [android/docs/p0-runtime-inference.zh-CN.md](../../android/docs/p0-runtime-inference.zh-CN.md)；debug APK 本机构建通过 | 🟡 部分实现（P0 真机验证待做；P4 部分实现） | 2026-11-21 |
-| [plan-benchmark-adoption-by-module.zh-CN.md](plan-benchmark-adoption-by-module.zh-CN.md) | 任务计划 | 对标 plugharness-go 按模块借鉴（功能优先）：批次一 A-1 链路状态机/错误码、A-2 探活、A-3 真实指数退避（跨 entry 继承 attempt）、B-1 SSE 补拉（含元数据与三态 401 处理：缓存令牌在则自动重兑换 cookie）、C-1 本机令牌鉴权（仅本机直连，远端走链路认证；ssh 入站经 `~/.agentlray/inbound.sock` 信任通道）已落地；批次二～四（切网/端口/身份 pin UI、SSH、升级、CI）仍为计划 | 🟡 批次一已实现，2026-11-22 复审修复后 `npm test` 878 项 / 37 suites 全通过（详见文末 §13） | 2026-11-22 |
+| [plan-benchmark-adoption-by-module.zh-CN.md](plan-benchmark-adoption-by-module.zh-CN.md) | 任务计划 | 对标 plugharness-go 按模块借鉴（功能优先）：批次一 A-1 链路状态机/错误码、A-2 探活、A-3 真实指数退避（跨 entry 继承 attempt）、B-1 SSE 补拉（含元数据与三态 401 处理：缓存令牌在则自动重兑换 cookie）、C-1 本机令牌鉴权（仅本机直连，远端走链路认证；ssh 入站经 `~/.agentlray/inbound.sock` 信任通道）与批次二 A-4 切网触发重连（壳上报 `/api/network/status` → 服务端 kick）、A-5 稳定本地端口、A-6 忘记此主机、D-1 网络阻断/DNS 可观测、D-2 首启进度已落地；批次三～四（SSH 分众、升级、CI）仍为计划 | 🟢 批次一、二已实现，2026-11-22 `npm test` 891 项 / 37 suites 全通过（详见文末 §13.1/§13.2；Android 原生改动已编译通过、待真机验证） | 2026-11-22 |
 
 ### 日志与运维
 

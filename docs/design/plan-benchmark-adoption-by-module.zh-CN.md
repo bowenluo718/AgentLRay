@@ -7,7 +7,7 @@
   - `docs/.local/analysis-plugharness-go-benchmark.zh-CN.md`（过程稿，未随代码提交；契约机器化 / 漂移自动化 / 失败显式化 / 验证分级化）
   - 本次三轮对标分析：远程连接（relay + ssh + 状态机）、引擎后台常驻、PRoot 打包、鉴权模型、SSE 补拉、i18n、首启时序、发布工程、分享码
 - **排序原则**：**先修直接影响用户使用的功能**（网络稳定性、数据不丢、安全、可解释的失败），工程化门禁类（CI、构建可复现、契约 schema、发布流水线）统一降到 P3，除非它直接堵住功能缺陷。
-- **状态**：🟡 批次一（A-1/A-2/A-3/B-1/C-1）**已实现**（2026-11-22，分支 `fix/dsh-review-2026-11-22`）；批次二～四仍为计划。进度与代码证据见 [§13](#13-实施进度与代码证据批次一)。
+- **状态**：🟢 批次一（A-1/A-2/A-3/B-1/C-1）与批次二（A-4/A-5/A-6/D-1/D-2）**已实现**（2026-11-22，分支 `fix/dsh-review-2026-11-22`）；批次三～四仍为计划。进度与代码证据见 [§13](#13-实施进度与代码证据批次一)。
 - **文档真源**：本文件（`docs/design/`）为正式副本，随代码提交；`docs/.local/` 保留同名过程稿。
 
 ---
@@ -398,13 +398,16 @@
 > 批次一的四项（A-1/A-2/A-3/B-1）共用同一套状态与探测，建议同一分支完成；C-1 独立分支。
 > **验收**：断网/切网/杀链路三类场景全部自动恢复；期间写入的消息不丢；未鉴权请求 401。
 
-### 批次二：体验与自救（P1，约 3–4 天）
+### 批次二：体验与自救（P1，约 3–4 天）✅ 已实现
 
-1. **A-4** 网络切换触发重连
-2. **A-5** 稳定本地端口
-3. **A-6** 身份 pin 的 UI 入口
-4. **D-1** 系统网络阻断 + DNS 随网变化
-5. **D-2** 首启进度可见
+1. **A-4** 网络切换触发重连 ✅（壳上报 `/api/network/status` → 服务端统一 kick）
+2. **A-5** 稳定本地端口 ✅（ssh / dsh loopback 复用期望端口，占用时回退）
+3. **A-6** 身份 pin 的 UI 入口 ✅（占位页 + 主机弹框的「忘记此主机」，二次确认）
+4. **D-1** 系统网络阻断 + DNS 随网变化 ✅（`NetworkWatch` + `networkBlocked` 横幅 + 启动策略行）
+5. **D-2** 首启进度可见 ✅（解压进度注入占位页；失败态三动作）
+
+> **验收状态**：切网 ≤5s 恢复由服务端 kick（立即探活 + 跳过退避）保证，Node 侧有自动化用例；
+> Android 真机断网/切网未在本机实测（无 SDK/gradle 环境），见 §13.2 偏差。
 
 ### 批次三：分众与升级（P2，约 4–5 天）
 
@@ -482,6 +485,25 @@
 - **`AGENTLRAY_NO_AUTH=1` 成为测试/脚本基线**：`test/helpers.js` 的 `serverEnv()` 默认关闭鉴权（`AGENTLRAY_UI_TOKEN: ''`），直接 `spawn(server.js)` 的 4 处测试也显式带上；`scripts/build-demo-fixtures.mjs` 同。桌面 `npm start` 不再零配置——令牌缺省自动生成并打印 `/?token=` 地址。
 - **`nextRetryAt` 为 epoch ms**（原先误用 ISO 字符串，与前端 `number` 类型不符）。
 - **令牌缓存长效化（2026-11-22）**：cookie 原为会话级（无 `Max-Age`，浏览器/WebView 重启即丢，Android 侧还会因 `exchangedToken` 已持久化而不再重新导航 → 永久 401）。现改为一年长效 cookie（同名同 `Path` 自动覆盖），302 目标改为 `/#token=<t>`（fragment 不进服务端日志），前端 `frontend/src/api/ui-token.ts` 把令牌写入 `localStorage` 并在每个同源请求附 `X-AgentLRay-Token`，新令牌自动覆盖旧缓存；`requestTokens` 同时接受头与 cookie（任一有效即放行），旧缓存不会顶掉新 cookie。Android 在导航后与 `onStop` 调 `CookieManager.flush()` 保证 cookie 落盘。
-- **A-6（删除信任记录的 UI 入口）仍属批次二**：`KEY_CHANGED` 目前只给错误码与文案建议，用户需手工删除 `~/.agentlray/dsh/*` 信任记录；批次二补 UI。
+- **A-6（删除信任记录的 UI 入口）已在批次二补齐**：`KEY_CHANGED` 现在在连接占位页与主机弹框提供「忘记此主机」（二次确认，清 client/probe 两个信任库），见 §13.2。
 - **C-1 在 Android 上需重新打包 APK 才能生效**（原生侧生成/持久化令牌）；Web 桌面端行为已变：未配置令牌时自动生成并要求本机带令牌（`AGENTLRAY_NO_AUTH=1` 可显式关闭）。
 - **未做真机/断网实测**：A-1～A-3 用 mock 远端 + 毫秒级探活/退避验证状态迁移；B-1 用真实 SSE 服务验证补拉；C-1 用真实服务验证 401/放行。断网/切网真机场景留待批次二 A-4 一并联调。
+
+### 13.2 批次二实施进度（体验与自救）
+
+> 验证（2026-11-22）：`npm test` **891 项 / 37 suites 全通过**（批次一基线 878 + 新增 13）、`npx tsc -b frontend` 与 `npm run build:ui` 通过。
+> **Android（Kotlin）改动已本机编译通过**（`gradle --offline :app:compileDebugKotlin`，JDK 21 / Gradle 8.11 / SDK 35）；**未做真机冒烟**（无设备），见 §13.2 待验证清单。
+
+| 编号 | 状态 | 代码证据 | 测试证据 |
+| --- | --- | --- | --- |
+| A-4 网络切换触发重连 | ✅ 已实现 | `lib/hosts.js` `kickHost`（connected → 立即探活，5s 超时 `AGENTLRAY_HOST_KICK_TIMEOUT_MS`；失败 `linkLost` 后 `kickReconnectNow` 清掉 `reconnectTimer/nextRetryAt` 立即重连；`reconnecting/failed+retryable` → 跳过退避）、`kickAllHosts`；`lib/routes/hosts.js` `POST /api/hosts/:id/kick`；`lib/routes/network.js` `POST/GET /api/network/status`（transport 白名单、`dnsChanged \|\| transportChanged` → `kickAllHosts`）；`lib/auth.js` `LOCAL_ONLY_RE` 增 `/network`（proxy 同源 403）；`server.js` 与 `bin/thin-server.js` 均挂载。Android `NetworkWatch.kt`：`registerDefaultNetworkCallback` → `POST /api/network/status`（带 `X-AgentLRay-Token`），运行时就绪后 `reportCurrent()` 补报。 | `test/hosts-batch2.test.js`「A-4 kick：链路健康时只探活」「链路已死时跳过 60s 退避立即重连」（<2.5s 断言）「kickAllHosts」「未运行主机不建链」；「D-1 路由：POST /api/network/status 首次上报不 kick，切网 / DNS 变化触发 kickAllHosts」 |
+| A-5 稳定本地端口 | ✅ 已实现 | `lib/transport.js` `isPortFree/pickLocalPort`（期望端口可用则复用，否则 `findFreePort` 回退）；`lib/hosts.js` `createEntry(id, prev)` 继承 `localPort`，ssh `launch` 用 `pickLocalPort(entry.localPort)`，dsh `openDshTunnel({ localPort })` 并回写实际端口；`lib/dsh/client.js` 透传 `localPort` 并返回 `localPort`；`lib/dsh/loopback-client.js` `createLoopbackEndpoint(..., { localPort })` 优先监听期望端口，占用时回退随机一次。 | `test/hosts-batch2.test.js`「A-5 pickLocalPort：复用空闲期望端口 / 占用回退」「loopback 端点复用期望端口，被占用回退且不报错」「ssh 重连前后 `baseUrl` 不变（真实 ssh-mock + 杀链路 + kick）」 |
+| A-6 身份 pin 的 UI 入口 | ✅ 已实现 | `lib/hosts.js` `forgetHostTrust(id)`（仅 dsh；对 `client` 与 `probe` 两个身份库 `loadPeers → revokePeer`，返回 `{id, deviceId, removed}`；`not-found`/`unsupported`）；`lib/routes/hosts.js` `DELETE /api/hosts/:id/trust`（404/400/500 映射 + 写操作日志只记动作与 id）；前端 `api/client.ts` `forgetHostTrust`；`HostConnectingView.tsx`（`KEY_CHANGED` → 二次确认「确认清除并重连」）；`HostsDialog.tsx`（行内「忘记此主机」，`window.confirm` 二次确认）。 | `test/hosts-batch2.test.js`「forgetHostTrust：清除 client/probe 钉扎」「未知主机 not-found、ssh 主机 unsupported」「路由：DELETE /api/hosts/:id/trust」 |
+| D-1 系统网络阻断与 DNS 变化 | ✅ 已实现 | Android `NetworkWatch.kt`：`onAvailable/onLost/onLinkPropertiesChanged` → `ResolvConf.apply(source="network")`（内容相同跳过写盘）+ 上报；`onBlockedStatusChanged` → `RuntimeLogRing` + 上报 `blocked`；启动打印 `policyLine`（电池优化豁免 / Data Saver / 通知权限）。`ResolvConf.apply(context, rootfs, source)` 新增来源日志与去重；`NodeRuntimeManager` 注入 `source="start"`。服务端 `lib/routes/mode.js` 薄服务 capabilities 增 `networkBlocked`（由 `/api/network/status` 内存态派生，10 分钟未刷新视为过期，避免壳退出后残留）；前端 `ModeCapabilities` 增字段、新增 `components/NetworkStatusBanner.tsx`（thin 下 15s 轮询，仅 true 且新鲜时显示）、`App.tsx` 挂载。 | `test/thin-android-guards.test.js`「mode capabilities：原生壳上报网络阻断后 networkBlocked=true（D-1）」（含恢复 false 与无上报 null）；`test/hosts-batch2.test.js` network 路由用例 |
+| D-2 首启进度可见 | ✅ 已实现 | `RootfsInstaller.kt`：`Progress(layer, entries, bytesDone, bytesTotal, elapsedMs)` + `fraction/etaMs`，`CountingInputStream` 统计压缩字节，每 64 条目或 500ms 回调一次（`bytesTotal` 取 manifest `size`，缺失则降级）；`lastLayout` 供网络回调复用。`App.kt` 写入日志环并转发 `runtime.onProgress`；`MainActivity.kt` `renderProgress` → 占位页 `window.__agentlrayProgress(done,total,etaMs)`；失败弹框改为三动作「重试 / 查看日志（尾部 500 行，可选中复制）/ 清除运行时并重装（删 rootfs+app，保留 `.agentlray` 数据）」；`android/www/index.html` 增进度条与百分比/剩余时间（无总量时只报条目数）。 | `test/thin-android-guards.test.js`「D-2 占位页：`window.__agentlrayProgress` 百分比/剩余时间与无总量降级」（最小 DOM 桩执行页面脚本） |
+
+**Android 侧待验证清单**（Kotlin 已编译通过；需真机/CI 补做）：
+- Wi-Fi ↔ 4G 切换后 ≤5s 恢复 `connected`（观察 `NetworkWatch` 日志 `transportChanged=true` 与服务端 `network status` 日志）；
+- 公钥变化 → `KEY_CHANGED` → 「忘记此主机」→ 重连成功；
+- 首启解压进度百分比/剩余时间显示，以及「清除运行时并重装」自救路径；
+- 系统 Data Saver / 后台数据限制下 `blocked=true` 横幅与 `policyLine` 输出。

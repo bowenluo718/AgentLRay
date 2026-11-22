@@ -6,20 +6,57 @@
     <title>AgentLRay</title>
     <style>
       /* 占位启动屏：薄服务就绪前展示（native Splash 亦可覆盖）。就绪后 MainActivity 用
-         WebView.loadUrl('http://127.0.0.1:3801') 替换整个页面。 */
+         WebView.loadUrl('http://127.0.0.1:3801') 替换整个页面。
+         D-2：首启解压进度通过 window.__agentlrayProgress(done,total,etaMs) 注入（原生调用）。 */
       html, body { margin: 0; height: 100%; background: #0d1117; color: #e6edf3; }
       body { display: flex; align-items: center; justify-content: center; font: 14px/1.5 system-ui, sans-serif; }
-      .wrap { text-align: center; }
+      .wrap { width: min(320px, 80vw); text-align: center; }
       .brand { font-size: 20px; font-weight: 600; letter-spacing: .5px; }
       .hint { margin-top: 8px; color: #8b9498; }
       .dot { animation: blink 1.2s infinite ease-in-out; }
       @keyframes blink { 0%, 100% { opacity: .2 } 50% { opacity: 1 } }
+      /* 进度条：默认隐藏（布局已就绪的二次启动不显示）；收到进度回调后展开。 */
+      .progress { display: none; margin-top: 16px; }
+      .progress.active { display: block; }
+      .bar { height: 6px; border-radius: 3px; background: #21262c; overflow: hidden; }
+      .fill { height: 100%; width: 0%; background: #2e7d6b; transition: width .25s ease; }
+      .meta { margin-top: 8px; color: #8b9498; font-size: 12px; font-variant-numeric: tabular-nums; }
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="brand">AgentLRay</div>
-      <div class="hint">正在启动本地薄服务<span class="dot">…</span></div>
+      <div class="hint" id="hint">正在启动本地薄服务<span class="dot">…</span></div>
+      <div class="progress" id="progress">
+        <div class="bar"><div class="fill" id="fill"></div></div>
+        <div class="meta" id="meta">首次启动，正在准备运行时…</div>
+      </div>
     </div>
+    <script>
+      // 原生注入入口（D-2）。done/total 为解压字节数；total 为 0 时降级只显示条目数。
+      // etaMs 为原生预估剩余毫秒（null 表示无法预估）。
+      window.__agentlrayProgress = function (done, total, etaMs) {
+        var progress = document.getElementById('progress');
+        var fill = document.getElementById('fill');
+        var meta = document.getElementById('meta');
+        if (!progress || !fill || !meta) return;
+        progress.classList.add('active');
+        if (total > 0) {
+          var pct = Math.max(0, Math.min(100, Math.round((done / total) * 100)));
+          fill.style.width = pct + '%';
+          var eta = '';
+          if (typeof etaMs === 'number' && etaMs > 0) {
+            var s = Math.ceil(etaMs / 1000);
+            eta = s >= 60 ? ' · 约剩 ' + Math.ceil(s / 60) + ' 分钟' : ' · 约剩 ' + s + ' 秒';
+          }
+          meta.textContent = '首次启动，正在准备运行时… ' + pct + '%' + eta;
+        } else {
+          // 总量未知（manifest 缺 size）：只展示「已处理条目数」，不假装有百分比。
+          fill.style.width = '100%';
+          fill.style.opacity = '0.3';
+          meta.textContent = '首次启动，正在准备运行时… 已处理 ' + done + ' 项';
+        }
+      };
+    </script>
   </body>
 </html>

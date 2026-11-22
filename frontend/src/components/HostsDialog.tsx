@@ -9,7 +9,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, Settings2 } from 'lucide-react';
-import { getHosts, getDshDevices, deleteHost as apiDeleteHost } from '@/api/client';
+import { getHosts, getDshDevices, deleteHost as apiDeleteHost, forgetHostTrust } from '@/api/client';
 import type { HostInfo, HostStatus, InboundPeer } from '@/api/types';
 import {
   HOST_ERROR_LABEL,
@@ -173,6 +173,27 @@ export function HostsDialog({
     },
     onError: (e) => toast.error(`删除失败：${(e as Error).message}`),
   });
+  // A-6「忘记此主机」：仅 dsh 主机（设备身份钉扎）。对端公钥变化后 fail-closed，
+  // 用户确认后清除 client/probe 两个信任库的钉扎，再重连（信任任何持新密钥的对端是
+  // 安全相关的破坏性动作，必须二次确认）。
+  const forgetMut = useMutation({
+    mutationFn: (id: string) => forgetHostTrust(id),
+    onSuccess: (res, id) => {
+      invalidate();
+      toast.success(`已清除「${id}」的信任记录（${res.removed} 项），正在重新连接`);
+      onConnect(id);
+    },
+    onError: (e) => toast.error(`清除信任失败：${(e as Error).message}`),
+  });
+  const onForget = (h: HostInfo) => {
+    const ok = window.confirm(
+      `确认清除「${h.label || h.id}」的设备信任记录？\n\n` +
+        '清除后将无条件信任持有新密钥的对端。仅当确认目标主机确已重装或更换设备时继续。'
+    );
+    if (!ok) return;
+    forgetMut.mutate(h.id);
+  };
+
   // 断开连接：只关隧道 + 停心跳（不删主机）。走 store 的 disconnectHost（同顶栏逻辑）。
   const disconnectMut = useMutation({
     mutationFn: (id: string) => disconnectHost(id),
@@ -302,6 +323,17 @@ export function HostsDialog({
                           连接
                         </TextAction>
                       )}
+                      {/* A-6：公钥变化后提供清除信任的显式入口（仅 dsh 主机有设备钉扎）。 */}
+                      {errorCode === 'KEY_CHANGED' && h.type === 'dsh' ? (
+                        <TextAction
+                          className="text-destructive hover:bg-destructive/10"
+                          disabled={forgetMut.isPending && forgetMut.variables === h.id}
+                          onClick={() => onForget(h)}
+                          title="清除该设备的信任记录后重新连接（适用对端重装/更换设备）"
+                        >
+                          {forgetMut.isPending && forgetMut.variables === h.id ? '清除中…' : '忘记此主机'}
+                        </TextAction>
+                      ) : null}
                       <TextAction onClick={() => onEdit(h)}>编辑</TextAction>
                       <TextAction
                         className="text-destructive hover:bg-destructive/10"

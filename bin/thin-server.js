@@ -23,6 +23,7 @@ const { shutdownHosts, setSelfIdentity, autoConnectThinHost } = require('../lib/
 const mountProxyRoutes = require('../lib/routes/proxy');
 const { isRemoteHost } = require('../lib/routes/proxy');
 const mountHostsRoutes = require('../lib/routes/hosts');
+const mountNetworkRoutes = require('../lib/routes/network');
 const mountDshRoutes = require('../lib/routes/dsh');
 const mountModeRoutes = require('../lib/routes/mode');
 const log = require('../lib/logging');
@@ -94,6 +95,8 @@ app.use((req, res, next) => {
 // - hosts：thin 无 local 宿主（Q14），只返回远端；
 // - dsh：强制 client（Q24），只出站连远端，不启被连接方服务。
 mountHostsRoutes(app, { includeLocal: false });
+// 宿主网络状态上报（D-1/A-4）：Android 原生壳在网络回调里 POST，服务端据此 kick 全部主机。
+mountNetworkRoutes(app);
 mountDshRoutes(app, { forceClient: true });
 
 // SPA fallback：薄服务复用同一 dist 前端，未知路径渲染 React 外壳。

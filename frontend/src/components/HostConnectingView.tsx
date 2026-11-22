@@ -1,6 +1,8 @@
 // 首帧连接占位（multi-host「先连后加载」）：记忆的远端尚未就绪时不渲染任何数据面，
 // 只显示主机名 + 链路状态 + 可回本机/重试。本机（hostReady 初始 true）不命中此组件。
+import { useState } from 'react';
 import { toast } from 'sonner';
+import { forgetHostTrust } from '@/api/client';
 import {
   HOST_ERROR_LABEL,
   HOST_STATUS_DOT,
@@ -57,6 +59,31 @@ export function HostConnectingView({ hostId }: { hostId: string }) {
     });
   };
 
+  // A-6：对端公钥变化（KEY_CHANGED）时 fail-closed，须用户显式「忘记此主机」——
+  // 清除 dsh 设备身份钉扎（client + probe 两个信任库），随后自动重试连接。
+  // 二次确认：这是安全相关的破坏性操作（信任任何持新密钥的对端），不能一键完成。
+  const [confirmForget, setConfirmForget] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
+  const forget = async () => {
+    setForgetting(true);
+    try {
+      const res = await forgetHostTrust(hostId);
+      toast.success(`已清除 ${label} 的信任记录，正在重新连接`);
+      setConfirmForget(false);
+      if (res.removed === 0) {
+        // 无钉扎记录（如 ssh 主机 / 先前已清）：仍然重试，让服务端给出真实结论。
+        toast.info('未找到该主机的信任记录，直接重试连接');
+      }
+      setSelectedHostId(hostId).then((ok) => {
+        if (!ok) toast.error(`重新连接 ${label} 失败`);
+      });
+    } catch (error) {
+      toast.error(`清除信任失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setForgetting(false);
+    }
+  };
+
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 p-6">
       <div className="flex items-center gap-2">
@@ -74,6 +101,43 @@ export function HostConnectingView({ hostId }: { hostId: string }) {
       {codeLabel ? <p className="text-xs font-medium text-destructive">{codeLabel}</p> : null}
       {message ? <p className="max-w-md text-center text-xs text-destructive">{message}</p> : null}
       {hint ? <p className="max-w-md text-center text-xs text-muted-foreground">{hint}</p> : null}
+      {errorCode === 'KEY_CHANGED' ? (
+        <div className="flex max-w-md flex-col items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2">
+          {confirmForget ? (
+            <>
+              <p className="text-center text-xs text-destructive">
+                清除信任后将无条件信任持有新密钥的对端。仅当确认目标主机确已重装/更换设备时继续。
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={forget}
+                  disabled={forgetting}
+                  className="rounded-md border border-destructive/60 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/20 disabled:opacity-50"
+                >
+                  {forgetting ? '清除中…' : '确认清除并重连'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmForget(false)}
+                  disabled={forgetting}
+                  className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+                >
+                  取消
+                </button>
+              </div>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmForget(true)}
+              className="rounded-md border border-destructive/60 px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10"
+            >
+              忘记此主机（清除信任记录）
+            </button>
+          )}
+        </div>
+      ) : null}
       <p className="max-w-md text-center text-xs text-muted-foreground">
         {selfHealing
           ? '链路断开后会自动按指数退避重连，期间无需重复操作。'

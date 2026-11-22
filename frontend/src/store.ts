@@ -317,6 +317,8 @@ export type AppMode = 'full' | 'thin';
 export interface ModeCapabilities {
   transports?: string[];
   nativeSave?: boolean;
+  /** 系统网络阻断（D-1）：true/false 为原生壳最近上报值，null/缺失为未知（无上报）。 */
+  networkBlocked?: boolean | null;
 }
 export type MainView = 'sessions' | 'insights' | 'prompts' | 'kanban';
 /** 右侧视图页签值校验（URL 参数 / localStorage 解析共用；非法值一律回退默认）。 */
