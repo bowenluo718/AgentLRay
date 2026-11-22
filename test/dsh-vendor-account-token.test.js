@@ -87,3 +87,27 @@ test('authorizeWithAccount：账号密码为空时直接拒绝，不发请求', 
   await assert.rejects(() => api.authorizeWithAccount(IDENTITY, '  ', 'pw'), /Email and password are required/);
   assert.equal(calls.length, 0);
 });
+
+test('authorizeOwnedRoleWithAccount：没有账号信息时不得把空串写进凭据（schema min(1) 会拒绝加载）', async () => {
+  const calls = [];
+  const store = memoryStore();
+  const api = new ClientServerApi(SERVER_URL, store, fakeFetch(calls), 'client');
+
+  const authorization = await api.authorizeOwnedRoleWithAccount(IDENTITY, ACCOUNT_TOKEN);
+
+  assert.equal(authorization.method, 'account');
+  assert.equal(authorization.account, undefined);
+  assert.equal(store.saved.length, 1);
+  assert.equal(store.saved[0].account, undefined, 'account 缺省时不得写入空串');
+  assert.equal(store.saved[0].authorizationMethod, 'account');
+});
+
+test('authorizeOwnedRoleWithAccount：传入的账号原样落盘', async () => {
+  const calls = [];
+  const store = memoryStore();
+  const api = new ClientServerApi(SERVER_URL, store, fakeFetch(calls), 'client');
+
+  await api.authorizeOwnedRoleWithAccount(IDENTITY, ACCOUNT_TOKEN, 'user@x.com', undefined);
+
+  assert.equal(store.saved[0].account, 'user@x.com');
+});

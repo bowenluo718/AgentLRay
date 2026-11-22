@@ -106,7 +106,7 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
 
 | 文件 | 说明 |
 | --- | --- |
-| `server-api.ts` | `ClientServerApi` / `HostServerApi`：与远端服务器配对 / 授权 / 凭据签发（**已补丁**，见 §4.9、§4.11） |
+| `server-api.ts` | `ClientServerApi` / `HostServerApi`：与远端服务器配对 / 授权 / 凭据签发（**已补丁**，见 §4.9、§4.11、§4.12、§4.12.1） |
 | `server-credentials.ts` | `ServerCredentialStore`：服务器凭据落盘与轮转（**已补丁**，见 §4.10） |
 | `server-connection.ts` | `HostServerConnection`：宿主侧 WebSocket + Noise + Relay/WebRTC 隧道（**已补丁**，见 §4.13） |
 | `connection-controller.ts` | `ConnectionController`：认证对端通道与 RPC 分发 |
@@ -259,6 +259,16 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
   账号密码登录路径永远拿不到账号授权（probe 登记失败、连接测试不可用）。
 * **兼容性**：既有签名与行为不变；仅新增方法与可选字段。
 * **同步上游时**：上游若提供「用账号令牌登记设备」的公开入口，本补丁可删除。
+
+### 4.12.1 `src/plugin/server-api.ts` —— 派生身份登记不得写入空账号（AgentLRay 补丁）
+
+* **上游**：`authorizeOwnedRoleWithAccount` 把缺省 `account` 规范成 `''` 写入凭据；
+  而 `credentialSchema.account` 是 `z.string().min(1).optional()`，带 `account: ''` 的凭据文件
+  下次加载即抛 `too_small`（现场：扫码登录后 probe 凭据从未生成，连接测试报「未登记」）。
+* **改成**：`account` 为空串/非字符串时按缺省处理，凭据与返回值都不带 `account` 字段；
+  `register` / `registerAuthorized` 的 `account` 同步改为可选。
+* **兼容性**：账号存在时行为不变；仅影响缺省账号的落盘形状（不再写空串）。
+* **同步上游时**：上游若不再写入空账号，本补丁可删除。
 
 ### 4.13 `src/plugin/server-connection.ts` —— 控制通道失败原因落日志（AgentLRay 补丁）
 

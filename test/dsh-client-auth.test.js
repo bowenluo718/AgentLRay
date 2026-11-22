@@ -80,6 +80,8 @@ const calls = { authenticate: [], listDevices: [], presenceFor: [], authorizeWit
 let authenticateImpl;
 let listDevicesImpl;
 let presenceImpl;
+// 扫码轮询结果可注入（构造器里是自有属性，改原型无效，必须走这个钩子）。
+let qrPollImpl;
 
 function FakeClientServerApi(serverUrl, store, fetchImplementation, role = 'client') {
   this.baseUrl = serverUrl.replace(/\/+$/, '');
@@ -118,14 +120,20 @@ function FakeClientServerApi(serverUrl, store, fetchImplementation, role = 'clie
     return { method: 'owned_device', ...(account ? { account } : {}) };
   };
   // probe（派生身份）用账号授权登记（PATCH：authorizeOwnedRoleWithAccount）。
+  // 与真实 vendor 一致：account 一旦出现就必须是非空字符串（credentialSchema 的 min(1)），
+  // 空串会在 saveTokens 校验时报 too_small —— 现场 probe 登记失败的根因之一。
   this.authorizeOwnedRoleWithAccount = async (identity, accountToken, account) => {
     calls.authorizeWithAccount.push(this.store._scope);
     if (!accountToken) throw serverApiError('INVALID_MESSAGE', 'Account authorization is required.');
-    await this.store.save(tokenRecord(identity, account ? { account } : {}));
+    if (account !== undefined && (typeof account !== 'string' || account.length === 0)) {
+      throw serverApiError('INVALID_MESSAGE', 'Too small: expected string to have >=1 characters');
+    }
+    await this.store.save(tokenRecord(identity, account === undefined ? {} : { account }));
   };
   this.oauthProviders = async () => [];
   this.startOAuthQrLogin = async () => ({ qrId: 'q'.repeat(20), scanUrl: `${this.baseUrl}/qr`, expiresIn: 600 });
   this.pollOAuthQrLogin = async (identity) => {
+    if (qrPollImpl) return qrPollImpl.call(this, identity);
     await this.store.save(tokenRecord(identity));
     return { status: 'complete', authorization: { method: 'account' }, accountToken: 'a'.repeat(20) };
   };
@@ -181,6 +189,7 @@ beforeEach(async () => {
   calls.authorizeWithAccount = [];
   calls.authorizeOwnedRole = [];
   calls.scopes = [];
+  qrPollImpl = undefined;
   authenticateImpl = async (api, identity) => {
     const stored = await api.store.load(api.baseUrl, identity.deviceId);
     return stored;
@@ -494,6 +503,53 @@ test('provisionProbeFromOwner：只有 client 登录时不盲目用 client token
     assert.equal(result.ok, false);
     assert.equal(result.error.code, 'AUTHORIZATION_REQUIRED');
     assert.deepEqual(calls.authorizeOwnedRole, [], 'client token 会被中继以「角色必须相反」拒绝，不得尝试');
+  });
+});
+
+test('pollQrLogin(client)：上游账号资料为空时仍能为 probe 登记（账号信息缺失不得阻断登录）', async () => {
+  await withFakeVendor(async () => {
+    // 现场：扫码登录后 probe 登记失败，上游 /auth/me 的账号字段为空（GET 响应已校验 min(1)，
+    // 但一旦上游返回空串，整个扫码登录会直接抛错）。账号信息只用于展示，不得阻断 probe 登记。
+    qrPollImpl = async function (identity) {
+      await this.store.save(tokenRecord(identity));
+      return { status: 'complete', authorization: { method: 'account', account: '' }, accountToken: 'a'.repeat(20) };
+    };
+    const sess = await auth.startQrLogin('client', 'github');
+    const poll = await auth.pollQrLogin('client', sess.qrId);
+    assert.equal(poll.status, 'complete');
+    assert.deepEqual(poll.probe, { ok: true }, `probe 登记应成功，实际 ${JSON.stringify(poll.probe)}`);
+    assert.ok(FakeStore.get('probe').saved, 'probe 凭据已落盘');
+    assert.equal(FakeStore.get('probe').saved.account, undefined, '空账号不得写入凭据（会触发 schema min(1)）');
+  });
+});
+
+test('pollQrLogin(client)：上游账号信息原样传给 probe 登记', async () => {
+  await withFakeVendor(async () => {
+    qrPollImpl = async function (identity) {
+      await this.store.save(tokenRecord(identity));
+      return { status: 'complete', authorization: { method: 'account', account: 'user@x.com' }, accountToken: 'a'.repeat(20) };
+    };
+    const sess = await auth.startQrLogin('client', 'github');
+    const poll = await auth.pollQrLogin('client', sess.qrId);
+
+    assert.equal(poll.status, 'complete');
+    assert.deepEqual(poll.probe, { ok: true }, `probe 登记应成功，实际 ${JSON.stringify(poll.probe)}`);
+    assert.equal(FakeStore.get('probe').saved.account, 'user@x.com', '扫码得到的账号应随凭据落盘');
+  });
+});
+
+test('provisionProbeFromOwner：host 凭据无 account 字段时也能用 host token 登记 probe', async () => {
+  await withFakeVendor(async () => {
+    await auth.loginWithAccount('both', 'user@x.com', 'pw');
+    // 现场：host 凭据是扫码登录写的，可能不带 account。
+    const hostSaved = FakeStore.get('host').saved;
+    FakeStore.get('host').saved = tokenRecord({ deviceId: hostSaved.deviceId }, { authorizationMethod: 'owned_device' });
+    FakeStore.get('probe').saved = undefined;
+
+    const result = await auth.provisionProbeFromOwner();
+
+    assert.equal(result.ok, true, `补登记应成功，实际 ${JSON.stringify(result.error)}`);
+    assert.ok(FakeStore.get('probe').saved);
   });
 });
 
