@@ -54,7 +54,7 @@ AgentLRay 现有**多主机模式**（`design-multi-host`，P0+P1①② 已实�
 | 决策点 | 结论 |
 | --- | --- |
 | **Q16 远端写操作** | **全部放行**（`resume-command`、`sessions new`、`prompts rewrite/hidden/analyze`）：它们不是系统配置，属「操控远端会话」；继续走 `proxy.js` 默认透传。 |
-| **Q18 鉴权** | **无鉴权**（沿用现状 CSRF 语义）：薄服务默认 `HOST=127.0.0.1`，LAN 需显式 `HOST=0.0.0.0`；`csrf.js` 对无 `Origin` 的非浏览器客户端放行。**主动接受的风险**：绑 LAN 即任何人可看全部会话，文档需显著提示。 |
+| **Q18 鉴权** | 2026-11-21 决定「无鉴权」；**2026-11-22 已改为本机令牌鉴权**（`lib/auth.js`，见 [plan-benchmark-adoption-by-module](plan-benchmark-adoption-by-module.zh-CN.md) C-1）：本机直连（目标 local / 本机资源）需令牌，令牌未配置时自动生成并落 `~/.agentlray/ui-token`；远端目标走链路认证、转发前剥除本机凭证。LAN 暴露仍需显式 `HOST=0.0.0.0` 并显著提示。 |
 | **Q21 启动与端口** | `agentlray thin` 子命令 + `npm run thin`；默认 `PORT=3801`、`HOST=127.0.0.1`；配置仍用 `~/.agentlray/hosts.json`（与完整实例共享主机列表），可用 `AGENTLRAY_HOME` 隔离。 |
 
 ### 2.5 移动端 APP（#17）关系
@@ -71,7 +71,7 @@ AgentLRay 现有**多主机模式**（`design-multi-host`，P0+P1①② 已实�
 - **`GET /api/mode` 单 dist**：避免第二套前端构建；运行时探测与现有 `DEMO` 短路同构，前端裁剪集中在一个 `mode === 'thin'` 判定点。
 - **无 `local` 宿主**：薄服务自身不读平台日志，保留 `local` 会出现「切到本机看到 404」的伪能力；从数据模型上就没有本地数据源。
 - **dsh 强制 client**：薄服务定位是连接方；再当被连接方会把它变回「迷你完整实例」，违背「薄」。
-- **无鉴权**：与现有 AgentLRay 架构一致（无 cookie、无 token 体系），改动最小；默认只绑 127.0.0.1 是现有安全默认。为移动端暴露 LAN 的安全风险已明示，属用户拍板接受。
+- **鉴权边界（2026-11-22 更新）**：薄服务与完整实例共用 `lib/auth.js`——只保护本机直连，远端转发不验本机令牌（链路认证），避免把本机 cookie 泄露给远端；令牌缺省自动生成，桌面/Android 均零配置。
 
 ## 4. 影响与兼容
 

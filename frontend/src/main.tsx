@@ -4,13 +4,19 @@ import ReactDOM from 'react-dom/client';
 import { Toaster } from '@/components/ui/sonner';
 import App from './App';
 import { getMode } from '@/api/client';
+import { adoptTokenFromLocation } from '@/api/ui-token';
 import { useAppStore } from '@/store';
 import { DEMO } from '@/demo/flag';
 import './index.css';
 
+// 鉴权失败（C-1 本机令牌缺失/失效，HTTP 401）不重试：重试只会放大 401 日志，且不会自愈。
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1, refetchOnWindowFocus: false },
+    queries: {
+      retry: (failureCount, error) =>
+        (error as { httpStatus?: number } | null)?.httpStatus !== 401 && failureCount < 1,
+      refetchOnWindowFocus: false,
+    },
   },
 });
 
@@ -34,6 +40,8 @@ async function bootMode() {
 }
 
 async function render() {
+  // 本机令牌（C-1）：启动 URL 里带令牌时写入长效缓存并抹掉地址栏（必须在任何 API 请求前）。
+  await adoptTokenFromLocation();
   await bootMode();
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

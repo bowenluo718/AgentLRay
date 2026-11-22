@@ -23,6 +23,7 @@ const {
   openHost,
   closeHost,
   closeAllExcept,
+  closeDshHosts,
   testHostSpec,
   resolveIdentityKey,
   getRuntime,
@@ -31,6 +32,7 @@ const {
   setSelfIdentity,
   reportPeer,
   shortHostname,
+  rememberLastHost,
 } = require('../lib/hosts');
 
 // 每个测试前重置 hosts.json 与运行时，保证用例间无共享落盘状态。
@@ -41,6 +43,15 @@ beforeEach(async () => {
   } catch {
     /* 不存在则忽略 */
   }
+});
+
+test('rememberLastHost：hosts.json 写盘阻塞时不拖住调用方（连接响应不能被文件 IO 拖住）', async () => {
+  // 模拟现场：Windows 上 hosts.json 被云同步/杀软占用，写盘长时间不返回。
+  const started = Date.now();
+  const returned = rememberLastHost('h1', () => new Promise(() => {}));
+  // 必须同步返回（不是 Promise），调用方 res.json 不被写盘阻塞。
+  assert.equal(returned, undefined);
+  assert.ok(Date.now() - started < 100, 'rememberLastHost 应立即返回');
 });
 
 test('normalizeHost：合法输入规范化（缺省字段填默认）', () => {
@@ -410,6 +421,23 @@ test('closeAllExcept：保留 keepId 隧道，关闭其余（design R4-Q1 无常
   setRuntimeForTest('host-b', 'http://127.0.0.1:41002');
   closeAllExcept(LOCAL_ID);
   assert.equal(getRuntime('host-b'), undefined);
+});
+
+test('closeDshHosts：只关闭 dsh 隧道，ssh 主机保持不动（dsh 退出登录用）', async () => {
+  setRuntimeForTest('host-ssh', 'http://127.0.0.1:41001');
+  setRuntimeForTest('host-dsh', 'http://127.0.0.1:41002');
+  let dshClosed = 0;
+  getRuntime('host-dsh').dshTunnel = {
+    close: async () => {
+      dshClosed += 1;
+    },
+  };
+
+  closeDshHosts();
+
+  assert.equal(dshClosed, 1, 'dsh 隧道必须被关闭（否则退出后仍可转发、并会写回凭据）');
+  assert.equal(getRuntime('host-dsh'), undefined);
+  assert.ok(getRuntime('host-ssh'), 'ssh 隧道不依赖 dsh 凭据，不得被一并关闭');
 });
 
 test('reportPeer：向被连接方 POST /api/inbound/hello 上报本机身份（inbound peers）', async () => {

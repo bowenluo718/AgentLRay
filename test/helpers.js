@@ -47,6 +47,11 @@ function serverEnv(home, port) {
     // 宿主进程若导出 AGENTLRAY_NO_PLUGINS=1（例如排查问题时残留），会跳过 project/user
     // 来源，使自定义平台相关用例静默失效；测试基线显式清空，只由用例自身设置。
     AGENTLRAY_NO_PLUGINS: '',
+    // 本机鉴权（C-1）：未配置令牌时服务端会自动生成 ~/.agentlray/ui-token 并要求本机请求
+    // 携带令牌，既有 /api 用例会全部 401。测试基线显式关闭鉴权，仅 local-auth 用例通过
+    // extraEnv 打开（并显式给出令牌，避免随机生成影响断言）。
+    AGENTLRAY_UI_TOKEN: '',
+    AGENTLRAY_NO_AUTH: '1',
   };
 }
 

@@ -349,8 +349,11 @@ must be the first `/api` handler**, before any body parser (remote forwarding
 needs the raw body stream). It routes by `X-Host-Id` (or `?host=`, for SSE):
 default/`local` → `next()` into the local routes; remote → forward to the tunnel
 `baseUrl`, preserving the original `Host`/`Origin` for the remote's CSRF check.
-Business logic lives in `lib/`. A CSRF guard (`lib/csrf.js`) rejects cross-site
-state-changing requests before the body is parsed. All responses set
+Business logic lives in `lib/`. The `/api` guard (`lib/auth.js`) runs **before**
+the gateway: **local** requests (target `local`, or the local resources
+`/api/{hosts,inbound,dsh,mode}`) require the local token, remote targets pass
+through (link authentication); see §16. A CSRF guard (`lib/csrf.js`) rejects
+cross-site state-changing requests before the body is parsed. All responses set
 `Cache-Control: no-store`. A 256 KB JSON body limit applies.
 
 | Method & path | Purpose |
@@ -385,9 +388,20 @@ dir overrides) lives in [usage.md](usage.md#api).
 - **Host model** (`lib/hosts.js`): `local` is built in (direct connection to this
   process's port; not persisted, no tunnel); the rest persist in `hosts.json`
   with a runtime state machine
-  `disconnected`/`connecting`/`connected`/`error`. The tunnel lifecycle is bound
-  to the currently selected host: switching away closes it, deleting closes and
-  removes it, and process exit kills all ssh children (no orphans).
+  `connecting`/`connected`/`reconnecting`/`failed`/`disconnected` (`status` keeps
+  the legacy aliases so older consumers keep working). Failures carry a stable
+  `errorCode` (`HOST_OFFLINE`, `DSH_AUTH_REQUIRED`, `KEY_CHANGED`,
+  `VERSION_INCOMPATIBLE`, `TUNNEL_TIMEOUT`, `TUNNEL_REFUSED`, `UNREACHABLE`,
+  `INVALID_TARGET`, `AUTH_REQUIRED`) plus `retryable`. The tunnel lifecycle is
+  bound to the currently selected host: switching away closes it, deleting closes
+  and removes it, and process exit kills all ssh children (no orphans).
+- **Health probe** (`AGENTLRAY_HOST_PROBE_MS`, default 15 s; single-attempt
+  timeout 3 s): `GET <baseUrl>/api/version`. Two consecutive failures mark the
+  link lost → `reconnecting`. The timer is `unref`'d and cleared on close.
+- **Reconnect backoff** (`AGENTLRAY_HOST_BACKOFF_MS`): 1→2→4→8→15→30→60 s with
+  ±20 % jitter, retrying indefinitely; a manual `openHost` cancels the pending
+  backoff and resets it, while non-retryable errors go straight to `failed`
+  without looping.
 - **ssh transport** (`lib/transport.js`): spawn the system `ssh -L` for local
   port forwarding, keeping the remote AgentLRay bound to `127.0.0.1` (the
   security boundary is the system ssh layer; zero stored credentials — keys/
@@ -534,6 +548,12 @@ session-level `session_exit` records (→ `noteEnded` + `resolveAllPending`, so
 an `ask` interaction is closed). Hermes has a dedicated SQLite WAL-watch branch
 (timestamp-incremental query).
 
+Every push carries `id: <byteOffset>`. A reconnect passes `?after=<offset>` (or
+`Last-Event-ID`) and the route resumes from that offset, so messages written
+while the stream was down are delivered and existing ones are not re-sent;
+`after=0` is treated like no offset (full baseline). When the file rotated or
+truncated below the offset, the route falls back to a full read.
+
 ## 15. Export and OTLP
 
 - **Export** (`lib/export.js`): renders a normalized session as shareable
@@ -550,10 +570,58 @@ an `ask` interaction is closed). Hermes has a dedicated SQLite WAL-watch branch
 
 ## 16. Security and trust model
 
-- **No auth, localhost by default.** The dashboard exposes full session history
-  with zero auth; it binds to `127.0.0.1` by default (`HOST=0.0.0.0` opts into
-  LAN).
-- **CSRF:** no cookies → no CSRF token would help. The guard rejects
+- **Localhost by default.** It binds to `127.0.0.1` by default (`HOST=0.0.0.0`
+  opts into LAN).
+- **Local token auth** (`lib/auth.js`) — decided purely by the request target:
+  - Local requests (target `local`, or the local resources
+    `/api/{hosts,inbound,dsh,mode}`) must carry the token: `GET /?token=<t>`
+    validates it, sets a long-lived (`Max-Age=31536000`) `HttpOnly;
+    SameSite=Strict` cookie and 302s to `<next|/>#token=<t>` (`next` accepts
+    same-origin absolute paths only);
+    `/api/*` accepts that cookie or `X-AgentLRay-Token` (sha256 +
+    `timingSafeEqual`). Unknown host ids are treated as local (fail-closed).
+  - Token source: `AGENTLRAY_UI_TOKEN` wins (the Android shell generates it and
+    persists it in app-private storage); otherwise it is generated into
+    `~/.agentlray/ui-token` (0600, reused across restarts).
+    `AGENTLRAY_NO_AUTH=1` disables the guard (build scripts, test baseline).
+    `GET /api/version` stays public (readiness probe).
+  - Front-end cache (`frontend/src/api/ui-token.ts`): the 302 fragment
+    (`#token=`) never reaches the server or its logs; the SPA validates it
+    against `/api/mode` (a 401 keeps the existing cache, so a cross-origin
+    `#token=` cannot shadow a working token), stores it in
+    `localStorage['agentlray.uiToken']`, strips it with `replaceState`, and sends
+    `X-AgentLRay-Token` on every same-origin request. SSE authenticates by cookie
+    only: a 401 on the reconnect probe with a cached token present re-exchanges
+    it via `/?token=<cached>&next=<path>` (`next` accepts same-origin paths
+    only) instead of dropping the cache. The Android WebView calls
+    `CookieManager.flush()` after navigation and on stop, and re-navigates to
+    exchange when the token matches but the cookie is gone.
+  - Remote targets are **not** checked against the local token: the link
+    authenticates itself (ssh keys / dsh device identity) and the proxy strips
+    local cookies and token headers before forwarding.
+  - Inbound peers (dsh/ssh tunnels hitting `/api/*`) need **no configuration**;
+    the trust anchor lives in the transport layer:
+    - **Inbound socket** (`lib/inbound-socket.js`): the server also listens on
+      `~/.agentlray/inbound.sock` (socket 0600, directory 0700) with the same
+      app; any process that can connect is the same user, and such requests are
+      marked `req.agentlrayInboundSocket` and allowed. Other users/apps (distinct
+      Android UIDs) are stopped by kernel file permissions. The path is
+      advertised via public `/api/version` (`inboundSocket`) and dsh
+      `harness.transport.describe` (`inboundSocket`).
+    - The connector tunnels to it: ssh first reads `/api/version` over a TCP
+      tunnel, then switches to `ssh -L <port>:<remote socket path>` (OpenSSH
+      streamlocal forwarding); dsh points its loopback target at the path. With
+      no path available it falls back to TCP loopback (receiver then needs auth
+      disabled or a token).
+    - **dsh in-process marker** (`X-AgentLRay-Tunnel`,
+      `lib/tunnel-headers.js`): injected by the loopback host before forwarding;
+      never persisted, never leaves the process, so other local processes cannot
+      forge it.
+  - Why no HTTP-level connector proof (secret upload, challenge): with
+    `ssh -L` to a TCP port the request source is 127.0.0.1, so any local process
+    could replay the same bootstrap and the token would be worthless; only the
+    transport (UNIX socket file permissions) can tell them apart.
+- **CSRF:** the auth cookie is `SameSite=Strict`, and the guard rejects
   cross-site unsafe requests by checking `Origin`/`Sec-Fetch-Site`/`Referer`
   against the request's `Host` (origin-relative, so LAN deployments on any
   hostname keep working). The gateway preserves the original `Host`/`Origin`, so

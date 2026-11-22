@@ -90,8 +90,31 @@ export type PlatformsResponse = PlatformInfo[];
 
 // ---------- Hosts（multi-host）----------
 
-/** 主机连接状态机（design R3-Q3）。 */
-export type HostStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+/**
+ * 主机链路状态（A-1 稳定状态机）。
+ * - `reconnecting`：链路曾建立后断开，服务端正按指数退避自动重连（会自愈，无需用户操作）。
+ * - `failed`：建链失败且不可自愈（如身份密钥变化、登录失效、目标无效）。
+ * - `error`：前端本地判定的失败（如 connect 请求被拒/超时），服务端未参与，保留兼容。
+ */
+export type HostStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'failed'
+  | 'error';
+
+/** 服务端稳定错误码（lib/dsh/errors.js 单一真源）。前端据此给动作。 */
+export type HostErrorCode =
+  | 'HOST_OFFLINE'
+  | 'DSH_AUTH_REQUIRED'
+  | 'KEY_CHANGED'
+  | 'VERSION_INCOMPATIBLE'
+  | 'TUNNEL_TIMEOUT'
+  | 'TUNNEL_REFUSED'
+  | 'UNREACHABLE'
+  | 'INVALID_TARGET'
+  | 'AUTH_REQUIRED';
 
 export interface HostSsh {
   /** ssh 配置：host 直接透传 ~/.ssh/config 别名或 hostname。 */
@@ -123,7 +146,18 @@ export interface HostInfo {
   /** dsh 目标（type=dsh 时非 null；ssh 目标为 null）。 */
   dsh: HostDsh | null;
   status: HostStatus;
+  /** 链路 phase（与 status 同源，语义更规范）；老服务端可能缺失 → 回落 status。 */
+  phase?: HostStatus;
+  /** 失败/断链消息（人类可读）。`reconnecting` 时为最近一次断链原因；`connected` 为 null。 */
   error: string | null;
+  /** 稳定错误码（lib/dsh/errors.js）；无错误或老服务端为 null。 */
+  errorCode?: HostErrorCode | null;
+  /** 该错误是否可由自动重连自愈（服务端判定，前端据此决定是否提示「重试」）。 */
+  errorRetryable?: boolean | null;
+  /** 已自动重连次数（进入 connected 归零）。 */
+  attempt?: number;
+  /** 下次自动重连的时间戳（epoch ms）；非退避等待中为 null。 */
+  nextRetryAt?: number | null;
   version: { bootId: string; version?: string } | null;
   /** 远端上报的版本号（GET /api/version 的 version 字段；老远端不返回则为 null）。 */
   remoteVersion: string | null;

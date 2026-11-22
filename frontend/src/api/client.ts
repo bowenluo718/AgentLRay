@@ -26,6 +26,7 @@ import type {
 } from './types';
 import { DEMO } from '@/demo/flag';
 import { demoJson } from '@/demo/router';
+import { cachedUiToken } from './ui-token';
 
 /**
  * Per-platform log-directory overrides (settings dialog). Empty string = default.
@@ -86,10 +87,31 @@ async function fetchJson<T>(url: string, init?: FetchInit): Promise<T> {
   if (init?.local !== true && activeHostId !== 'local') {
     headers.set('X-Host-Id', activeHostId);
   }
+  // 本机令牌兜底（frontend/src/api/ui-token.ts）：cookie 被清/WebView 存储回收后，
+  // 仍可用缓存令牌访问本机接口。远端目标由 proxy 剥除，不会泄露给远端。
+  const token = cachedUiToken();
+  if (token && !headers.has('X-AgentLRay-Token')) headers.set('X-AgentLRay-Token', token);
   const response = await fetch(url, { ...init, headers });
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(body?.error || response.statusText);
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+      code?: string;
+      errorCode?: string;
+      errorRetryable?: boolean | null;
+      nextRetryAt?: number | null;
+    } | null;
+    // 附加稳定错误码（A-1）：调用方可按 code 给差异化提示/动作，message 保持人类可读。
+    const err = new Error(body?.error || response.statusText) as Error & {
+      code?: string | null;
+      retryable?: boolean | null;
+      nextRetryAt?: number | null;
+      httpStatus?: number;
+    };
+    err.code = body?.errorCode ?? body?.code ?? null;
+    err.retryable = body?.errorRetryable ?? null;
+    err.nextRetryAt = body?.nextRetryAt ?? null;
+    err.httpStatus = response.status;
+    throw err;
   }
   return response.json() as Promise<T>;
 }
@@ -565,17 +587,20 @@ export function exportUrl(
 }
 
 /** URL for the real-time tail EventSource (GET /api/watch, SSE — consumed via new EventSource()).
- *  EventSource 不能带自定义头，非 local 主机时用 ?host= query 指定路由目标。 */
+ *  EventSource 不能带自定义头，非 local 主机时用 ?host= query 指定路由目标。
+ *  `after` 为断线补拉起读偏移（B-1）：服务端从该字节偏移续读并补发断线期间新增消息。 */
 export function watchUrl(opts: {
   platform: Platform;
   sessionId: string;
   agent?: string;
+  after?: number | null;
 }): string {
   return withParams('/api/watch', {
     platform: opts.platform,
     sessionId: opts.sessionId,
     agent: opts.agent,
     host: activeHostId === 'local' ? undefined : activeHostId,
+    after: opts.after ?? undefined,
   });
 }
 
@@ -632,6 +657,10 @@ export interface HostTestResult {
   status: string;
   bootId: string | null;
   error: string | null;
+  /** 稳定错误码（A-1）：测试失败时用于给差异化提示。 */
+  errorCode?: string | null;
+  /** 该失败是否可重试（自动重连可自愈）。 */
+  errorRetryable?: boolean | null;
 }
 
 /** POST /api/hosts/test — 测试「未保存」的主机配置（表单「测试连接」）：
@@ -681,7 +710,8 @@ export interface DshDevice {
   name: string;
   platform: string;
   membershipId: string;
-  online: boolean;
+  /** true/false 为 presence 查询结果；null 表示查询失败、在线状态未知。 */
+  online: boolean | null;
   lastSeenAt: number | null;
 }
 
@@ -755,4 +785,29 @@ export function connectHost(id: string): Promise<HostTestResult> {
 /** POST /api/hosts/:id/disconnect — 手动断开连接（关隧道 + 停心跳；local 不可断）。 */
 export function disconnectHost(id: string): Promise<{ id: string; status: string }> {
   return requestJson(`/api/hosts/${encodeURIComponent(id)}/disconnect`, 'POST', undefined, { local: true });
+}
+
+/** DELETE /api/hosts/:id/trust — 忘记此主机（A-6）：清除 dsh 设备身份钉扎。
+ *  对端公钥变化（KEY_CHANGED）时 fail-closed，用户确认后清除信任再重连。 */
+export function forgetHostTrust(
+  id: string
+): Promise<{ id: string; deviceId: string; removed: number }> {
+  return requestJson(`/api/hosts/${encodeURIComponent(id)}/trust`, 'DELETE', undefined, {
+    local: true,
+  });
+}
+
+/** 宿主网络状态（D-1）：原生壳最近一次上报 + 服务端时间。 */
+export interface NetworkStatus {
+  transport: string | null;
+  blocked: boolean | null;
+  dnsChanged: boolean;
+  reportedAt: number;
+  serverTime: number;
+}
+
+/** GET /api/network/status — 本机资源（local: true），读取原生壳最近一次网络上报。
+ *  从未上报（桌面端/浏览器）返回 status: null。 */
+export function getNetworkStatus(): Promise<{ status: NetworkStatus | null; serverTime: number }> {
+  return fetchJson('/api/network/status', { local: true });
 }

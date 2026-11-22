@@ -64,13 +64,36 @@ const FAKE_PROVIDERS = [
 ];
 
 // 记录被调用的事件，供断言。
-const calls = { authorizeWithAccount: [], qrStart: [], qrPoll: [], providers: 0, providersBaseUrl: undefined, providersThrow: false, providersNetworkError: false, providersDnsError: false };
+const calls = { authorizeWithAccount: [], authorizeOwned: [], qrStart: [], qrPoll: [], apiRoles: [], providers: 0, providersBaseUrl: undefined, providersThrow: false, providersNetworkError: false, providersDnsError: false };
 
-function FakeClientServerApi(serverUrl, store) {
+// 与真实 vendor 一致：设备 role 由使用的 API 类决定（HostServerApi=host / ClientServerApi=client），
+// 注册时上游用 this.role 生成设备描述（deviceDescriptor）→ 记录它以便断言。
+function FakeClientServerApi(serverUrl, store, fetchImplementation, role = 'client') {
   this.baseUrl = serverUrl.replace(/\/+$/, '');
   this.store = store;
+  this.role = role;
   this.identity = undefined;
   this.bindIdentity = (id) => { this.identity = id; };
+  calls.apiRoles.push(this.role);
+  // probe（派生身份）用账号授权登记，不传账号密码（PATCH：authorizeOwnedRoleWithAccount）。
+  this.authorizeOwnedRoleWithAccount = async (identity, accountToken, account, recoverIdentity) => {
+    calls.authorizeOwned.push({ deviceId: identity.deviceId, role: this.role, accountToken, account, recover: typeof recoverIdentity === 'function' });
+    if (!accountToken) {
+      const e = new Error('Account authorization is required.');
+      e.code = 'INVALID_MESSAGE';
+      throw e;
+    }
+    await this.store.save({
+      serverUrl: this.baseUrl,
+      deviceId: identity.deviceId,
+      authorizationMethod: 'account',
+      ...(account ? { account } : {}),
+      accessToken: 'a'.repeat(20),
+      refreshToken: 'r'.repeat(20),
+      accessTokenExpiresAt: Date.now() + 3600_000,
+      refreshTokenExpiresAt: Date.now() + 30 * 86400_000,
+    });
+  };
   this.oauthProviders = async () => {
     calls.providers += 1;
     calls.providersBaseUrl = this.baseUrl;
@@ -105,23 +128,16 @@ function FakeClientServerApi(serverUrl, store) {
     calls.qrStart.push(provider);
     return { qrId: 'f'.repeat(20) + provider, scanUrl: `${this.baseUrl}/api/v1/auth/q/abc123`, expiresIn: 600, provider };
   };
-  this.pollOAuthQrLogin = async (identity, qrId) => {
-    calls.qrPoll.push({ qrId, deviceId: identity.deviceId });
-    // 模拟扫码完成：register 一个 token 到 store。
-    await this.store.save({
-      serverUrl: this.baseUrl,
-      deviceId: identity.deviceId,
-      authorizationMethod: 'account',
-      account: '扫码用户',
-      accessToken: 'a'.repeat(20),
-      refreshToken: 'r'.repeat(20),
-      accessTokenExpiresAt: Date.now() + 3600_000,
-      refreshTokenExpiresAt: Date.now() + 30 * 86400_000,
-    });
-    return { status: 'complete', authorization: { method: 'account', account: '扫码用户' } };
-  };
-  this.authorizeWithAccount = async (identity, email, password) => {
-    calls.authorizeWithAccount.push({ deviceId: identity.deviceId, email, password });
+  // 与上游签名一致：authorizeWithAccount(identity, email, password, recoverIdentity?)，返回
+  // { method, account, accountToken }（accountToken 为 AgentLRay 补丁，用于派生身份登记）。
+  this.authorizeWithAccount = async (identity, email, password, recoverIdentity) => {
+    calls.authorizeWithAccount.push({ deviceId: identity.deviceId, role: this.role, email, password, recover: typeof recoverIdentity === 'function' });
+    if (calls.authorizeRejected) {
+      // 模拟服务器 revoke 本设备：上游据此调 recoverIdentity 换身份后重试（与真实 register 语义一致）。
+      calls.authorizeRejected = false;
+      const next = await recoverIdentity();
+      return this.authorizeWithAccount(next, email, password, recoverIdentity);
+    }
     if (email === 'bad@example.com' || password === 'wrong') {
       const e = new Error('AUTH_INVALID');
       e.code = 'AUTH_INVALID';
@@ -137,12 +153,39 @@ function FakeClientServerApi(serverUrl, store) {
       accessTokenExpiresAt: Date.now() + 3600_000,
       refreshTokenExpiresAt: Date.now() + 30 * 86400_000,
     });
+    return { method: 'account', account: email, accountToken: 'a'.repeat(20) };
   };
+  // 与上游一致：pollOAuthQrLogin(identity, qrId, recoverIdentity?)；token 由上游内部 register() 写入。
+  this.pollOAuthQrLogin = async (identity, qrId, recoverIdentity) => {
+    calls.qrPoll.push({ qrId, role: this.role, deviceId: identity.deviceId });
+    if (calls.qrPollRevoked) {
+      calls.qrPollRevoked = false;
+      const next = await recoverIdentity();
+      return this.pollOAuthQrLogin(next, qrId, recoverIdentity);
+    }
+    await this.store.save({
+      serverUrl: this.baseUrl,
+      deviceId: identity.deviceId,
+      authorizationMethod: 'account',
+      account: '扫码用户',
+      accessToken: 'a'.repeat(20),
+      refreshToken: 'r'.repeat(20),
+      accessTokenExpiresAt: Date.now() + 3600_000,
+      refreshTokenExpiresAt: Date.now() + 30 * 86400_000,
+    });
+    calls.qrPollRecover = { provided: typeof recoverIdentity === 'function' };
+    return { status: 'complete', authorization: { method: 'account', account: '扫码用户' }, accountToken: 'a'.repeat(20) };
+  };
+}
+
+// HostServerApi 默认 role='host'（与上游一致）；ClientServerApi 默认 'client'。
+function FakeHostServerApi(serverUrl, store, fetchImplementation, role = 'host') {
+  FakeClientServerApi.call(this, serverUrl, store, fetchImplementation, role);
 }
 
 function fakeVendor() {
   return {
-    serverApi: { ClientServerApi: FakeClientServerApi },
+    serverApi: { ClientServerApi: FakeClientServerApi, HostServerApi: FakeHostServerApi },
     serverCredentials: { ServerCredentialStore: FakeServerCredentialStore },
     crypto: { fromBase64Url: (s) => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64') },
   };
@@ -152,6 +195,8 @@ function fakeVendor() {
 beforeEach(() => {
   for (const k of Object.keys(stores)) delete stores[k];
   calls.authorizeWithAccount = [];
+  calls.authorizeOwned = [];
+  calls.apiRoles = [];
   calls.qrStart = [];
   calls.qrPoll = [];
   calls.providers = 0;
@@ -216,9 +261,74 @@ test('loginWithAccount：both 角色注册 host+client 两个 scope', async () =
     assert.deepEqual(res.roles, ['host', 'client']);
     const status = await auth.scopeLoginStatus();
     assert.deepEqual(status.roles, ['host', 'client']);
-    // 两个 scope 各调了一次 authorizeWithAccount
+    // host/client 各调了一次 authorizeWithAccount；both 同时顺带注册 probe（连接测试身份，
+    // 独立设备身份，防止连接测试顶替出站隧道）→ 共 3 个互不相同的 deviceId。
     const ids = calls.authorizeWithAccount.map((c) => c.deviceId);
-    assert.equal(new Set(ids).size, 2);
+    assert.equal(ids.length, 2);
+    assert.equal(calls.authorizeOwned.length, 1);
+    assert.equal(new Set([...ids, calls.authorizeOwned[0].deviceId]).size, 3);
+    assert.deepEqual(res.probe, { ok: true });
+  });
+});
+
+test('loginWithAccount：host 角色必须用 HostServerApi 注册为 host 设备（否则中继设备列表看不到）', async () => {
+  await withFakeVendor(async () => {
+    await auth.loginWithAccount('host', 'user@x.com', 'pw');
+    // 中继服务器 /api/v1/devices 只返回 role=host 的设备；用 ClientServerApi（role=client）
+    // 注册 host 身份会让本机永远不出现在其它 AgentLRay 的设备列表里。
+    assert.deepEqual(calls.apiRoles, ['host']);
+    assert.deepEqual(calls.authorizeWithAccount.map((c) => c.role), ['host']);
+  });
+});
+
+test('loginWithAccount：client 与 probe 都注册为 client 设备', async () => {
+  await withFakeVendor(async () => {
+    await auth.loginWithAccount('client', 'user@x.com', 'pw');
+    assert.deepEqual(calls.apiRoles, ['client', 'client']);
+    assert.deepEqual(calls.authorizeWithAccount.map((c) => c.role), ['client']);
+    assert.deepEqual(calls.authorizeOwned.map((c) => c.role), ['client']);
+  });
+});
+
+test('pollQrLogin(host)：扫码登录后 host 身份以 host 设备注册', async () => {
+  await withFakeVendor(async () => {
+    const sess = await auth.startQrLogin('host', 'zhihu');
+    await auth.pollQrLogin('host', sess.qrId);
+    assert.deepEqual(calls.qrPoll.map((c) => c.role), ['host']);
+  });
+});
+
+test('loginWithAccount：probe 注册复用账号授权（不传空账号密码、不要求账号密码重输）', async () => {
+  await withFakeVendor(async () => {
+    const res = await auth.loginWithAccount('client', 'user@x.com', 'pw');
+    assert.deepEqual(res.roles, ['client']);
+    assert.deepEqual(res.probe, { ok: true });
+    // probe 走「账号授权登记」而非账号密码：只调用一次 authorizeOwnedRoleWithAccount，
+    // 带本次登录得到的账号令牌 + recoverIdentity，绝不把账号密码扩散给 probe。
+    assert.equal(calls.authorizeWithAccount.length, 1);
+    assert.equal(calls.authorizeOwned.length, 1);
+    assert.equal(calls.authorizeOwned[0].recover, true);
+    assert.equal(calls.authorizeOwned[0].accountToken, 'a'.repeat(20));
+    assert.equal(calls.authorizeOwned[0].account, 'user@x.com');
+    const probeStore = stores.probe.saved;
+    assert.ok(probeStore, 'probe 凭据应已落盘');
+    assert.notEqual(probeStore.deviceId, stores.client.saved.deviceId, 'probe 必须是独立设备身份');
+  });
+});
+
+test('discoverProviders / startQrLogin：退出后不重建设备身份文件（读路径不生成身份）', async () => {
+  await withFakeVendor(async () => {
+    await auth.loginWithAccount('client', 'user@x.com', 'pw');
+    const dshDir = path.join(tmpHome, '.agentlray', 'dsh');
+    await auth.logout();
+    assert.equal(fs.existsSync(dshDir), false);
+
+    // 退出后前端会调用这两个接口渲染登录表单：不得顺手生成 X25519 身份。
+    await auth.discoverProviders('client');
+    await auth.startQrLogin('client', 'zhihu');
+
+    assert.equal(fs.existsSync(path.join(dshDir, 'dsh-client.json')), false, '发现 provider 不得生成身份');
+    assert.equal(fs.existsSync(path.join(dshDir, 'dsh-client.key')), false);
   });
 });
 
@@ -262,19 +372,64 @@ test('startQrLogin / pollQrLogin：both 拒绝，host/client 成功并落 token'
     // poll 成功后 token 已落 client scope
     const status = await auth.scopeLoginStatus();
     assert.deepEqual(status.roles, ['client']);
+    // 扫码完成后同样注册 probe（复用扫码得到的账号授权），不影响主登录结果。
+    assert.deepEqual(poll.probe, { ok: true });
+    assert.deepEqual(calls.qrPollRecover, { provided: true });
+    assert.ok(stores.probe.saved, 'probe 凭据应已落盘');
+  });
+});
+
+// ---- 身份被服务器 revoke：登录边界重建身份（否则同一身份永远被拒） ----
+
+test('pollQrLogin：DEVICE_REVOKED → 重建 client 身份并重试，token 落新身份', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'client', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    // 模拟扫码 poll 在 register 时被服务器 revoke：上游调 recoverIdentity 换身份后重试成功。
+    calls.qrPollRevoked = true;
+    const sess = await auth.startQrLogin('client', 'github');
+    const before = JSON.parse(fs.readFileSync(path.join(tmpHome, '.agentlray', 'dsh', 'dsh-client.json'), 'utf8')).deviceId;
+    const poll = await auth.pollQrLogin('client', sess.qrId);
+    assert.equal(poll.status, 'complete');
+    const after = JSON.parse(fs.readFileSync(path.join(tmpHome, '.agentlray', 'dsh', 'dsh-client.json'), 'utf8')).deviceId;
+    assert.notEqual(after, before, '被 revoke 后必须换新身份');
+    assert.equal(stores.client.saved.deviceId, after, 'token 必须落在新身份下');
+    assert.deepEqual(poll.probe, { ok: true });
+  });
+});
+
+test('authorizeWithAccount：DEVICE_REVOKED → 重建 host 身份并重试，token 落新身份', async () => {
+  await withFakeVendor(async () => {
+    await saveDshSettings({ role: 'host', serverUrl: 'https://dsh.r2049.cn', deviceName: 'dev' });
+    calls.authorizeRejected = true;
+    // 显式先建好旧身份（不依赖其它用例留下的目录状态）。
+    await require('../lib/dsh/identity').identityStoreFor('host').loadOrCreate('dev');
+    const before = JSON.parse(fs.readFileSync(path.join(tmpHome, '.agentlray', 'dsh', 'dsh-device.json'), 'utf8')).deviceId;
+    const res = await auth.loginWithAccount('host', 'user@x.com', 'pw');
+    assert.deepEqual(res.roles, ['host']);
+    const after = JSON.parse(fs.readFileSync(path.join(tmpHome, '.agentlray', 'dsh', 'dsh-device.json'), 'utf8')).deviceId;
+    assert.notEqual(after, before, '被 revoke 后必须换新身份');
+    assert.equal(stores.host.saved.deviceId, after, 'token 必须落在新身份下');
   });
 });
 
 // ---- logout ----
 
-test('logout：清所有 scope token，回未登录态', async () => {
+test('logout：清空 ~/.agentlray/dsh 全部文件，回未登录态', async () => {
   await withFakeVendor(async () => {
     await auth.loginWithAccount('both', 'user@x.com', 'pw');
     assert.equal((await auth.scopeLoginStatus()).loggedIn, true);
+    const dshDir = path.join(tmpHome, '.agentlray', 'dsh');
+    // 登录后该目录下确有凭据 + 设备身份/密钥（host/client/probe 三套）。
+    assert.ok(fs.existsSync(path.join(dshDir, 'dsh-device.json')));
+    assert.ok(fs.existsSync(path.join(dshDir, 'dsh-client.key')));
     await auth.logout();
+    assert.equal(fs.existsSync(dshDir), false, '退出必须删除 ~/.agentlray/dsh 目录');
     const status = await auth.scopeLoginStatus();
     assert.equal(status.loggedIn, false);
     assert.deepEqual(status.roles, []);
+    // 重新登录能正常生成新身份。
+    await auth.loginWithAccount('client', 'user@x.com', 'pw');
+    assert.ok(fs.existsSync(path.join(dshDir, 'dsh-client.json')));
   });
 });
 
@@ -378,9 +533,15 @@ test('POST /api/dsh/auth/logout 后回未登录态', async () => {
       let cfg = await (await fetch(`${base}/api/dsh/config`)).json();
       assert.equal(cfg.authStatus.loggedIn, true);
       // 退出
+      const dshDir = path.join(tmpHome, '.agentlray', 'dsh');
+      assert.ok(fs.existsSync(dshDir), '登录后 ~/.agentlray/dsh 应存在');
       await fetch(`${base}/api/dsh/auth/logout`, { method: 'POST' });
+      assert.equal(fs.existsSync(dshDir), false, '退出必须删除 ~/.agentlray/dsh');
       cfg = await (await fetch(`${base}/api/dsh/config`)).json();
       assert.equal(cfg.authStatus.loggedIn, false);
+      // 回归：查登录态的读路径（configView → scopeLoginStatus）不得生成设备身份，
+      // 否则退出后 UI 一刷新就把 dsh-device.json/.key 等写回目录（现场：退出后仍残留 4 个文件）。
+      assert.equal(fs.existsSync(dshDir), false, 'GET /api/dsh/config 不得重建设备身份文件');
     } finally {
       server.close();
     }

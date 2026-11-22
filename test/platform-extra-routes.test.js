@@ -170,6 +170,8 @@ describe('平台等价 P2：legacy 别名与卸载 404', () => {
         OPENCLAW_DIR: path.join(home, '.openclaw', 'agents'),
         AGENTLRAY_PLATFORMS_DIR: path.join(home, '.none-user'),
         AGENTLRAY_PROJECT_PLATFORMS_DIR: path.join(home, '.none-project'),
+        // 本机鉴权（lib/auth.js）默认启用：测试基线显式关闭，否则所有 /api 请求 401。
+        AGENTLRAY_NO_AUTH: '1',
       },
       cwd: REPO_ROOT,
       stdio: ['ignore', 'ignore', 'pipe'],

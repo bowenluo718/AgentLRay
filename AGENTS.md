@@ -7,7 +7,7 @@ AgentLRay 是本地 Web 看板：读取各 AI 编码代理（OpenClaw、Codex、
 ## 常用命令
 
 ```bash
-npm start                # http://127.0.0.1:3800（无鉴权，勿随意外露）
+npm start                # http://127.0.0.1:3800（本机请求需令牌；启动日志打印带 token 的地址）
 npm run dev              # 先 build:ui 再启动
 npm run build:ui         # 诊断规则打包 + vite build；首次用 build:ui:full
 npm run build:demo       # VITE_DEMO=1 演示构建
@@ -38,6 +38,6 @@ npm run pack:build
 - **文档**：中间过程文档（设计/计划/进度/审查/测试举证）写 `docs/.local/`（被 `.gitignore` 忽略、不提交）并登记 `docs/.local/README.md`；正式文档在 `docs/`。未指定语言时**默认简体中文**；代码标识符、命令、配置键、错误信息保持原文。
 - **设计文档进度与迁移（强制）**：`docs/.local/` 下的设计/计划文档必须记录**实施进度**（已实现 / 部分实现 / 待实现 + 代码证据），实现有变更则同步更新文档内进度小节、`docs/.local/README.md` 的「实施进度与迁移状态」索引。**已实现或部分实现的设计文档必须迁移到 `docs/design/` 并随代码提交**，同时更新 `docs/design/README.md` 与 `docs/.local/README.md` 的索引/进度；尚未实现的过程材料（评审、进度、交接、外部研究）留在 `docs/.local/`。迁移后在 `docs/design/` 的副本为准，`docs/.local/` 保留同名过程稿。
 - **平台适配器是可信边界**：加载即按当前权限执行任意代码；`AGENTLRAY_NO_PLUGINS=1` 跳过 project/user 来源。
-- **安全默认**：无鉴权，默认只绑 `127.0.0.1`；外露需显式 `HOST=0.0.0.0`。
-- **测试隔离**：`test/setup-env.cjs` 注入空的用户平台目录并注册 `@agentlray/shared` 别名；它**不得**设置 `AGENTLRAY_HOME`/改 `HOME`（既有测试会自建隔离家目录）。`test/fixtures/home` 必须整体入库。
+- **安全默认**：只绑 `127.0.0.1`；**本机直连**（目标 local 或本机资源 `/api/{hosts,inbound,dsh,mode}`）必须携带本机令牌——`AGENTLRAY_UI_TOKEN` 优先，否则自动生成并落 `~/.agentlray/ui-token`（0600），启动日志打印 `GET /?token=` 地址（兑换 `HttpOnly` cookie）；`AGENTLRAY_NO_AUTH=1` 关闭。**远端目标不验本机令牌**（链路认证：ssh 私钥 / dsh 设备身份），proxy 转发前剥除本机凭证；两类入站的信任锚都在传输层——ssh 入站经 `~/.agentlray/inbound.sock`（0600、目录 0700，同用户进程才连得上，`req.agentlrayInboundSocket` 放行，`lib/inbound-socket.js`），dsh loopback 入站用进程内密钥（`X-AgentLRay-Tunnel`，`lib/tunnel-headers.js`）。**每个 HOME 只能有一个进程监听该 socket**（第二个实例 bind 失败即抛错），因此 `/api/version` 与 dsh `harness.transport.describe` 只通告本进程实际 bind 成功的路径（`boundInboundSocketPath()`），否则会把连接方引到同 HOME 的另一实例。外露需显式 `HOST=0.0.0.0`。
+- **测试隔离**：`test/setup-env.cjs` 注入空的用户平台目录并注册 `@agentlray/shared` 别名；它**不得**设置 `AGENTLRAY_HOME`/改 `HOME`（既有测试会自建隔离家目录）。`test/fixtures/home` 必须整体入库。本机鉴权（`lib/auth.js`）缺省启用，测试基线用 `AGENTLRAY_NO_AUTH=1`（`test/helpers.js` 的 `serverEnv()` 已带）；**直接 `spawn(server.js)` 的测试也必须带**，否则服务端自动生成令牌、所有 `/api` 请求 401。
 - **文档时效**：`docs/architecture.md`/`architecture.zh-CN.md` 已按当前实现重写（基线 `c7fdb8f`），与 `docs/usage*.md`、`docs/diagnostics*.md`、`docs/offline-inspect*.md`、`docs/session-forensics*.md`、`docs/ROADMAP*.md` 同批校对；`docs/.local/implementation.md` 是历史快照（仍提到已移除的 `public/` legacy UI、会话备份、资产库），仅供追溯。`claims.json` 中每个公开数字都配有 `scripts/claims-receipts.mjs` 复算命令，改动文档数字时需同步该命令的期望值。以仓库实际文件为准。

@@ -38,7 +38,8 @@ async function getJson(pathname) {
 
 async function main() {
   const home = mkdtempSync(path.join(os.tmpdir(), 'axr-fixtures-'));
-  const env = { ...process.env, HOME: home, PORT: String(PORT), HOST: '127.0.0.1' };
+  // 本机鉴权（lib/auth.js）对这些一次性构建脚本无意义：显式关闭，否则每个 GET 都 401。
+  const env = { ...process.env, HOME: home, PORT: String(PORT), HOST: '127.0.0.1', AGENTLRAY_NO_AUTH: '1' };
   for (const [platform, [srcDir, dataDir]] of Object.entries(PLATFORM_DIRS)) {
     cpSync(path.join(SAMPLE_LOGS, srcDir), path.join(home, dataDir), { recursive: true });
     void platform;

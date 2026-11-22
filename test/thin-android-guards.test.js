@@ -30,6 +30,7 @@ const {
 } = require('../lib/hosts');
 const mountHostsRoutes = require('../lib/routes/hosts');
 const mountModeRoutes = require('../lib/routes/mode');
+const mountNetworkRoutes = require('../lib/routes/network');
 
 const ENV_KEYS = ['AGENTLRAY_DISABLE_SSH', 'AGENTLRAY_NATIVE_SAVE', 'AGENTLRAY_THIN_HOST'];
 const savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
@@ -57,6 +58,7 @@ function startApp(hostsOptions = {}, modeOptions = { mode: 'thin' }) {
     app.use(express.json());
     mountHostsRoutes(app, hostsOptions);
     mountModeRoutes(app, modeOptions);
+    mountNetworkRoutes(app);
     const server = app.listen(0, '127.0.0.1', () => {
       const port = server.address().port;
       resolveApp({
@@ -202,7 +204,8 @@ test('mode capabilities：DISABLE_SSH 派生 transports=dsh，NATIVE_SAVE 派生
   try {
     const r = await app.request('/api/mode');
     const body = JSON.parse(r.body);
-    assert.deepEqual(body.capabilities, { transports: ['dsh'], nativeSave: true });
+    // networkBlocked（D-1）：无原生上报时为 null。
+    assert.deepEqual(body.capabilities, { transports: ['dsh'], nativeSave: true, networkBlocked: null });
   } finally {
     app.server.close();
   }
@@ -213,9 +216,42 @@ test('mode capabilities：未设开关时 transports=[ssh,dsh]、nativeSave=fals
   try {
     const r = await app.request('/api/mode');
     const body = JSON.parse(r.body);
-    assert.deepEqual(body.capabilities, { transports: ['ssh', 'dsh'], nativeSave: false });
+    assert.deepEqual(body.capabilities, {
+      transports: ['ssh', 'dsh'],
+      nativeSave: false,
+      networkBlocked: null,
+    });
   } finally {
     app.server.close();
+  }
+});
+
+test('mode capabilities：原生壳上报网络阻断后 networkBlocked=true（D-1）', async () => {
+  const network = require('../lib/routes/network');
+  network._resetForTest();
+  const app = await startApp({ includeLocal: false }, { mode: 'thin' });
+  try {
+    const before = JSON.parse((await app.request('/api/mode')).body);
+    assert.equal(before.capabilities.networkBlocked, null, '无上报时为 null（未知）');
+
+    const posted = await app.request('/api/network/status', {
+      method: 'POST',
+      body: { transport: 'cellular', blocked: true },
+    });
+    assert.equal(posted.status, 200);
+
+    const after = JSON.parse((await app.request('/api/mode')).body);
+    assert.equal(after.capabilities.networkBlocked, true);
+
+    await app.request('/api/network/status', {
+      method: 'POST',
+      body: { transport: 'cellular', blocked: false },
+    });
+    const restored = JSON.parse((await app.request('/api/mode')).body);
+    assert.equal(restored.capabilities.networkBlocked, false, '恢复后如实上报 false');
+  } finally {
+    app.server.close();
+    network._resetForTest();
   }
 });
 
@@ -227,4 +263,44 @@ test('完整实例 /api/mode 不带 capabilities（保持向后兼容）', async
   } finally {
     app.server.close();
   }
+});
+
+// ---- D-2 首启进度占位页 ----
+
+test('D-2 占位页：window.__agentlrayProgress 存在，百分比/剩余时间与无总量降级', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(
+    path.join(__dirname, '..', 'android', 'www', 'index.html'),
+    'utf8'
+  );
+  assert.ok(html.includes('window.__agentlrayProgress'), '占位页必须暴露原生注入入口');
+  assert.ok(html.includes("id=\"progress\""), '占位页必须有进度容器');
+
+  // 用最小 DOM 桩执行注入脚本（不引入 jsdom）：只需 classList/style/textContent。
+  const script = html.slice(html.indexOf('<script>') + 8, html.indexOf('</script>'));
+  const elements = {};
+  const el = (id) => {
+    elements[id] ??= {
+      id,
+      style: {},
+      textContent: '',
+      classList: { add(c) { this.set.add(c) }, set: new Set() },
+    };
+    return elements[id];
+  };
+  const sandbox = { window: {}, document: { getElementById: el } };
+  new Function('window', 'document', script)(sandbox.window, sandbox.document);
+
+  // 正常进度：50%，剩余 30s。
+  sandbox.window.__agentlrayProgress(500, 1000, 30_000);
+  assert.equal(elements.fill.style.width, '50%');
+  assert.match(elements.meta.textContent, /50%/);
+  assert.match(elements.meta.textContent, /30 秒/);
+  assert.ok(elements.progress.classList.set.has('active'));
+
+  // 总量未知：不假装有百分比，只报已处理项数。
+  sandbox.window.__agentlrayProgress(42, 0, null);
+  assert.match(elements.meta.textContent, /42 项/);
+  assert.ok(!elements.meta.textContent.includes('%'));
 });

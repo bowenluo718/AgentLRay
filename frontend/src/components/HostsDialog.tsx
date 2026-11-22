@@ -9,9 +9,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, Settings2 } from 'lucide-react';
-import { getHosts, getDshDevices, deleteHost as apiDeleteHost } from '@/api/client';
+import { getHosts, getDshDevices, deleteHost as apiDeleteHost, forgetHostTrust } from '@/api/client';
 import type { HostInfo, HostStatus, InboundPeer } from '@/api/types';
-import { HOST_STATUS_DOT, HOST_STATUS_LABEL } from '@/lib/host-status';
+import {
+  HOST_ERROR_LABEL,
+  HOST_STATUS_DOT,
+  HOST_STATUS_LABEL,
+  isSelfHealing,
+} from '@/lib/host-status';
 import { useAppStore, REMEMBERED_HOST_KEY } from '@/store';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -135,6 +140,7 @@ export function HostsDialog({
   const selectedHostId = useAppStore((s) => s.selectedHostId);
   const hostStatus = useAppStore((s) => s.hostStatus);
   const hostError = useAppStore((s) => s.hostError);
+  const hostErrorCode = useAppStore((s) => s.hostErrorCode);
   const inbound = useAppStore((s) => s.inbound);
   // 薄服务无 local 宿主（后端已不返回），空态文案改为「远程主机」。
   const isThin = useAppStore((s) => s.mode) === 'thin';
@@ -167,6 +173,27 @@ export function HostsDialog({
     },
     onError: (e) => toast.error(`删除失败：${(e as Error).message}`),
   });
+  // A-6「忘记此主机」：仅 dsh 主机（设备身份钉扎）。对端公钥变化后 fail-closed，
+  // 用户确认后清除 client/probe 两个信任库的钉扎，再重连（信任任何持新密钥的对端是
+  // 安全相关的破坏性动作，必须二次确认）。
+  const forgetMut = useMutation({
+    mutationFn: (id: string) => forgetHostTrust(id),
+    onSuccess: (res, id) => {
+      invalidate();
+      toast.success(`已清除「${id}」的信任记录（${res.removed} 项），正在重新连接`);
+      onConnect(id);
+    },
+    onError: (e) => toast.error(`清除信任失败：${(e as Error).message}`),
+  });
+  const onForget = (h: HostInfo) => {
+    const ok = window.confirm(
+      `确认清除「${h.label || h.id}」的设备信任记录？\n\n` +
+        '清除后将无条件信任持有新密钥的对端。仅当确认目标主机确已重装或更换设备时继续。'
+    );
+    if (!ok) return;
+    forgetMut.mutate(h.id);
+  };
+
   // 断开连接：只关隧道 + 停心跳（不删主机）。走 store 的 disconnectHost（同顶栏逻辑）。
   const disconnectMut = useMutation({
     mutationFn: (id: string) => disconnectHost(id),
@@ -219,7 +246,7 @@ export function HostsDialog({
   const dshLabel = (deviceId: string): string => {
     const d = (devices.data ?? []).find((it) => it.deviceId === deviceId);
     if (!d) return deviceId;
-    return `${d.name}（${d.online ? '在线' : '离线'}）· ${deviceId.slice(0, 8)}`;
+    return `${d.name}（${d.online == null ? '状态未知' : d.online ? '在线' : '离线'}）· ${deviceId.slice(0, 8)}`;
   };
 
   return (
@@ -242,7 +269,8 @@ export function HostsDialog({
               const isLocal = h.id === 'local';
               const st = hostStatus[h.id] ?? h.status ?? 'disconnected';
               const isCurrent = h.id === selectedHostId;
-              const error = h.error ?? hostError[h.id] ?? null
+              const error = h.error ?? hostError[h.id] ?? null;
+              const errorCode = h.errorCode ?? hostErrorCode[h.id] ?? null;
               return (
                 <div
                   key={h.id}
@@ -254,9 +282,15 @@ export function HostsDialog({
                       {!isLocal ? <span className="rounded px-1 text-[10px] text-muted-foreground">{h.id}</span> : (selfLabel ?? 'local')}
                       {!isLocal ? <StatusBadge status={st} />  : null}                      
                     </div>
-                    {st === 'error' && error ? (
+                    {(st === 'error' || st === 'failed') && error ? (
                       <span className="max-w-[12rem] truncate text-[10px] text-destructive" title={error}>
+                        {errorCode ? `${HOST_ERROR_LABEL[errorCode] ?? errorCode} · ` : ''}
                         {error}
+                      </span>
+                    ) : null}
+                    {isSelfHealing(st, h.errorRetryable) ? (
+                      <span className="text-[10px] text-muted-foreground">
+                        正在自动重连{h.attempt ? `（第 ${h.attempt} 次）` : ''}…
                       </span>
                     ) : null}
                     {h.ssh ? (
@@ -289,6 +323,17 @@ export function HostsDialog({
                           连接
                         </TextAction>
                       )}
+                      {/* A-6：公钥变化后提供清除信任的显式入口（仅 dsh 主机有设备钉扎）。 */}
+                      {errorCode === 'KEY_CHANGED' && h.type === 'dsh' ? (
+                        <TextAction
+                          className="text-destructive hover:bg-destructive/10"
+                          disabled={forgetMut.isPending && forgetMut.variables === h.id}
+                          onClick={() => onForget(h)}
+                          title="清除该设备的信任记录后重新连接（适用对端重装/更换设备）"
+                        >
+                          {forgetMut.isPending && forgetMut.variables === h.id ? '清除中…' : '忘记此主机'}
+                        </TextAction>
+                      ) : null}
                       <TextAction onClick={() => onEdit(h)}>编辑</TextAction>
                       <TextAction
                         className="text-destructive hover:bg-destructive/10"

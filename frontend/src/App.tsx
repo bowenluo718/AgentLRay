@@ -7,12 +7,14 @@ import { Sidebar } from '@/components/Sidebar';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { HostConnectingView } from '@/components/HostConnectingView';
 import { HostCompatBanner } from '@/components/HostCompatBanner';
+import { NetworkStatusBanner } from '@/components/NetworkStatusBanner';
 import { HostsDialog } from '@/components/HostsDialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
 import { useVersionPoller } from '@/hooks/useVersionPoller';
 import { useInboundPoller } from '@/hooks/useInboundPoller';
+import { useHostStatePoller } from '@/hooks/useHostStatePoller';
 import { DEMO } from '@/demo/flag';
 import { getHosts, getSelectedPlatforms } from '@/api/client';
 import { useAppStore } from '@/store';
@@ -98,10 +100,13 @@ export default function App() {
       adoptThinHost(target.id);
     } else {
       useAppStore.getState().setSelectedHostId(target.id).then((ok) => {
-        if (!ok) {
-          // 重连失败：停留连接占位，用户可在主机列表再连/重试（薄服务无 local 可回落）。
-          useAppStore.getState().setHostRuntime(target.id, 'error', '连接失败，请在主机列表重试');
-          useAppStore.getState().setHostReadyResult('连接失败，请在主机列表重试');
+        if (ok) return;
+        // 重连失败：**停留连接占位**（薄服务无 local 可回落）。服务端会按退避自动重连，
+        // useHostStatePoller 轮询到 connected 后由下方效应 adoptThinHost 接管；不在此覆盖
+        // 服务端上报的状态/错误码，也不置 hostReady（否则占位页消失后再无人采用重连结果）。
+        const state = useAppStore.getState();
+        if (!state.hostErrorCode[target.id] && !state.hostError[target.id]) {
+          state.setHostRuntime(target.id, 'failed', '连接失败，正在自动重试（也可手动重试）');
         }
       });
     }
@@ -150,6 +155,24 @@ export default function App() {
       queryClient.invalidateQueries({ queryKey: ['platforms'] });
     });
   }, [hosts, queryClient]);
+
+  // 远端未就绪（连接占位可见）时轮询服务端链路状态：服务端按指数退避自动重连（A-3），
+  // 前端据此把「重连中」收敛为「已连接」——薄服务无 local 可回落，只能靠自动恢复。
+  const targetHostId = isThin
+    ? selectedHostId !== 'local'
+      ? selectedHostId
+      : rememberedHostId !== 'local'
+        ? rememberedHostId
+        : (hosts[0]?.id ?? '')
+    : rememberedHostId;
+  const targetStatus = useAppStore((s) => s.hostStatus[targetHostId]);
+  const pollHostState = !DEMO && targetHostId !== '' && targetHostId !== 'local' && !hostReady;
+  useHostStatePoller(pollHostState);
+  useEffect(() => {
+    // 薄服务：服务端自动重连成功 → 直接采用该主机（无需用户手动重试）。
+    if (!isThin || hostReady || targetStatus !== 'connected') return;
+    adoptThinHost(targetHostId);
+  }, [isThin, hostReady, targetStatus, targetHostId, adoptThinHost]);
 
   // 远端下平台选中值来自远端 server ui（可写，改动经 PUT /api/settings 写回远端）。
   // 远端恢复/切换后、平台列表就绪时读取一次 GET /api/ui-selection（跟随远端 host 头
@@ -342,6 +365,8 @@ export default function App() {
             ) : null}
           </div>
         ) : null}
+        {/* D-1：系统网络阻断提示（仅薄服务/Android，桌面无原生上报）。 */}
+        <NetworkStatusBanner />
         <HostCompatBanner />
         <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-1 md:hidden">
           <span className="text-sm font-semibold">AgentLRay</span>

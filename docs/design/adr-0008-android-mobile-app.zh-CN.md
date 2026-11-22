@@ -39,7 +39,7 @@ AgentLRay 的设计前提是**读本机 agent 日志**；手机（Android）上�
 | 决策点 | 结论 |
 | --- | --- |
 | **R1 连接对象** | app 经公网或局域网连**远端完整 AgentLRay 实例**（full 模式，自带本地日志的桌面数据源）。 |
-| **R1 安全** | **VPN/隧道隔离**（WireGuard / 公司 VPN / dsh 中继加密通道），**不加应用层鉴权**。token/接口鉴权的风险与建议见 §7（本期暂缓）。 |
+| **R1 安全** | **VPN/隧道隔离**（WireGuard / 公司 VPN / dsh 中继加密通道）；2026-11-22 起本机直连额外要求**本机令牌**（§7 D1 已实现），远端链路不再加应用层鉴权。 |
 | **R2 承载** | **PRoot + Ubuntu arm64 rootfs + Node 22/24**：在 app 私有目录内以子进程运行 `bin/thin-server.js`，**直接复用现有 thin-server.js + lib/hosts + lib/dsh + lib/routes**，**不重写薄服务逻辑**。 |
 | **R2 隧道类型** | **只支持 dsh**（产品裁剪：移动端穿透 NAT 的首选；PRoot 下 SSH 技术上可行，但首版不启用，见 §6）。 |
 | **R2 套壳** | **Capacitor**（WebView 托管 + 插件生态），加载本地 `http://127.0.0.1:3801`。 |
@@ -104,7 +104,8 @@ AgentLRay 的设计前提是**读本机 agent 日志**；手机（Android）上�
 | 私钥 AES 落盘 + 主机表单（dsh 能力裁剪） | ⬜ 待实现 | `lib/secret.js`、`HostFormDialog` |
 | 启动屏 + 就绪门控 + 仅前台生命周期 | ⬜ 待实现 | — |
 | 签名/加固/崩溃上报 | ⬜ 待实现 | — |
-| token 认证 / 接口鉴权 / 随机端口 | ⏸ 暂缓 | 见 §7 |
+| 本机令牌鉴权 / 接口鉴权 | ✅ 已实现（2026-11-22，见 [design-android-mobile-app](design-android-mobile-app.zh-CN.md) §8.1） | `lib/auth.js`、`NodeRuntimeManager.kt`、`MainActivity.kt` |
+| 随机端口 | ⏸ 暂缓 | 见 §7 D3 |
 
 ## 6. 开放问题（P0 关闭）
 
@@ -116,11 +117,12 @@ AgentLRay 的设计前提是**读本机 agent 日志**；手机（Android）上�
 
 ## 7. 暂缓事项（2026-11-21 决定）
 
-> **token 认证与接口鉴权暂不考虑；端口固定 3801。** 以下风险记录在案，正式对外分发前处理。
+> 2026-11-21 决定：token 认证与接口鉴权暂不考虑；端口固定 3801。
+> **2026-11-22 更新：本机令牌鉴权已实现**（D1 关闭）；端口仍固定 3801。以下保留原始记录。
 
 | 编号 | 问题 | 当前决定 | 后续建议 |
 | --- | --- | --- | --- |
-| D1 | Android loopback 非 app 私有，其他应用可访问 `127.0.0.1:3801`；`lib/csrf.js` 对无 Origin 客户端放行 | 接受风险 | 启动时随机 token：原生经 env/args 传给 Node，WebView 经 URL fragment 获取；header/`?token=` 双通道校验 |
+| D1 | Android loopback 非 app 私有，其他应用可访问 `127.0.0.1:3801`；`lib/csrf.js` 对无 Origin 客户端放行 | ✅ 已实现（原生持久化令牌 + env 注入 + `?token=` 兑换 cookie；本机直连校验） | 令牌轮换（可选） |
 | D2 | dsh loopback 端点无鉴权（`lib/dsh/loopback-client.js`） | 接受风险 | 内部鉴权头由 `proxy.js` 注入，或改为进程内 RPC |
 | D3 | 固定端口 3801 可被抢占 | 固定 3801 | 随机端口 + 稳定 origin，或加载前做服务身份校验 |
 | D4 | loopback 明文（无 TLS） | 接受 | 回环风险低；若引入 token，token 不得落在其他应用可读位置 |
