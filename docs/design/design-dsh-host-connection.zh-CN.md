@@ -122,7 +122,7 @@ ds-harness-remote 是一个 pnpm workspace 单仓（GitHub `liguobao/ds-harness-
 - `type: 'ssh'` → 走现有 `lib/transport.js`（`spawnSsh` + `buildSshArgs` + `probeVersion`），**零改动**。
 - `type: 'dsh'` → 走新增 `lib/dsh/client.js`（`openDshTunnel` 建 LoopbackPreview 隧道 + `probeVersion`），产出与 ssh 相同的契约：`{ status, baseUrl, version }`。
 
-`tunnelAndProbe` 的「探测 `/api/version` + 收尾」逻辑复用；「建隧道」按 type 分派。状态机（disconnected/connecting/connected/error）、CRUD、proxy 透传、前端 host 选择均**复用**。
+`tunnelAndProbe` 的「探测 `/api/version` + 收尾」逻辑复用；「建隧道」按 type 分派。状态机（`disconnected/connecting/connected/reconnecting/failed`，`status` 保留旧同义值）、CRUD、proxy 透传、前端 host 选择均**复用**。
 
 ### 被连接方生命周期
 

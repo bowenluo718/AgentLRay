@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.webkit.CookieManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -43,6 +44,8 @@ class MainActivity : BridgeActivity() {
     private var errorDialog: AlertDialog? = null
     /** 已点击同步但还在等存储权限返回（从系统设置页回来后自动续跑）。 */
     private var pendingSync = false
+    /** 上次成功兑换 cookie 的令牌（持久化）：令牌变化时需强制重载换 cookie。 */
+    private var exchangedToken: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +76,9 @@ class MainActivity : BridgeActivity() {
 
     override fun onStop() {
         super.onStop()
+        // 令牌 cookie 落盘（C-1 长效缓存）：WebView 默认异步刷盘，进程被杀/存储回收时
+        // 可能丢失 → 每次退后台显式 flush，下次冷启动无需重新兑换令牌。
+        runCatching { CookieManager.getInstance().flush() }
         // 5s 防抖：短暂切后台（系统弹窗/通知栏）不杀进程。
         handler.removeCallbacks(stopRunnable)
         handler.postDelayed(stopRunnable, STOP_DEBOUNCE_MS)
@@ -186,13 +192,35 @@ class MainActivity : BridgeActivity() {
         }, "agentlray-sync").apply { isDaemon = true }.start()
     }
 
-    /** 就绪后加载本地薄服务页面（仅当 url 不是薄服务时才导航，避免每次 onStart 重载闪烁）。 */
+    /**
+     * 加载本地薄服务页面（仅当 url 不是薄服务、或令牌尚未兑换时才导航，避免每次 onStart 重载闪烁）。
+     *
+     * 本机鉴权（C-1）：导航带 `?token=`，由 thin-server 换成 HttpOnly cookie 后 302 回 `/`；
+     * cookie 在 WebView 内持久，后续刷新/SSE 同源自动携带。令牌在 filesDir 持久化，跨运行时
+     * 重启不变；`exchangedToken` 记录已兑换的令牌（同样持久化），只有令牌变化时才重新导航，
+     * 因此 Activity 重建/前后台切换不会重复加载，也不会误以为已兑换。
+     */
     private fun loadThinUi() {
         val webView = bridge?.webView ?: return
         SecurityConfig.harden(webView, BuildConfig.DEBUG)
+        val runtime = App.instance.runtime
+        val token = runtime.uiToken
+        if (exchangedToken == null) exchangedToken = runtime.exchangedToken()
         val current = webView.url
-        if (current != null && current.startsWith(THIN_ORIGIN)) return
-        webView.loadUrl(THIN_ORIGIN)
+        val onThin = current != null && current.startsWith(THIN_ORIGIN)
+        // 光比对令牌值不够：WebView 的 cookie jar 可能被回收/清理，此时链接全部 401，
+        // 而 rememberToken 已持久化 → 不能 return，否则永远不再导航兑换（App 卡死在 401）。
+        val cookieOk = runCatching {
+            CookieManager.getInstance().getCookie(THIN_ORIGIN)?.contains("$COOKIE_NAME=") == true
+        }.getOrDefault(false)
+        if (onThin && token == exchangedToken && cookieOk) return
+        runtime.markExchanged(token)
+        exchangedToken = token
+        webView.loadUrl(
+            if (token.isNullOrEmpty()) THIN_ORIGIN else "$THIN_ORIGIN/?token=${Uri.encode(token)}"
+        )
+        // 兑换请求（302 设 cookie）完成后尽快落盘：延迟一拍再 flush，避免趁 cookie 尚未写入。
+        handler.postDelayed({ runCatching { CookieManager.getInstance().flush() } }, COOKIE_FLUSH_DELAY_MS)
     }
 
     private fun showError(message: String) {
@@ -210,7 +238,11 @@ class MainActivity : BridgeActivity() {
 
     companion object {
         private const val THIN_ORIGIN = "http://127.0.0.1:3801"
+        /** 本机鉴权 cookie 名（与 lib/auth.js 的 COOKIE_NAME 一致）。 */
+        private const val COOKIE_NAME = "agentlray_token"
         private const val STOP_DEBOUNCE_MS = 5_000L
+        /** 导航后延迟刷盘 cookie（等 `/?token=` → 302 的 Set-Cookie 落地）。 */
+        private const val COOKIE_FLUSH_DELAY_MS = 3_000L
         private const val REQ_STORAGE = 1001
     }
 }

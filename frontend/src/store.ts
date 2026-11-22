@@ -1,6 +1,14 @@
 import { create } from 'zustand';
 import { saveUiSettings, setActiveHostId, setHostReady, connectHost, disconnectHost as apiDisconnectHost, getHosts } from '@/api/client';
-import type { HostInfo, HostStatus, InboundInfo, Platform, PlatformCapabilities, PlatformInfo } from '@/api/types';
+import type {
+  HostErrorCode,
+  HostInfo,
+  HostStatus,
+  InboundInfo,
+  Platform,
+  PlatformCapabilities,
+  PlatformInfo,
+} from '@/api/types';
 import { DEMO } from '@/demo/flag';
 
 // —— 平台列表降级表 ——
@@ -494,11 +502,20 @@ interface AppState {
   hostStatus: Record<string, HostStatus>;
   /** 主机错误文案，按 host id。 */
   hostError: Record<string, string>;
+  /** 主机稳定错误码（A-1），按 host id；无错误/老服务端时缺省。 */
+  hostErrorCode: Record<string, HostErrorCode>;
   /** 数据面是否可发（local 恒 true；远端=隧道连接+探测成功）。首帧「先连后加载」
    *  门控：记忆远端时先置 false，连接成功后置 true 才渲染/拉取数据面。 */
   hostReady: boolean;
   /** 主机就绪失败/回落的文案（有值=已回落本机数据）。 */
   hostReadyError: string | null;
+  /** 就绪失败的稳定错误码（HostConnectingView 据此给差异化提示/动作）。 */
+  hostReadyErrorCode: HostErrorCode | null;
+  /** 就绪失败是否可由自动重连自愈（true → 占位页提示「会自动重试」）。 */
+  hostReadyErrorRetryable: boolean | null;
+  /** 每个主机状态最近一次变化的时间（占位页判断「稳定失败」用：持续失败超过阈值才提示
+   *  重新登录/删除信任等人工动作，避免一次瞬时失败就弹不可自愈文案）。 */
+  hostStateChangedAt: Record<string, number>;
   /** 本机当前被哪些其他主机连接（inbound peers，由 useInboundPoller 拉取）。 */
   inbound: InboundInfo | null;
   /** 运行时模式（design-thin-service Q13）：full / thin。boot 先 GET /api/mode 解析，
@@ -518,8 +535,8 @@ interface AppState {
   setInbound: (inbound: InboundInfo | null) => void;
   /** 写入运行时模式（boot 解析 /api/mode 后调用）；可选携带能力位（thin）。 */
   setMode: (mode: AppMode, capabilities?: ModeCapabilities | null) => void;
-  /** 设置/更新单个主机连接状态与错误。 */
-  setHostRuntime: (id: string, status: HostStatus, error?: string | null) => void;
+  /** 设置/更新单个主机连接状态与错误（可选稳定错误码）。 */
+  setHostRuntime: (id: string, status: HostStatus, error?: string | null, errorCode?: HostErrorCode | null) => void;
   /** 切换当前选中主机：非 local 先 connectHost 探测，成功才提交并清会话上下文。
    *  返回是否成功（调用方据此 toast）。内部同步 hostReady 状态机。 */
   setSelectedHostId: (id: string) => Promise<boolean>;
@@ -529,8 +546,19 @@ interface AppState {
   /** 直接进入「连接中」：置 hostReady=false（数据面暂不可发，占位渲染）。 */
   setHostConnecting: () => void;
   /** 连接/恢复流程结束：hostReady=true 回落（本机或停留的远端仍可发数据面），
-   *  可选记录回落文案。 */
-  setHostReadyResult: (hostReadyError: string | null) => void;
+   *  可选记录回落文案与稳定错误码/可重试标记。 */
+  setHostReadyResult: (
+    hostReadyError: string | null,
+    errorCode?: HostErrorCode | null,
+    retryable?: boolean | null
+  ) => void;
+  /** 薄服务专用：连接失败后**保持未就绪**（无 local 可回落），占位页继续渲染、服务端
+   *  自动重连由 useHostStatePoller + adoptThinHost 收敛。记录最后一次失败原因/码。 */
+  setHostLinkFailed: (
+    hostReadyError: string | null,
+    errorCode?: HostErrorCode | null,
+    retryable?: boolean | null
+  ) => void;
   /** 应用远端主机 server ui 的选中值（platform/selectedPlatforms/detailPlatform）。
    *  只写前端状态、不回写服务端（该值本身即远端真源）；local 主机下不调用。 */
   applyRemoteSelection: (sel: { platform: Platform; selectedPlatforms: Platform[] }) => void;
@@ -612,6 +640,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   hosts: [],
   hostStatus: { local: 'connected' },
   hostError: {},
+  hostErrorCode: {},
+  hostReadyErrorCode: null,
+  hostReadyErrorRetryable: null,
+  hostStateChangedAt: {},
   // 首帧主机就绪：记忆的是本机 → 立即可发数据面；记忆的是远端 → 等连接成功才就绪。
   hostReady: initial.rememberedHostId === 'local',
   hostReadyError: null,
@@ -623,45 +655,90 @@ export const useAppStore = create<AppState>((set, get) => ({
   setHosts: (hosts) => {
     const status: Record<string, HostStatus> = { local: 'connected' };
     const err: Record<string, string> = {};
+    const code: Record<string, HostErrorCode> = {};
     for (const h of hosts) {
       status[h.id] = h.status;
       if (h.error) err[h.id] = h.error;
+      if (h.errorCode) code[h.id] = h.errorCode;
     }
-    set({ hosts, hostStatus: status, hostError: err });
+    const now = Date.now();
+    set((s) => {
+      // 状态变化时间：仅当 status 变化时刷新（同状态反复轮询不重置计时）。
+      const changed = { ...s.hostStateChangedAt };
+      for (const [id, st] of Object.entries(status)) {
+        if (s.hostStatus[id] !== st) changed[id] = now;
+      }
+      return { hosts, hostStatus: status, hostError: err, hostErrorCode: code, hostStateChangedAt: changed };
+    });
   },
   setInbound: (inbound) => set({ inbound }),
   setMode: (mode, capabilities = null) => set({ mode, modeCapabilities: capabilities }),
-  setHostRuntime: (id, status, error = null) =>
+  setHostRuntime: (id, status, error = null, errorCode = null) =>
     set((s) => ({
       hostStatus: { ...s.hostStatus, [id]: status },
       hostError: error ? { ...s.hostError, [id]: error } : s.hostError,
+      hostErrorCode: errorCode ? { ...s.hostErrorCode, [id]: errorCode } : s.hostErrorCode,
+      hostStateChangedAt: s.hostStatus[id] !== status ? { ...s.hostStateChangedAt, [id]: Date.now() } : s.hostStateChangedAt,
     })),
   setHostConnecting: () => {
-    set({ hostReady: false, hostReadyError: null });
+    set({
+      hostReady: false,
+      hostReadyError: null,
+      hostReadyErrorCode: null,
+      hostReadyErrorRetryable: null,
+    });
     setHostReady(false); // 同步 client 镜像（SSE/手动 fetch 判定）
   },
-  setHostReadyResult: (hostReadyError) => {
-    set({ hostReady: true, hostReadyError });
+  setHostReadyResult: (hostReadyError, errorCode = null, retryable = null) => {
+    set({
+      hostReady: true,
+      hostReadyError,
+      hostReadyErrorCode: errorCode,
+      hostReadyErrorRetryable: retryable,
+    });
     setHostReady(true); // 同步 client 镜像（SSE/手动 fetch 判定）
+  },
+  setHostLinkFailed: (hostReadyError, errorCode = null, retryable = null) => {
+    set({
+      hostReady: false,
+      hostReadyError,
+      hostReadyErrorCode: errorCode,
+      hostReadyErrorRetryable: retryable,
+    });
+    setHostReady(false); // 数据面仍不可发：占位页继续渲染
   },
   setSelectedHostId: async (id) => {
     const cur = get().selectedHostId;
-    if (id === cur) return true;
+    // 同一主机且已就绪 → 幂等；未就绪（占位页「重试连接」）则真的要重连一次。
+    if (id === cur && get().hostReady) return true;
     if (id !== 'local') {
       // 就绪状态机：进入连接中（数据面暂不可发）。
       get().setHostRuntime(id, 'connecting', null);
-      set({ hostReady: false, hostReadyError: null });
+      set({ hostReady: false, hostReadyError: null, hostReadyErrorCode: null, hostReadyErrorRetryable: null });
       setHostReady(false); // 同步 client 镜像
       let ok = false;
+      let failed: (Error & { code?: string | null; retryable?: boolean | null }) | null = null;
       try {
         await connectHost(id);
         ok = true;
       } catch (e) {
         // 失败停留原主机（selectedHostId 不变，隧道未动）：原主机数据面仍可发。
-        get().setHostRuntime(id, 'error', e instanceof Error ? e.message : String(e));
+        // 服务端失败（502 + 稳定错误码）→ failed；前端本地失败（网络/超时）→ error。
+        failed = e instanceof Error ? e : new Error(String(e));
+        const code = (failed.code ?? null) as HostErrorCode | null;
+        get().setHostRuntime(id, code ? 'failed' : 'error', failed.message, code);
       } finally {
-        // 原主机仍可用（local 直连恒可；失败停留的远端其隧道可能仍活着）。
-        get().setHostReadyResult(null);
+        // 原主机仍可用（local 直连恒可；失败停留的远端其隧道可能仍活着）。薄服务无 local
+        // 可回落：失败时**保持未就绪**，让占位页与自动重连收敛（否则占位页消失后再无人
+        // 采用服务端重连成功的结果）。
+        const code = (failed?.code ?? null) as HostErrorCode | null;
+        const retryable = failed?.retryable ?? null;
+        if (failed && get().mode === 'thin') {
+          get().setHostLinkFailed(failed.message, code, retryable);
+        } else {
+          // 服务端可重试失败由服务端自动退避重连，占位页据此提示「会自动重试」。
+          get().setHostReadyResult(null, code, retryable);
+        }
       }
       if (!ok) return false;
       get().setHostRuntime(id, 'connected', null);

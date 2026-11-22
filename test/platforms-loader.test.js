@@ -338,7 +338,7 @@ async function readPlatformInfo(home, extraEnv = {}) {
 async function bootServer(home, extraEnv = {}) {
   const port = 20000 + Math.floor(Math.random() * 10000);
   const child = spawn(process.execPath, [path.join(REPO_ROOT, 'server.js')], {
-    env: { ...process.env, HOME: home, PORT: String(port), HOST: '127.0.0.1', ...extraEnv },
+    env: { ...process.env, HOME: home, PORT: String(port), HOST: '127.0.0.1', AGENTLRAY_NO_AUTH: '1', ...extraEnv },
     cwd: REPO_ROOT,
     stdio: ['ignore', 'ignore', 'pipe'],
   });

@@ -17,8 +17,12 @@ const { setStatusConfig } = require('./lib/status');
 const { loadStatusConfig } = require('./lib/status-config');
 const { loadDirsConfigSync } = require('./lib/dirs-config');
 const { csrfGuard } = require('./lib/csrf');
+const { apiAuthGuard, tokenExchangeHandler, authEnabled, resolveUiToken } = require('./lib/auth');
 const { shutdownHosts, setSelfIdentity } = require('./lib/hosts');
 const mountProxyRoutes = require('./lib/routes/proxy');
+const { startInboundSocket, boundInboundSocketPath } = require('./lib/inbound-socket');
+const { HOME: HOME_DIR } = require('./lib/config');
+const { isRemoteHost } = require('./lib/routes/proxy');
 const mountHostsRoutes = require('./lib/routes/hosts');
 const mountInboundRoutes = require('./lib/routes/inbound');
 const mountDshRoutes = require('./lib/routes/dsh');
@@ -30,12 +34,21 @@ const pkg = require('./package.json');
 
 const app = express();
 const PORT = process.env.PORT || 3800;
-// Bind to localhost by default: the dashboard exposes full AI session
-// history (and ?dir= reads) with zero auth — opt into LAN via HOST=0.0.0.0
+// Bind to localhost by default: the dashboard exposes full AI session history
+// (and ?dir= reads). Local requests are token-guarded (lib/auth.js: AGENTLRAY_UI_TOKEN,
+// otherwise an auto-generated ~/.agentlray/ui-token). LAN exposure still requires
+// explicit HOST=0.0.0.0.
 const HOST = process.env.HOST || '127.0.0.1';
 const DIST_DIR = path.join(__dirname, 'frontend', 'dist');
 // 只服务构建后的 React UI；未构建时 SPA fallback 返回提示（legacy vanilla UI 已移除）。
 const HAS_DIST = fs.existsSync(path.join(DIST_DIR, 'index.html'));
+
+// 本机鉴权（C-1）：只保护**本机直连**（目标 local / 本机资源）。远端目标不验本机令牌——
+// 链路认证由 ssh 私钥 / dsh 设备身份承担；proxy 会剥除本机凭证后再转发。
+// 令牌未配置时自动生成并落 ~/.agentlray/ui-token（0600），AGENTLRAY_NO_AUTH=1 可关闭。
+// 守卫只读 headers/cookie、不消费 body，不影响 proxy 的原始流语义。
+const UI_TOKEN = resolveUiToken();
+app.use('/api', apiAuthGuard({ token: UI_TOKEN, isRemoteHost }));
 
 // 网关 host 路由：必须是第一个 /api 处理器——放在 /api/version 等任何本地路由之前，
 // 以便带 X-Host-Id（或 ?host=）的远端请求先被拦截转发；local 请求 next() 继续往下。
@@ -57,11 +70,21 @@ setSelfIdentity({ version: pkg.version, bootId: SERVER_BOOT_ID });
 // log.* 调用前执行，以便 first-run 标记带上版本与平台目录。
 log.init({ version: pkg.version, platforms: Object.keys(PLATFORMS) });
 app.get('/api/version', (req, res) => {
-  res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
+  res.json({ bootId: SERVER_BOOT_ID, version: pkg.version,
+    // 入站信任通道路径（公开端点只暴露路径字符串）：连接方据此把 ssh/dsh 隧道指向本机
+    // UNIX socket，被连接方因此无需关闭本机令牌鉴权（lib/inbound-socket.js）。
+    // 只通告**本进程实际 bind 成功**的路径：同机 thin/full 共用 HOME，bind 失败者若仍
+    // 按 HOME 算路径通告，对端会把流量打到另一个实例上。
+    inboundSocket: boundInboundSocketPath(),
+  });
 });
 // 运行时模式信号（design-thin-service Q13）：完整实例 → { mode: 'full' }。
 // 与 /api/version 同列本地资源，proxy.js 不会把远端模式透传回来。
 mountModeRoutes(app, { mode: 'full' });
+
+// WebView 首次导航 `GET /?token=<token>` 换 HttpOnly cookie（C-1）：必须挂在
+// express.static 之前，否则 `/` 会先被静态首页命中、兑换被绕过。
+app.get('/', tokenExchangeHandler({ token: UI_TOKEN }));
 
 if (HAS_DIST) {
   app.use(express.static(DIST_DIR, { maxAge: 0, etag: false, lastModified: false }));
@@ -114,6 +137,7 @@ async function boot() {
     host: HOST,
     port: PORT,
     platforms: Object.keys(PLATFORMS),
+    auth: authEnabled() && UI_TOKEN ? 'token' : 'off',
   });
   try {
     setStatusConfig(await loadStatusConfig());
@@ -143,6 +167,23 @@ async function boot() {
   }
   app.listen(PORT, HOST, () => {
     console.log(`AgentLRay listening on http://${HOST}:${PORT}`);
+    // 入站信任通道（ssh 入站免令牌）：同 app 再听一个 0600 UNIX socket，连接方 ssh -L 指向它。
+    startInboundSocket({ app, home: HOME_DIR, log }).then(
+      (sock) => {
+        console.log(`  入站通道：${sock.path}（ssh 连接方自动使用，无需配置）`);
+        log.boot.info('inbound socket listening', { path: sock.path });
+      },
+      (error) => {
+        // 失败不阻塞主服务：ssh 入站退回「需 AGENTLRAY_NO_AUTH 或本机令牌」的旧行为。
+        console.log(`  入站通道：未启用（${error.message}）`);
+        log.boot.warn('inbound socket failed', { error: error.message });
+      }
+    );
+    if (authEnabled() && UI_TOKEN) {
+      console.log(`  本机鉴权：已启用（/api 本机请求需令牌；浏览器打开 http://${HOST}:${PORT}/?token=${UI_TOKEN} ）`);
+    } else {
+      console.log('  本机鉴权：已关闭（AGENTLRAY_NO_AUTH=1）');
+    }
     const platformDirs = {};
     for (const [id, p] of Object.entries(PLATFORMS)) {
       let dir;

@@ -11,6 +11,7 @@
 | --- | --- | --- |
 | v1.0 | 2026-11-20 | 初稿：nodejs-mobile 承载 dsh-only 薄服务 + Capacitor WebView 套壳。 |
 | v1.1 | 2026-11-21 | 评审整改：①承载由 nodejs-mobile 改为 **PRoot + Ubuntu + Node 22/24**（原方案受 Node 18 限制无法运行 dsh 栈）；②补齐打包路径、进程生命周期、能力面、发布合规与测试策略；③token 鉴权 / 接口鉴权 / 固定端口风险记入 §11「暂缓事项」，本期不实现。 |
+| v1.2 | 2026-11-22 | **本机令牌鉴权已实现**（C-1）：原生生成 256-bit 令牌并持久化（`filesDir/ui-token`）经 `AGENTLRAY_UI_TOKEN` 注入，WebView 以 `?token=` 兑换 `HttpOnly` cookie；只保护本机直连，远端目标走链路认证。§8.1/§8.2/§11 D1、D4 与 §12 进度同步更新。 |
 | v1.2 | 2026-11-21 | 构建实测整改：①debug APK 已在本机产出（JDK21+Gradle8.11+AGP8.7.2+SDK35）；②zstd-jni 无 Android ABI，运行时层改 `.tgz` + 内置 `GZIPInputStream`（偏差②）；③真机首启报「rootfs 内缺少 node」，定位为 `ensure()` 并发竞态（onCreate 后台线程 × onStart 双跑共用 tmp），修复见 §7.1（`@Synchronized` + 哨兵校验 + 自愈）；④资产扩展名取 `.tgz` 因 aapt2 会解压并改写 `assets/**.gz` 名（偏差④）。 |
 | v1.3 | 2026-11-21 | 真机二次定位：proot 报 `library "libtalloc.so.2" not found`。根因：Android 8+ bionic linker **忽略 app 进程的 `LD_LIBRARY_PATH`**（安全策略），原注入无效；且 proot 的 `DT_RUNPATH` 指向 Termux 前缀（宿主不存在）。修复：依赖库与 proot 同放 `jniLibs/arm64-v8a/`（nativeLibraryDir），用 patchelf 把 proot 及其依赖的 `DT_RUNPATH` 改为 `${ORIGIN}`（bionic API 24+ 支持），`--replace-needed libtalloc.so.2→libtalloc.so`（jniLibs 只收 `*.so`）；删除 `LD_LIBRARY_PATH` 注入与 `assets/runtime/lib` 拷贝。fetch-proot.sh 已内建 patchelf 步骤。 |
 | v1.4 | 2026-11-21 | 真机三次定位：proot 已 LINK 并启动，报 `/usr/bin/env: '<宿主 node 绝对路径>': No such file or directory`。根因：传给 guest 进程的程序路径用了宿主绝对路径（`layout.nodeBin.absolutePath`），proot 的 `-r rootfsDir` 只映射 guest `/`，宿主绝对路径在 guest 里被当 guest 路径解析而失配。修复：新增 `Layout.nodeGuestPath="/usr/local/bin/node"`，`buildCommand` 用 guest 根路径（env/脚本本就是 guest 路径）。§7.1 启动顺序补「guest 程序路径必须用 guest 视角」。 |
@@ -47,7 +48,7 @@
 - iOS 版本。
 - 运行多个薄服务实例 / 后台隧道池（web 前端的**多主机切换**仍保留，见本节末说明）。
 - 离线查看 / 本地缓存。
-- 应用层鉴权 / 接口 token（**本期明确暂缓**，风险与建议见 §11）。
+- 应用层鉴权 / 接口 token 的**远端侧**方案（本机令牌鉴权已实现，见 §8.1；远端仍依赖链路认证）。
 
 > **多主机说明**：thin-server 本身支持多台 dsh 主机，web 端 `HostFormDialog` / 主机切换器可直接复用。首版排除的是"多个薄服务进程并存"与"后台常驻隧道池"，不是禁用多主机 UI。
 
@@ -469,6 +470,7 @@ Application.onCreate / Service.onCreate
 | --- | --- |
 | 凭据加密 | `lib/secret.js` AES-256-GCM；密钥 `filesDir/.agentlray/secret`（0600，app 私有目录）。 |
 | 网络绑定 | 薄服务固定 `HOST=127.0.0.1`、`PORT=3801`（端口固定为产品决策，风险见 §11）。 |
+| 本机接口鉴权 | `lib/auth.js`：本机直连（目标 local / 本机资源 `/api/{hosts,inbound,dsh,mode}`）必须携带令牌。原生 `NodeRuntimeManager` 首次启动生成 256-bit 令牌并持久化到 `filesDir/ui-token`（应用私有，跨重启/升级不变），经 env `AGENTLRAY_UI_TOKEN` 注入；`MainActivity` 以 `http://127.0.0.1:3801/?token=…` 导航，thin-server 校验后设一年长效 `HttpOnly; SameSite=Strict` cookie 并 302 回 `/#token=<令牌>`（前端据此写 `localStorage` 并在每个请求附头，`replaceState` 抹掉 fragment）。已兑换的令牌记在 `filesDir/ui-token.exchanged`；令牌不变**且 WebView cookie 仍在**时不重复导航（cookie 被清则重新导航兑换，否则会永久 401）。远端目标不验本机令牌（链路认证：dsh 设备密钥），proxy 转发前剥除本机 cookie/令牌头。 |
 | 端口占用检测 | 启动后若 `/api/version` 不通且进程报告 `EADDRINUSE` → **不加载 WebView**，显示错误屏，防止加载未知页面。 |
 | Android 备份 | `android:allowBackup="false"` + `dataExtractionRules` 排除 `.agentlray`（secret/hosts 不进云备份）。 |
 | 明文流量 | `network_security_config.xml` 仅对 `127.0.0.1` 放行 cleartext；其余默认拒绝。 |
@@ -479,11 +481,11 @@ Application.onCreate / Service.onCreate
 
 ### 8.2 暂缓（本期明确不实现）
 
-- 应用层 token 认证、`/api/*` 接口鉴权、dsh loopback 端点鉴权；
-- 随机端口 / 防端口抢占；
+- 随机端口 / 防端口抢占（见 §11 D3）；
+- dsh loopback 端点独立鉴权（当前由入站 UNIX socket 信任通道 + 进程内标记 `X-AgentLRay-Tunnel` 覆盖，见 §11 D2）；
 - 详见 §11「暂缓事项」。
 
-> 已知边界：Android 的 loopback 不是 app 私有，其他应用可访问 `127.0.0.1:3801`；`lib/csrf.js` 对无 Origin 的非浏览器客户端放行。当前接受该风险，正式对外分发前必须回到 §11 处理。
+> 已知边界：Android 的 loopback 不是 app 私有，其他应用可访问 `127.0.0.1:3801`——现已由**本机令牌鉴权**（§8.1）覆盖：无令牌即 401。`lib/csrf.js` 对无 Origin 的非浏览器客户端仍放行，但这类客户端同样需要令牌。
 
 ---
 
@@ -526,8 +528,8 @@ Application.onCreate / Service.onCreate
 | rootfs 体积/冷启动/内存 | 中 | minbase + 官方 Node；rootfs 只解压一次；预算 150–250 MB；P0 实测。 |
 | 孤儿进程 / 端口占用 | 中 | pid 文件 + 启动清理 + `--kill-on-exit`；EADDRINUSE 错误屏。 |
 | Android 自动备份泄露凭据 | 中 | `allowBackup=false` + 备份排除规则。 |
-| 本机 API 无鉴权（其他 app 可访问） | 中 | **本期暂缓**，见 §11；正式分发前处理。 |
-| 固定端口 3801 可被抢占 | 中 | 本期仅做占用检测；随机端口/token 见 §11。 |
+| 本机 API 无鉴权（其他 app 可访问） | 中 | ✅ 已缓解：本机令牌鉴权（`lib/auth.js` + 原生持久化令牌），无令牌 401。 |
+| 固定端口 3801 可被抢占 | 中 | 本期仅做占用检测；随机端口见 §11 D3（令牌部分已实现）。 |
 | app 前端 dist 与远端 full 版本漂移 | 中 | 连接时检查远端 `/api/version` 最低版本；不兼容给出升级提示。 |
 | 下载/导出在 WebView 不可用 | 中 | 原生保存桥接 + `capabilities.nativeSave`；P2 验收覆盖。 |
 | Node 崩溃日志漏报 | 中 | stderr 环形缓冲 + 异常退出 → Sentry breadcrumb/event。 |
@@ -543,14 +545,15 @@ Application.onCreate / Service.onCreate
 
 ## 11. 暂缓事项（记录在案，本期不实现）
 
-> 2026-11-21 评审决定：**token 认证与接口鉴权暂不考虑；端口固定使用 3801。** 以下问题与建议留档，待正式对外分发或安全评审时处理。
+> 2026-11-21 评审决定：token 认证与接口鉴权暂不考虑；端口固定使用 3801。
+> **2026-11-22 更新**：本机令牌鉴权已实现（§8.1，D1/D4 关闭）；端口仍固定 3801（D3 未变）。
 
 | 编号 | 问题 | 当前决定 | 后续建议 | 触发条件 |
 | --- | --- | --- | --- | --- |
-| D1 | Android loopback 非 app 私有，其他应用可访问 `127.0.0.1:3801`；`lib/csrf.js` 对无 Origin 客户端放行 | 接受风险 | 每次启动生成随机 token：原生经 env/args 传给 Node（不走 TCP），WebView 通过 URL fragment 获取；fetch 用 header、EventSource 用 `?token=`；`/api/*` 统一校验 | 对外分发 / 安全评审 |
-| D2 | dsh loopback 端点（`lib/dsh/loopback-client.js`）是无鉴权本地 HTTP 服务 | 接受风险 | 增加内部鉴权头，由 `proxy.js` 注入；或改为进程内 RPC，不落 TCP | 同 D1 |
+| D1 | Android loopback 非 app 私有，其他应用可访问 `127.0.0.1:3801`；`lib/csrf.js` 对无 Origin 客户端放行 | ✅ **已实现**（2026-11-22）：原生生成令牌并持久化，经 env 注入，WebView `?token=` 兑换 cookie；本机直连 `/api/*` 校验令牌，远端目标走链路认证 | 余项：令牌轮换策略（可选） | 对外分发 / 安全评审 |
+| D2 | dsh loopback 端点（`lib/dsh/loopback-client.js`）是无鉴权本地 HTTP 服务 | ✅ 已实现（2026-11-22）：被连接方提供 `~/.agentlray/inbound.sock`（0600）信任通道，连接方 dsh/ssh 隧道直接指向它；dsh loopback 宿主另注入进程内密钥 `X-AgentLRay-Tunnel` | 连接方 loopback 端点本身仅监听 127.0.0.1 随机端口（数据面已由被连接方鉴权覆盖） | 同 D1 |
 | D3 | 固定端口 3801 可被其他应用抢占，导致监听失败或加载未知页面 | 固定 3801（产品决策） | 采用随机端口 + 稳定 origin 方案（如自定义 scheme / 端口映射）；或在加载前做服务身份校验 | 同 D1 |
-| D4 | 无 TLS（loopback 明文） | 接受 | 本机回环风险低；如引入 token，token 不得出现在可被其他应用读取的位置 | 同 D1 |
+| D4 | 无 TLS（loopback 明文） | 接受 | ✅ 令牌满足「不出现在可被其他应用读取的位置」：`filesDir/ui-token` 为应用私有，日志中脱敏；仍建议后续评估 loopback TLS | 同 D1 |
 | D5 | SSH 传输 | 首版禁用 | PRoot 已具备 `child_process`；后续可在 rootfs 加入 `openssh-client` 并放开 `AGENTLRAY_DISABLE_SSH` | 用户需求 |
 | D6 | 后台常驻 / 推送 | 不做 | 需要时改用 foreground service + 常驻通知 | 用户需求 |
 | D7 | iOS | 不做 | 另行评估（PRoot 不可用，需独立方案） | 用户需求 |
@@ -573,7 +576,8 @@ Application.onCreate / Service.onCreate
 | P2 dsh 连接闭环 | 🟡 已实现（未真机连远端验证） | dsh 登录/设备选择/隧道复用现有栈；**本轮补齐服务端导出桥接**：`frontend/src/views/sessions/exports.ts` 在 `nativeSave` 时 `fetch(exportUrl)→saveTextFile`，`serverExportFilename` 解析 `Content-Disposition` |
 | P3 健壮性 | 🟡 已实现（断线/版本兼容，SSE 真机待验） | 崩溃退避/前后台/孤儿清理/端口错误屏已落地；**本轮新增版本兼容**：`lib/version-compat.js`（单一真源判定）+ `/api/hosts` 序列化 `remoteVersion`/`compatible` + `HostCompatBanner.tsx` 升级提示；`test/version-compat.test.js`（6 例） |
 | P4 发布（签名/加固/Sentry/体积） | 🟡 部分实现 | **本轮**：release 签名经 env 注入（`app/build.gradle`）+ R8 压缩/混淆（`proguard-rules.pro`）+ 原生崩溃落盘基线（`CrashLog.kt`）；厂商加固 SDK / 正式 Sentry / AAB 分发链 / 体积实测待发布前完成 |
-| token 认证 / 接口鉴权 / 随机端口 | ⏸ 暂缓（§11） | — |
+| 本机令牌鉴权（C-1） | ✅ 已实现 | `lib/auth.js`（本机直连才验令牌、无令牌自动生成 `~/.agentlray/ui-token`、隧道可信标记）、`server.js`/`bin/thin-server.js` 挂载顺序、`NodeRuntimeManager.kt`（令牌持久化 + 日志脱敏）、`MainActivity.kt`（`?token=` 导航 + 已兑换令牌记录）、`lib/dsh/loopback-host.js`（可信标记注入）；测试 `test/local-auth.test.js`（含远端目标放行、本机资源强制令牌、伪造标记 401） |
+| 随机端口 / 防端口抢占 | ⏸ 暂缓（§11 D3） | — |
 
 > 实现偏差（记录在案）：①目录布局按标准 Capacitor 落在 `android/android/`（`cap sync` 要求），design §3 扁平树为其内容；②原 `.tar.zst` + `zstd-jni` 方案经 Maven 核验**无 Android ABI 分类器**（`linux_aarch64` 为 glibc，bionic 无法加载），已改为 `.tgz` + Android 内置 `GZIPInputStream`（`commons-compress` 仅做 tar 解析）；③前端下载桥接依赖 `window.Capacitor.Plugins.SaveFile` 探测，未引入 `@capacitor/core` 构建耦合；④资产扩展名取 `.tgz` 而非 `.tar.gz`：aapt2 会解压 `assets/**.gz` 并把资产名改写为去后缀形式，导致运行时找不到文件。⑤PRoot 原生依赖不随 `LD_LIBRARY_PATH` 注入：Android 8+ bionic 忽略 app 进程的 `LD_LIBRARY_PATH`，且 jniLibs 只收无版本号 `*.so`（`libtalloc.so.2` 会被 AGP 丢弃）；故依赖库与 proot 同放 `jniLibs`，构建期用 patchelf 把 proot 及其依赖的 `DT_RUNPATH` 改成 `${ORIGIN}`（bionic API 24+ 把 `$ORIGIN` 重写为可执行文件目录）并同步 `NEEDED` 命名。
 

@@ -284,7 +284,7 @@ npm run thin                  # 同上（脚本包装）
 **注意事项：**
 
 - **前端需先构建**：缺少 `frontend/dist/index.html` 时页面返回 503（提示 `npm run build:ui`）。发布包已含 `frontend/dist`；从源码运行时先 `npm run build:ui`。
-- **无鉴权**：沿用 CSRF 防护但无登录；默认只绑 `127.0.0.1`。要让局域网/移动端访问需显式 `HOST=0.0.0.0`——**这会暴露远端全部会话，谨慎使用**，并自行用反代/防火墙收口。
+- **本机令牌鉴权**：默认只绑 `127.0.0.1`，**本机直连**（目标 `local`，或本机资源 `/api/{hosts,inbound,dsh,mode}`）必须携带令牌。启动日志打印 `http://127.0.0.1:<port>/?token=<令牌>`，浏览器打开一次即兑换为**长效**（一年）`HttpOnly; SameSite=Strict` cookie，并在前端 `localStorage` 留一份缓存（cookie 被清后仍可用）；CLI/脚本可用 `X-AgentLRay-Token` 头。令牌更换后重新打开一次该地址即自动覆盖旧缓存。令牌来源：`AGENTLRAY_UI_TOKEN` 环境变量优先，否则自动生成并写入 `~/.agentlray/ui-token`（0600，重启复用）；`AGENTLRAY_NO_AUTH=1` 关闭（构建脚本/测试基线使用）。**远端目标不验本机令牌**：链路认证由 ssh 私钥 / dsh 设备身份承担，proxy 转发前会剥除本机 cookie 与令牌头；dsh/ssh 入站经本机 UNIX socket `~/.agentlray/inbound.sock`（0600，连接方自动使用，被连接方无需配置）或 dsh 进程内密钥标记可信连接。要让局域网/移动端访问需显式 `HOST=0.0.0.0`——**这会暴露全部会话，谨慎使用**，请配合反代/防火墙收口。
 - **配置来源**：主机与 dsh 配置仍用 `~/.agentlray/hosts.json`，与完整实例共用格式，可用 `AGENTLRAY_HOME` 指向独立目录。
 - 薄服务与完整实例**不是**同一个网关：完整实例在本地跑全栈并可改系统配置；薄服务是纯连接方轻量网关。
 

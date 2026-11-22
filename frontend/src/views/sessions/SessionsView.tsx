@@ -2,6 +2,7 @@
 // scroll-to-message (local + cross-view via pendingScrollMsgId), SSE tail.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import { usePlatformProbe } from '@/hooks/usePlatformProbe';
 import { resolveExecSpawnLabel, useAppStore } from '@/store';
 import { ChildAgentBanner } from '@/views/trace/ChildAgentsSection';
@@ -212,7 +213,11 @@ export function SessionsView() {
         else el.scrollTo({ top: el.scrollHeight });
       },
       [sortOrder]
-    )
+    ),
+    // 鉴权失效（401）不重连：提示用户重新打开页面（壳会重新导航并兑换令牌）。
+    useCallback(() => {
+      toast.error('本机访问令牌已失效，请重新打开页面', { id: 'agentlray-auth-lost' });
+    }, [])
   );
 
   const actx = useMemo(

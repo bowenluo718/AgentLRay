@@ -28,6 +28,7 @@ const { SETTINGS_FILE } = require('../lib/settings');
 const { registerPeer, snapshot, clear } = require('../lib/inbound');
 const { parseLoopbackRequest } = require('../lib/dsh/loopback');
 const { DshLoopbackHost } = require('../lib/dsh/loopback-host');
+const { TUNNEL_HEADER, tunnelSecret } = require('../lib/tunnel-headers');
 const { createLoopbackEndpoint } = require('../lib/dsh/loopback-client');
 const { createHostRouter } = require('../lib/dsh/host');
 
@@ -251,7 +252,9 @@ test('loopback 请求校验：非法操作/端口/路径/首部/请求体均拒�
 });
 
 test('loopback 宿主：未放行端口拒绝，放行端口真实转发到本机 HTTP 服务', async (t) => {
+  const seen = {};
   const backend = http.createServer((req, res) => {
+    seen.headers = req.headers;
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ hit: req.url }));
   });
@@ -274,6 +277,46 @@ test('loopback 宿主：未放行端口拒绝，放行端口真实转发到本�
     if (chunk.done) break;
   }
   assert.equal(body, '{"hit":"/a"}');
+  // 隧道内可信标记（C-1 信任连接认证）：被连接方进程密钥注入，本机其他进程无法伪造。
+  assert.equal(seen.headers[TUNNEL_HEADER], tunnelSecret());
+});
+
+test('真实 API app 挂在 unix socket 上：loopback 宿主请求免令牌，TCP 端口仍 401', async (t) => {
+  const express = require('express');
+  const { apiAuthGuard } = require('../lib/auth');
+  const { startInboundSocket, inboundSocketPath } = require('../lib/inbound-socket');
+  const sockHome = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-sock-'));
+  t.after(() => fs.rmSync(sockHome, { recursive: true, force: true }));
+
+  const app = express();
+  app.use('/api', apiAuthGuard({ token: 'tok-0123456789', isRemoteHost: async () => false }));
+  app.get('/api/sessions', (_req, res) => res.json({ ok: true }));
+  const sock = await startInboundSocket({ app, home: sockHome });
+  t.after(() => sock.close());
+  const tcp = app.listen(0, '127.0.0.1');
+  await new Promise((resolve) => tcp.once('listening', resolve));
+  t.after(() => new Promise((resolve) => tcp.close(resolve)));
+
+  const tcpPort = tcp.address().port;
+  const host = new DshLoopbackHost(() => [tcpPort, 1]);
+  t.after(() => host.closeAll());
+
+  // 对照组：本机 TCP 直连没有令牌 → 401。
+  assert.equal((await fetch(`http://127.0.0.1:${tcpPort}/api/sessions`)).status, 401);
+
+  // 被连接方在 unix socket 上听同一个 app：宿主按 socket 路径转发（dsh 放行列表即 socket 路径）。
+  const file = inboundSocketPath(sockHome);
+  const socketHost = new DshLoopbackHost(() => [file]);
+  t.after(() => socketHost.closeAll());
+  const head = await socketHost.call({ op: 'http.open', id: 's1', port: file, path: '/api/sessions', method: 'GET' });
+  assert.equal(head.status, 200);
+  let body = '';
+  for (;;) {
+    const chunk = await socketHost.call({ op: 'http.read', id: 's1' });
+    body += Buffer.from(chunk.data, 'base64').toString('utf8');
+    if (chunk.done) break;
+  }
+  assert.deepEqual(JSON.parse(body), { ok: true });
 });
 
 test('loopback 连接方端点：请求经通道转发到远端端口并回传响应', async (t) => {

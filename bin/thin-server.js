@@ -16,8 +16,12 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const { csrfGuard } = require('../lib/csrf');
+const { apiAuthGuard, tokenExchangeHandler, authEnabled, resolveUiToken } = require('../lib/auth');
+const { startInboundSocket, boundInboundSocketPath } = require('../lib/inbound-socket');
+const { HOME: HOME_DIR } = require('../lib/config');
 const { shutdownHosts, setSelfIdentity, autoConnectThinHost } = require('../lib/hosts');
 const mountProxyRoutes = require('../lib/routes/proxy');
+const { isRemoteHost } = require('../lib/routes/proxy');
 const mountHostsRoutes = require('../lib/routes/hosts');
 const mountDshRoutes = require('../lib/routes/dsh');
 const mountModeRoutes = require('../lib/routes/mode');
@@ -28,10 +32,18 @@ const pkg = require('../package.json');
 const app = express();
 // 薄服务默认 3801（与完整实例 3800 区隔，二者可同机并存）。
 const PORT = process.env.PORT || 3801;
-// 无鉴权（沿用现状 CSRF）：LAN 需显式 HOST=0.0.0.0（会暴露全部会话，文档显著提示）。
+// 本机访问令牌（lib/auth.js）：未配置时自动生成 ~/.agentlray/ui-token（0600），
+// AGENTLRAY_NO_AUTH=1 可关闭；LAN 需显式 HOST=0.0.0.0（会暴露全部会话，文档显著提示）。
 const HOST = process.env.HOST || '127.0.0.1';
 const DIST_DIR = path.join(__dirname, '..', 'frontend', 'dist');
 const HAS_DIST = fs.existsSync(path.join(DIST_DIR, 'index.html'));
+
+// 本机鉴权（C-1）：只保护**本机直连**（目标 local / 本机资源）。远端目标不验本机令牌——
+// 链路认证由隧道承担；proxy 剥除本机凭证后再转发。令牌未配置时自动生成
+// （~/.agentlray/ui-token，0600），AGENTLRAY_NO_AUTH=1 可关闭。只读 headers/cookie、
+// 不消费 body，不影响原始流透传。
+const UI_TOKEN = resolveUiToken();
+app.use('/api', apiAuthGuard({ token: UI_TOKEN, isRemoteHost }));
 
 // 网关 host 路由：必须第一个挂载（在任何 body parser 之前），远端转发需要原始 body 流。
 // thin 选项开启系统配置面拦截（settings 全部 403、platforms 写面 403）。
@@ -48,10 +60,19 @@ setSelfIdentity({ version: pkg.version, bootId: SERVER_BOOT_ID });
 // 平台目录为空（薄服务不携带平台解析栈）。
 log.init({ version: pkg.version, platforms: [] });
 app.get('/api/version', (_req, res) => {
-  res.json({ bootId: SERVER_BOOT_ID, version: pkg.version });
+  res.json({ bootId: SERVER_BOOT_ID, version: pkg.version,
+    // 入站信任通道路径（公开端点只暴露路径字符串）：连接方据此把 ssh/dsh 隧道指向本机
+    // UNIX socket，被连接方因此无需关闭本机令牌鉴权（lib/inbound-socket.js）。
+    // 只通告**本进程实际 bind 成功**的路径：同机 thin/full 共用 HOME，bind 失败者若仍
+    // 按 HOME 算路径通告，对端会把流量打到另一个实例上。
+    inboundSocket: boundInboundSocketPath(),
+  });
 });
 // 模式信号：薄服务 → { mode: 'thin', version }（本地资源，绝不透传远端模式）。
 mountModeRoutes(app, { mode: 'thin' });
+
+// WebView `GET /?token=` 换 cookie：必须挂在 express.static 之前（同完整实例）。
+app.get('/', tokenExchangeHandler({ token: UI_TOKEN }));
 
 if (HAS_DIST) {
   app.use(express.static(DIST_DIR, { maxAge: 0, etag: false, lastModified: false }));
@@ -87,8 +108,25 @@ app.get('*', (_req, res) => {
 // 前端 GET /api/hosts 读到后直落该主机（无「先连后加载」等待）。
 app.listen(PORT, HOST, () => {
   console.log(`AgentLRay thin listening on http://${HOST}:${PORT}`);
+  // 入站信任通道：薄服务只做连接方，但同机若有进程 ssh -L 指向本机也应免令牌。
+  startInboundSocket({ app, home: HOME_DIR, log }).then(
+    (sock) => console.log(`  入站通道：${sock.path}（ssh 连接方自动使用，无需配置）`),
+    (error) => console.log(`  入站通道：未启用（${error.message}）`)
+  );
   console.log('  薄服务：仅远程连接，不携带平台解析栈，系统配置面已关闭');
-  log.boot.info('boot', { bootId: SERVER_BOOT_ID, version: pkg.version, mode: 'thin', host: HOST, port: PORT });
+  if (authEnabled() && UI_TOKEN) {
+    console.log(`  本机鉴权：已启用（浏览器打开 http://${HOST}:${PORT}/?token=${UI_TOKEN} 兑换 cookie）`);
+  } else {
+    console.log('  本机鉴权：已关闭（AGENTLRAY_NO_AUTH=1）');
+  }
+  log.boot.info('boot', {
+    bootId: SERVER_BOOT_ID,
+    version: pkg.version,
+    mode: 'thin',
+    host: HOST,
+    port: PORT,
+    auth: authEnabled() && UI_TOKEN ? 'token' : 'off',
+  });
   autoConnectThinHost()
     .then(({ ok, hostId, runtime }) => {
       if (!hostId) {
@@ -101,8 +139,14 @@ app.listen(PORT, HOST, () => {
         console.log(`  已自动连接主机 ${hostId}${v}`);
         log.boot.info('auto connect', { hostId, ok: true, remoteVersion: runtime?.version?.version ?? null });
       } else {
-        console.log(`  自动连接主机 ${hostId} 失败: ${runtime?.error ?? '未知错误'}`);
-        log.app.warn('auto connect failed', { hostId, error: runtime?.error ?? '未知错误' });
+        const detail = runtime?.error?.message ?? '未知错误';
+        console.log(`  自动连接主机 ${hostId} 失败: ${detail}`);
+        log.app.warn('auto connect failed', {
+          hostId,
+          code: runtime?.error?.code ?? null,
+          retryable: runtime?.error?.retryable ?? null,
+          error: detail,
+        });
       }
     })
     .catch((error) => {

@@ -1,10 +1,12 @@
 package com.agentlray.app
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.SecureRandom
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -36,6 +38,16 @@ class NodeRuntimeManager(
 
     private var restartCount = 0
     private var userStopped = false
+    /**
+     * 本机接口令牌（C-1）：首次启动随机生成后**持久化到 filesDir/ui-token**，经 env
+     * `AGENTLRAY_UI_TOKEN` 传给 Node（不走 TCP）。WebView 用 `GET /?token=` 换 HttpOnly
+     * cookie 后正常访问；令牌跨进程/跨升级稳定 → 已兑换的 cookie 不会因运行时重启失效。
+     * filesDir 是应用私有目录，其他应用不可读。
+     */
+    @Volatile
+    private var uiTokenValue: String? = null
+    val uiToken: String?
+        get() = uiTokenValue
 
     fun start() {
         executor.execute {
@@ -110,7 +122,8 @@ class NodeRuntimeManager(
         val dns = ResolvConf.apply(context, layout.rootfsDir)
         logRing.append("", if (dns.isEmpty()) "resolv.conf：保留兜底 DNS" else "resolv.conf：${dns.joinToString(",")}")
 
-        val command = buildCommand(layout, proot)
+        val token = ensureUiToken()
+        val command = buildCommand(layout, proot, token)
         val pb = ProcessBuilder(command)
         pb.directory(layout.appDir)
         pb.redirectErrorStream(true)
@@ -121,7 +134,8 @@ class NodeRuntimeManager(
         // 部分内核 seccomp 敏感时的兜底开关（可按需开启，P0 实测）。
         if (File(layout.runtimeDir, "no-seccomp").isFile) env["PROOT_NO_SECCOMP"] = "1"
 
-        logRing.append("", "spawn: ${command.joinToString(" ")}")
+        // 令牌脱敏后再进日志环：日志会显示在错误屏、debug 构建还会同步到 /sdcard。
+        logRing.append("", "spawn: ${command.joinToString(" ").replace(token, "***")}")
         val proc = try {
             pb.start()
         } catch (e: Exception) {
@@ -197,7 +211,45 @@ class NodeRuntimeManager(
         }
     }
 
-    private fun buildCommand(layout: RootfsInstaller.Layout, proot: File): List<String> {
+    /**
+     * 解析本机令牌（见 [uiToken] 注释）：内存 → filesDir/ui-token → 新建。
+     * SecureRandom + Base64 URL 安全字符集，256 bit。写入为「临时文件 + rename」，
+     * 中途被杀不会留下半截令牌（否则下次启动会读到残缺值导致 cookie 立刻失效）。
+     */
+    @Synchronized
+    private fun ensureUiToken(): String {
+        uiTokenValue?.let { return it }
+        val file = File(context.filesDir, TOKEN_FILE)
+        val existing = runCatching { file.readText().trim() }.getOrNull().orEmpty()
+        if (existing.isNotEmpty()) {
+            uiTokenValue = existing
+            return existing
+        }
+        val bytes = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        val token = Base64.encodeToString(bytes, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+        runCatching {
+            val tmp = File(context.filesDir, "$TOKEN_FILE.tmp")
+            tmp.writeText(token)
+            if (!tmp.renameTo(file)) {
+                file.writeText(token)
+                tmp.delete()
+            }
+        }
+        uiTokenValue = token
+        return token
+    }
+
+    /** 已成功兑换 cookie 的令牌（供 MainActivity 判断是否需要重新导航）。 */
+    fun exchangedToken(): String? = runCatching { File(context.filesDir, TOKEN_EXCHANGED_FILE).readText().trim() }.getOrNull()?.ifEmpty { null }
+
+    fun markExchanged(token: String?) {
+        runCatching {
+            val file = File(context.filesDir, TOKEN_EXCHANGED_FILE)
+            if (token == null) file.delete() else file.writeText(token)
+        }
+    }
+
+    private fun buildCommand(layout: RootfsInstaller.Layout, proot: File, token: String): List<String> {
         // 依赖库（libtalloc/libandroid-shmem）与 libproot.so 同在 nativeLibraryDir：
         // proot 的 DT_RUNPATH 已在构建期改为 ${ORIGIN}（fetch-proot.sh 用 patchelf 改写）。
         // 不能用 LD_LIBRARY_PATH —— Android 8+ 的 bionic linker 对 app 进程忽略它。
@@ -218,6 +270,8 @@ class NodeRuntimeManager(
             "AGENTLRAY_NATIVE_SAVE=1",
             "PORT=3801",
             "HOST=127.0.0.1",
+            // 本机接口令牌（C-1）：thin-server 据此对 /api 鉴权；/api/version 保持公开供健康探测。
+            "AGENTLRAY_UI_TOKEN=$token",
             // guest 根路径：proot 的 -r rootfsDir 把 guest `/` 映射到 host rootfsDir，
             // 传给 guest 进程的程序路径必须是 guest 视角（宿主绝对路径会被 proot 当 guest 路径解析而失配）。
             layout.nodeGuestPath,
@@ -310,6 +364,9 @@ class NodeRuntimeManager(
     }
 
     companion object {
+        private const val TOKEN_FILE = "ui-token"
+        private const val TOKEN_EXCHANGED_FILE = "ui-token.exchanged"
+
         private const val TAG = "AgentLRayRuntime"
         private const val PORT = 3801
         private const val PID_FILE = "node.pid"

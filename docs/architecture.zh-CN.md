@@ -296,6 +296,8 @@ spawn 前终止它（SIGTERM → SIGKILL 兜底），无法检测/终止时降�
 处理器**，且在任何 body parser 之前（远端转发要原始 body 流）。它按 `X-Host-Id`
 （或 `?host=`，供 SSE）路由：缺省/`local` → `next()` 走本地路由；远端 → 转发到
 隧道 `baseUrl`（保留原始 `Host`/`Origin` 供远端 CSRF 校验）。业务逻辑在 `lib/`。
+`/api` 鉴权中间件（`lib/auth.js`）**先于**网关执行：**本机直连**（目标 `local` 或本机
+资源 `/api/{hosts,inbound,dsh,mode}`）要求本机令牌；远端目标放行（链路认证），见 §16。
 CSRF 防护（`lib/csrf.js`）在解析 body 前拒绝跨站状态变更请求。所有响应设
 `Cache-Control: no-store`。JSON body 上限 256 KB。
 
@@ -329,8 +331,18 @@ CSRF 防护（`lib/csrf.js`）在解析 body 前拒绝跨站状态变更请求�
 
 - **主机模型**（`lib/hosts.js`）：`local` 内建恒在（直连本进程端口，不落盘、不建
   隧道）；其余主机持久化在 `hosts.json`，运行时状态机
-  `disconnected`/`connecting`/`connected`/`error`。隧道生命周期绑定当前选中主机：
-  切换离开 → 关闭，删除 → 关闭并移除，进程退出 → 兜底 kill 所有 ssh 子进程。
+  `connecting`/`connected`/`reconnecting`/`failed`/`disconnected`（`status` 保留
+  旧同义值以兼容既有消费方）。失败携带稳定错误码 `errorCode`（`HOST_OFFLINE`、
+  `DSH_AUTH_REQUIRED`、`KEY_CHANGED`、`VERSION_INCOMPATIBLE`、`TUNNEL_TIMEOUT`、
+  `TUNNEL_REFUSED`、`UNREACHABLE`、`INVALID_TARGET`、`AUTH_REQUIRED`）与
+  `retryable`。隧道生命周期绑定当前选中主机：切换离开 → 关闭，删除 → 关闭并移除，
+  进程退出 → 兜底 kill 所有 ssh 子进程。
+- **探活**（`AGENTLRAY_HOST_PROBE_MS`，默认 15s；单次超时 3s）：周期性
+  `GET <baseUrl>/api/version`，连续 2 次失败判定链路丢失 → `reconnecting`。定时器
+  `unref` 且关闭时清理。
+- **重连退避**（`AGENTLRAY_HOST_BACKOFF_MS`）：1→2→4→8→15→30→60s，±20% 抖动，
+  无限重试；手动 `openHost` 取消待执行退避并归零，不可重试错误直接进入 `failed`
+  且不循环。
 - **ssh 传输**（`lib/transport.js`）：spawn 系统 `ssh -L` 做本地端口转发，远端
   AgentLRay 保持 `127.0.0.1` 绑定，安全边界在系统 ssh 层（零存密：凭据/指纹走
   `~/.ssh/config`、`ssh-agent`、`known_hosts`）。可执行名经 `AGENTLRAY_SSH_BIN`
@@ -448,6 +460,10 @@ JSONL 只推进到最后一个完整行；dsh zstd 解压每个完整新帧并�
 额外处理会话级 `session_exit` 记录（→ `noteEnded` + `resolveAllPending`，使 `ask`
 交互闭环）。Hermes 有专门 SQLite WAL-watch 分支（时间戳增量查询）。
 
+每次推送携带 `id: <byteOffset>`。重连时传 `?after=<offset>`（或 `Last-Event-ID`），
+路由从该偏移续读：断线期间写入的消息补齐、已有消息不重发；`after=0` 视同无偏移
+（全量基线）。文件轮转或截断到偏移以下时回落全量读取。
+
 ## 15. 导出与 OTLP
 
 - **导出**（`lib/export.js`）：把归一化会话渲染为可分享的 Markdown 或自包含 HTML
@@ -461,9 +477,42 @@ JSONL 只推进到最后一个完整行；dsh zstd 解压每个完整新帧并�
 
 ## 16. 安全与信任模型
 
-- **无认证，默认 localhost。** 看板零认证暴露完整会话历史；默认绑定 `127.0.0.1`
-  （`HOST=0.0.0.0` 选择 LAN）。
-- **CSRF：** 无 cookie → CSRF token 无意义。防护用 `Origin`/`Sec-Fetch-Site`/
+- **默认 localhost。** 默认绑定 `127.0.0.1`（`HOST=0.0.0.0` 选择 LAN）。
+- **本机令牌鉴权**（`lib/auth.js`）——**只看请求目标是本机还是远端**：
+  - 本机直连（目标 `local`，或本机资源 `/api/{hosts,inbound,dsh,mode}`）必须携带令牌：
+    `GET /?token=<t>` 校验后设置**长效** `HttpOnly; SameSite=Strict` cookie
+    （`Max-Age=31536000` + `Expires`，同名同 `Path` 自动覆盖旧值）并 302 到
+    `/#token=<t>`；`/api/*` 接受该 cookie 或 `X-AgentLRay-Token`
+    （sha256 + `timingSafeEqual`）。**任一凭据有效即放行**（头 + cookie 逐个比对），
+    避免前端缓存旧值把新 cookie 顶掉。未配置的主机 id 按本机处理（fail-closed）。
+  - 前端长效缓存（`frontend/src/api/ui-token.ts`）：302 的 fragment 不含 HTTP 语义、不进
+    服务端日志，SPA 启动读取后立即 `replaceState` 抹掉地址栏，并写入
+    `localStorage['agentlray.uiToken']`；之后每个同源请求附 `X-AgentLRay-Token`，cookie
+    被清/WebView 存储回收时仍可用。带新令牌再次打开页面时**先校验再覆盖**
+    （`/api/mode` 返回 401 则不覆盖，防跨源 `#token=` 顶掉有效缓存）。SSE 只能凭 cookie
+    鉴权：重连前探测到 401 且缓存令牌仍在时，自动 `/?token=<缓存>&next=<当前路径>` 重新兑换
+    cookie（`next` 只接受站内绝对路径），不清缓存。Android WebView 额外在导航后与退后台时
+    `CookieManager.flush()`，并在 `exchangedToken` 相同但 cookie 缺失时强制重新导航兑换。
+  - 令牌来源：`AGENTLRAY_UI_TOKEN` 优先（Android 壳生成并持久化于应用私有目录）；
+    否则自动生成并落 `~/.agentlray/ui-token`（0600，重启复用）。`AGENTLRAY_NO_AUTH=1`
+    关闭（构建脚本/测试基线）。`GET /api/version` 保持公开（就绪探测）。
+  - 远端目标**不验本机令牌**：链路认证由 ssh 私钥 / dsh 设备身份承担；proxy 转发前
+    剥除本机 cookie 与令牌头，避免泄露给远端。
+  - 被连接方（dsh/ssh 隧道打到本机 `/api/*`）**无需任何配置**，信任锚在传输层：
+    - **入站信任通道**（`lib/inbound-socket.js`）：服务在 `~/.agentlray/inbound.sock`
+      （socket 0600、目录 0700）上再听同一个 app；能连上该 socket 的进程即同用户进程，
+      请求带 `req.agentlrayInboundSocket` 标记放行。其他用户/其他 app（Android 不同 UID）
+      被内核按文件权限挡住。路径经公开的 `/api/version`（`inboundSocket`）与 dsh
+      `harness.transport.describe`（`inboundSocket`）通告。
+    - 连接方据此建隧道：ssh 先建 TCP 隧道读 `/api/version`，再改走
+      `ssh -L <port>:<远端 socket 路径>`（OpenSSH streamlocal 转发）；dsh 把 loopback
+      目标直接设为该路径。取不到路径时退回 TCP 回环（此时接收方需关鉴权或带令牌）。
+    - **dsh 进程内密钥**（`X-AgentLRay-Tunnel`，`lib/tunnel-headers.js`）：loopback 宿主
+      转发前注入，密钥不落盘、不出站，同机其他进程无法伪造。
+  - 为什么不在 HTTP 层做「连接方自证」（上报密钥、challenge 等）：`ssh -L` 到 TCP 端口后
+    请求源就是 127.0.0.1，本机任意进程都能走同一套引导流程，等于关掉令牌；只有传输层
+    （UNIX socket 文件权限）能真正区分。
+- **CSRF：** 鉴权 cookie 为 `SameSite=Strict`；防护用 `Origin`/`Sec-Fetch-Site`/
   `Referer` 对比请求的 `Host` 拒绝跨站不安全请求（相对来源，LAN 部署在任何主机名
   下仍可用）。网关转发保留原始 `Host`/`Origin`，两端校验一致。
 - **路径净化：** `resolveDir` 只接受绝对、无 `..` 的覆盖；`sanitizeAgentName`/

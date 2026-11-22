@@ -11,7 +11,12 @@ import { toast } from 'sonner';
 import { Plus, Settings2 } from 'lucide-react';
 import { getHosts, getDshDevices, deleteHost as apiDeleteHost } from '@/api/client';
 import type { HostInfo, HostStatus, InboundPeer } from '@/api/types';
-import { HOST_STATUS_DOT, HOST_STATUS_LABEL } from '@/lib/host-status';
+import {
+  HOST_ERROR_LABEL,
+  HOST_STATUS_DOT,
+  HOST_STATUS_LABEL,
+  isSelfHealing,
+} from '@/lib/host-status';
 import { useAppStore, REMEMBERED_HOST_KEY } from '@/store';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -135,6 +140,7 @@ export function HostsDialog({
   const selectedHostId = useAppStore((s) => s.selectedHostId);
   const hostStatus = useAppStore((s) => s.hostStatus);
   const hostError = useAppStore((s) => s.hostError);
+  const hostErrorCode = useAppStore((s) => s.hostErrorCode);
   const inbound = useAppStore((s) => s.inbound);
   // 薄服务无 local 宿主（后端已不返回），空态文案改为「远程主机」。
   const isThin = useAppStore((s) => s.mode) === 'thin';
@@ -242,7 +248,8 @@ export function HostsDialog({
               const isLocal = h.id === 'local';
               const st = hostStatus[h.id] ?? h.status ?? 'disconnected';
               const isCurrent = h.id === selectedHostId;
-              const error = h.error ?? hostError[h.id] ?? null
+              const error = h.error ?? hostError[h.id] ?? null;
+              const errorCode = h.errorCode ?? hostErrorCode[h.id] ?? null;
               return (
                 <div
                   key={h.id}
@@ -254,9 +261,15 @@ export function HostsDialog({
                       {!isLocal ? <span className="rounded px-1 text-[10px] text-muted-foreground">{h.id}</span> : (selfLabel ?? 'local')}
                       {!isLocal ? <StatusBadge status={st} />  : null}                      
                     </div>
-                    {st === 'error' && error ? (
+                    {(st === 'error' || st === 'failed') && error ? (
                       <span className="max-w-[12rem] truncate text-[10px] text-destructive" title={error}>
+                        {errorCode ? `${HOST_ERROR_LABEL[errorCode] ?? errorCode} · ` : ''}
                         {error}
+                      </span>
+                    ) : null}
+                    {isSelfHealing(st, h.errorRetryable) ? (
+                      <span className="text-[10px] text-muted-foreground">
+                        正在自动重连{h.attempt ? `（第 ${h.attempt} 次）` : ''}…
                       </span>
                     ) : null}
                     {h.ssh ? (

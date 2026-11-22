@@ -73,7 +73,7 @@ flowchart TB
 | Q15 | 系统配置接口边界 | **堵写面**（settings PUT / cli-bins / platforms mount|replace 403），**保留 `GET /api/ui-selection` 只读**恢复远端平台选择；前端 thin 跳过 `syncSelectedPlatforms`（写），平台选择只存 localStorage。 |
 | Q16 | 远端操控写操作 | **全部放行**（resume-command / sessions new / prompts rewrite·hidden·analyze）：非系统配置，属操控远端会话。 |
 | Q17 | dsh 配置 | 薄服务本地挂 `/api/dsh/*`（连接所需最小配置例外）；dsh 是穿透 NAT 的关键通道。 |
-| Q18 | 鉴权 | **无鉴权**（沿用现状 CSRF）；默认 `HOST=127.0.0.1`，LAN 需显式 `HOST=0.0.0.0`；风险已明示。 |
+| Q18 | 鉴权 | **本机令牌鉴权**（2026-11-22 更新，原「无鉴权」已作废）：本机直连与本地资源（`hosts/inbound/dsh/mode`）需令牌；令牌缺省自动生成到 `~/.agentlray/ui-token`；远端目标走链路认证并在转发前剥除本机 cookie/令牌；默认 `HOST=127.0.0.1`，LAN 需显式 `HOST=0.0.0.0`。 |
 | Q19 | 启动自动连接 | boot 即 `openHost` 上次/首台主机；失败仅记状态，前端首帧直落该主机。 |
 | Q20 | 多隧道池 | 薄服务**沿用单隧道**（`connect` 仍 `closeAllExcept`）；池化另立需求。 |
 | Q21 | 启动入口与配置 | `agentlray thin` 子命令 + `npm run thin`；默认 `PORT=3801`、`HOST=127.0.0.1`；配置仍用 `~/.agentlray/hosts.json`，可用 `AGENTLRAY_HOME` 隔离。 |
@@ -117,7 +117,7 @@ flowchart TB
 
 - **薄 ≠ 完整网关子集**：薄服务不是「隐藏设置 UI 的完整实例」，而是「数据面边界排除系统配置的连接方网关」；二者从进程与路由挂载上分离。
 - **无 `local` 宿主**：从数据模型上就没有本地数据源，避免「切到本机看到 404」的伪能力。
-- **无鉴权风险**：薄服务绑 LAN 即任何人可看全部会话；默认只绑 127.0.0.1，LAN 需显式开启。**主动接受**（用户拍板 Q18=c），文档需显著提示。
+- **鉴权（2026-11-22 更新）**：本机直连需令牌（`lib/auth.js`，缺省自动生成）；绑 LAN 时对**远端目标**的转发不验本机令牌，链路由传输层认证保护——LAN 暴露仍需显式 `HOST=0.0.0.0` 并显著提示。
 - **`/api/mode` 本地资源**：绝不能被 `proxy.js` 透传，否则薄服务会误把远端模式当自己的。
 - **与 `design-remote-settings-tunnel` 的关系**：完整网关仍透传远端 settings（可改）；薄服务不透传——两种形态并存，非回归。
 - **单隧道**：移动端切主机反复拆建隧道，体验略差；池化另立需求（P1-4）。
