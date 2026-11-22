@@ -106,9 +106,9 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
 
 | 文件 | 说明 |
 | --- | --- |
-| `server-api.ts` | `ClientServerApi` / `HostServerApi`：与远端服务器配对 / 授权 / 凭据签发（**已补丁**，见 §4.9） |
-| `server-credentials.ts` | `ServerCredentialStore`：服务器凭据落盘与轮转 |
-| `server-connection.ts` | `HostServerConnection`：宿主侧 WebSocket + Noise + Relay/WebRTC 隧道 |
+| `server-api.ts` | `ClientServerApi` / `HostServerApi`：与远端服务器配对 / 授权 / 凭据签发（**已补丁**，见 §4.9、§4.11） |
+| `server-credentials.ts` | `ServerCredentialStore`：服务器凭据落盘与轮转（**已补丁**，见 §4.10） |
+| `server-connection.ts` | `HostServerConnection`：宿主侧 WebSocket + Noise + Relay/WebRTC 隧道（**已补丁**，见 §4.13） |
 | `connection-controller.ts` | `ConnectionController`：认证对端通道与 RPC 分发 |
 | `client-secure-transport.ts` | `ClientSecureTransport`：客户端侧加密传输 |
 | `transport-upgrade.ts` | `TransportUpgradeHost`：传输升级宿主侧实现 |
@@ -134,7 +134,7 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
 ### 4.1 `src/plugin/identity-store.ts` —— 类型桩（手写，非借码）
 
 * **上游**：`packages/plugin/src/identity-store.ts`（1141 行），包含设备身份生成、文件锁、目录迁移、凭据轮转、信任对端持久化等完整运行时实现。
-* **为什么裁剪**：本项目不使用上游的身份存储实现。AgentLRay 侧自行实现 `lib/dsh/identity.js`，落在 `~/.agentlray/dsh-device.json`，与 AgentLRay 的配置目录约定保持一致。
+* **为什么裁剪**：本项目不使用上游的身份存储实现。AgentLRay 侧自行实现 `lib/dsh/identity.js`，落在 `~/.agentlray/dsh/dsh-device.json`，与 AgentLRay 的配置目录约定保持一致。
 * **裁剪后由谁补位**：本文件只保留上游 `server-api.ts` / `server-connection.ts` / `connection-controller.ts` / `client-secure-transport.ts` 以 **type-only** 方式引用的类型契约：`HostIdentity`、`TrustedPeer`、`IdentityStore`、`RemoteDeviceRole`。`HostIdentity` 与 `TrustedPeer` 的字段与上游定义**逐字一致**（含 `schemaVersion: 1`、`membershipId?: string`），`IdentityStore` 的方法签名与上游一致。
 * **运行时影响**：无。该文件编译产物为空模块（仅类型），不产生任何运行时代码。
 
@@ -216,6 +216,71 @@ const dsh = require('/abs/path/to/AgentLRay/lib/dsh/vendor/dist/index.js')
   `lib/dsh/auth.js` 的 `describeNetworkError` 沿 `cause` 链逐层展开（最多 6 层）写入日志并透出前端。
 * **兼容性**：仅新增可选参数与实例属性，不改变错误 `code` / `message` / `reason`，调用方现有判断不受影响。
 * **同步上游时**：上游若自行保留 cause，本补丁可删除。
+
+### 4.10 `src/plugin/server-credentials.ts` —— 硬链接不可用时的锁降级 + 清理残留锁（AgentLRay 补丁）
+
+* **上游**：`withQueueLock` 用「临时文件 + 硬链接」发布刷新队列记录；文件系统不支持硬链接
+  （`EXDEV` / `EOPNOTSUPP` / `ENOTSUP` / `ENOSYS` / `EPERM` / `EACCES`）时直接抛
+  `SERVER_CREDENTIALS_LOCK_UNSUPPORTED`，认证与设备列表随之中断。`clear()` 只删
+  `server-credentials.json`，不清 `.refresh-lock` 标记与 `.holder-*` 记录。
+* **为什么改**：Android 薄服务运行在 PRoot / `/sdcard`（FUSE）等不支持硬链接的挂载上，
+  每次 `authenticate()` 都必然失败，表现却是「dsh 登录已失效」，用户无法自救。
+* **改成**：
+  1. 获取文件锁阶段抛 `ServerCredentialsLockUnsupportedError` 时，**降级为进程内互斥**
+     （按锁路径串行）。降级只覆盖同一进程；跨进程互斥在该文件系统上本就不可得。
+     `operation()` 自身抛错原样上抛，绝不重跑。
+  2. `ServerCredentialStore` 构造器新增可选 `linkFile` 注入（默认 `node:fs/promises.link`），
+     供测试模拟不支持硬链接的现场。
+  3. `clear()` 顺带清理已退出进程的 `.holder-*`；锁标记仅在没有存活 holder 时删除，
+     不破坏仍在运行的其它实例之间的互斥。
+* **兼容性**：仅在「上游本来就会失败」的场景改变行为（从报错改为可工作）；支持的
+  文件系统上路径不变。新增的是可选构造参数，调用方可忽略。
+* **同步上游时**：若上游自行实现降级/清理，本补丁可删除；注意保留 `PATCH(AgentLRay)` 标注便于 diff。
+
+### 4.11 `src/plugin/server-api.ts` —— `authenticate()` 无锁快路径（AgentLRay 补丁）
+
+* **上游**：`loadOrIssue` 无论本地凭据是否新鲜，都先进入跨进程刷新锁再判断。
+* **为什么改**：本地 access token 仍新鲜是最常见路径，无谓地引入锁依赖；在硬链接不可用的
+  现场（见 §4.10）这把整条认证链路一起卡死。
+* **改成**：先 `store.load` 判断——`refreshTokenExpiresAt` 与 `accessTokenExpiresAt` 都仍有
+  30s 以上余量时直接返回本地凭据，不进锁；否则保持原有「进锁 + 轮转/注册」逻辑。
+* **兼容性**：只跳过「进锁后也会直接返回」的分支；凭据过期/临期时行为不变。
+* **同步上游时**：上游若已加无锁快路径，本补丁可删除。
+
+### 4.12 `src/plugin/server-api.ts` —— 用既有账号授权登记派生身份（AgentLRay 补丁）
+
+* **上游**：带账号授权的设备登记只有 `authorizeWithAccount(identity, email, password)`；派生身份（probe）
+  没有账号密码可传（账号密码不落盘），调用即 `email.trim()` 抛 TypeError。
+* **改成**：抽出 `registerAuthorized(identity, authorization, recoverIdentity?)`（原 register +
+  `DEVICE_REVOKED` 重试逻辑，原样）；`authorizeWithAccount` 与 `pollOAuthQrLogin` 复用它；
+  新增 `authorizeOwnedRoleWithAccount(identity, accountToken, account?, recoverIdentity?)`；
+  `pollOAuthQrLogin` 的 complete 结果与 `authorizeWithAccount` 的返回值均附 `accountToken`
+  （仅内存使用，不落盘）——账号密码登录同样要能为 probe 登记，若只在 `pollOAuthQrLogin` 透出，
+  账号密码登录路径永远拿不到账号授权（probe 登记失败、连接测试不可用）。
+* **兼容性**：既有签名与行为不变；仅新增方法与可选字段。
+* **同步上游时**：上游若提供「用账号令牌登记设备」的公开入口，本补丁可删除。
+
+### 4.13 `src/plugin/server-connection.ts` —— 控制通道失败原因落日志（AgentLRay 补丁）
+
+* **上游**：`server control connection failed` 只带 `code`/`retryable`，`ControlConnectionError` 的
+  message（`hello.ack` 缺失、`Unable to open the Server WebSocket.` 等）被丢弃；中继以 close 帧
+  表达拒绝（如 `4002 invalid access token`）时关闭码与原因不落日志；控制帧编解码失败只有
+  `server control frame failed`，不含底层错误。
+* **为什么改**：2026-11-22 现场远程 host 持续 `lastError=CONNECTION_FAILED`、presence 始终离线，
+  日志只有 `{"code":"CONNECTION_FAILED","retryable":true}`，无法区分「WS 连不上（代理/网络）/
+  hello 被拒 / 凭据刷新超时」，也无法看到中继给出的具体拒绝原因。
+* **改成**（只增日志字段与日志行）：
+  - 失败日志追加 `message`；`ServerApiError` 追加 `phase`/`status`/`reason`；`cause` 取错误链最底层的
+    系统错误码（`fetch failed → UND_ERR_CONNECT_TIMEOUT`、`ECONNREFUSED` 等），凭据刷新超时因此能看到
+    真实网络原因；
+  - 中继的业务关闭码（非 1000–1015 通用码、且带 reason）随失败日志输出 `closeCode`/`closeReason`；
+    该字段在**每轮重连前清空**，避免上一轮的关闭原因泄漏到本轮无关失败（DNS/TLS/超时）的日志里；
+  - WS `onerror` 的底层错误作为 `ControlConnectionError` 的 `cause` 透传；
+  - `authenticate()` 抛错时 `debug` 级输出 `server control authenticate failed`（完整错误链）；
+  - 控制帧编解码失败追加 `cause`；AUTH_INVALID / TOKEN_EXPIRED 分支改走 `server returned a control error`
+    （code/message/retryable/connectionId）。
+* **兼容性**：状态机、重连与错误码均不变。
+* **同步上游时**：上游若已在失败日志中保留错误详情，本补丁可删除。
 
 ## 5. 编译
 

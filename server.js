@@ -25,6 +25,7 @@ const mountDshRoutes = require('./lib/routes/dsh');
 const mountModeRoutes = require('./lib/routes/mode');
 const { startDshHostService, stopDshHostService } = require('./lib/dsh/host');
 const log = require('./lib/logging');
+const { installProcessErrorHandlers } = require('./lib/process-errors');
 const pkg = require('./package.json');
 
 const app = express();
@@ -167,16 +168,8 @@ process.on('exit', () => {
 });
 // 未捕获异常 / 未处理 rejection（design-logging §5.5）：统一 error 落 app 日志，随后按
 // Node 默认语义（退出码 1）退出——加监听器会抑制默认崩溃，故显式退出以保留原行为。
-process.on('uncaughtException', (error) => {
-  log.app.error('uncaught exception', { error: error?.stack || String(error) });
-  log.close();
-  process.exit(1);
-});
-process.on('unhandledRejection', (reason) => {
-  log.app.error('unhandled rejection', { error: reason instanceof Error ? reason.stack : String(reason) });
-  log.close();
-  process.exit(1);
-});
+// 例外：控制台管道断开（EPIPE）只记日志、不退出（见 lib/process-errors.js）。
+installProcessErrorHandlers();
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, () => {
     log.app.info('process exit', { signal: sig });

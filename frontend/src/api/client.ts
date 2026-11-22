@@ -681,7 +681,8 @@ export interface DshDevice {
   name: string;
   platform: string;
   membershipId: string;
-  online: boolean;
+  /** true/false 为 presence 查询结果；null 表示查询失败、在线状态未知。 */
+  online: boolean | null;
   lastSeenAt: number | null;
 }
 

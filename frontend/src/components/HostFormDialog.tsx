@@ -381,7 +381,7 @@ export function HostFormDialog({
                     <option value="">选择设备…</option>
                     {deviceOptions.map((d) => (
                       <option key={d.deviceId} value={d.deviceId}>
-                        {d.name}（{d.online ? '在线' : '离线'}）· {d.deviceId.slice(0, 8)}
+                        {d.name}（{d.online == null ? '状态未知' : d.online ? '在线' : '离线'}）· {d.deviceId.slice(0, 8)}
                       </option>
                     ))}
                   </select>

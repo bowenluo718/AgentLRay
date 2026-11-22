@@ -44,13 +44,17 @@ export interface OAuthProviderInfo {
 
 export type OAuthQrPollResult =
   | { status: 'pending' | 'expired' }
-  | { status: 'complete'; authorization: DeviceAuthorization }
+  // PATCH(AgentLRay): complete 时附账号令牌（accountToken），供派生身份（probe）登记；
+  // 调用方不得落盘/记日志。
+  | { status: 'complete'; authorization: DeviceAuthorization; accountToken?: string }
 
 export interface DeviceAuthorization {
   method: 'account' | 'host_registration_code' | 'owned_device' | 'device_pairing'
   account?: string
   expiresAt?: number
   isAdmin?: boolean
+  /** PATCH(AgentLRay): 仅 authorizeWithAccount 返回——本次登录得到的账号令牌（内存内使用）。 */
+  accountToken?: string
 }
 
 export type FetchImplementation = typeof fetch
@@ -160,6 +164,9 @@ export class HostServerApi {
     }
   }
 
+  // PATCH(AgentLRay): 抽出「账号授权后的设备登记」为 registerAuthorized，供
+  // authorizeOwnedRoleWithAccount 复用（probe 身份用已有账号授权登记，不再需要账号密码）。
+  // Upstream: authorizeWithAccount 内联 register + DEVICE_REVOKED 重试。
   async authorizeWithAccount(
     identity: HostIdentity,
     email: string,
@@ -180,6 +187,47 @@ export class HostServerApi {
       account: login.account,
       authorizationMethod: 'account' as const,
     }
+    await this.registerAuthorized(identity, authorization, recoverIdentity)
+    return {
+      method: 'account',
+      account: login.account,
+      // PATCH(AgentLRay): 透出本次登录得到的账号令牌（仅内存，不落盘、不记日志），
+      // 供调用方为派生身份（probe）走 authorizeOwnedRoleWithAccount 登记，避免再次登录。
+      accountToken: login.token,
+      expiresAt: login.expiresAt,
+      isAdmin: login.isAdmin,
+    }
+  }
+
+  // PATCH(AgentLRay): 用调用方已有的账号授权（accountToken，如刚扫码/登录得到的账号令牌）
+  // 登记本设备，不传账号密码。
+  // Why: probe 等派生身份需要独立设备 token，但账号密码不落盘，不能也不应再次登录；
+  // 上游 authorizeWithAccount 是唯一带账号授权的登记入口，因此补这一入口。
+  // Upstream: 无（本方法为新增）。
+  async authorizeOwnedRoleWithAccount(
+    identity: HostIdentity,
+    accountToken: string,
+    account?: string,
+    recoverIdentity?: () => Promise<HostIdentity>,
+  ): Promise<DeviceAuthorization> {
+    this.bindIdentity(identity)
+    if (typeof accountToken !== 'string' || accountToken.length === 0) {
+      throw new ServerApiError('INVALID_MESSAGE', 'Account authorization is required.', false)
+    }
+    const authorization = { accountToken, account: account ?? '', authorizationMethod: 'account' as const }
+    await this.registerAuthorized(identity, authorization, recoverIdentity)
+    return {
+      method: 'account',
+      ...(account === undefined ? {} : { account }),
+    }
+  }
+
+  // PATCH(AgentLRay): authorizeWithAccount 的原 register + DEVICE_REVOKED 重试逻辑（原样抽出）。
+  private async registerAuthorized(
+    identity: HostIdentity,
+    authorization: { accountToken: string; account: string; authorizationMethod: 'account' },
+    recoverIdentity?: () => Promise<HostIdentity>,
+  ): Promise<void> {
     try {
       await this.register(identity, authorization)
     } catch (error) {
@@ -191,12 +239,6 @@ export class HostServerApi {
       const nextIdentity = await recoverIdentity()
       this.bindIdentity(nextIdentity)
       await this.register(nextIdentity, authorization)
-    }
-    return {
-      method: 'account',
-      account: login.account,
-      expiresAt: login.expiresAt,
-      isAdmin: login.isAdmin,
     }
   }
 
@@ -267,6 +309,8 @@ export class HostServerApi {
     return { qrId: value.qrId, scanUrl, expiresIn: value.expiresIn as number }
   }
 
+  // PATCH(AgentLRay): 与 authorizeWithAccount 对齐，register + DEVICE_REVOKED 重试抽到
+  // registerAuthorized（原样，行为不变）；返回体额外带 accountToken 供派生身份登记。
   async pollOAuthQrLogin(
     identity: HostIdentity,
     qrId: string,
@@ -294,17 +338,12 @@ export class HostServerApi {
       account: account.account,
       authorizationMethod: 'account' as const,
     }
-    try {
-      await this.register(identity, authorization)
-    } catch (error) {
-      if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED' || recoverIdentity === undefined) throw error
-      const nextIdentity = await recoverIdentity()
-      this.bindIdentity(nextIdentity)
-      await this.register(nextIdentity, authorization)
-    }
+    await this.registerAuthorized(identity, authorization, recoverIdentity)
     return {
       status: 'complete',
       authorization: { method: 'account', account: account.account, isAdmin: account.isAdmin },
+      // PATCH(AgentLRay): 仅供调用方内存使用（派生身份登记），不落盘、不记日志。
+      accountToken: value.token,
     }
   }
 
@@ -495,6 +534,13 @@ export class HostServerApi {
   }
 
   private async loadOrIssue(identity: HostIdentity): Promise<ServerCredentials> {
+    // PATCH(AgentLRay): 无锁快路径。本地 access token 仍新鲜（且 refresh 未临期）时直接
+    // 返回，不进入跨进程刷新锁——这是认证最常见的路径，Android/PRoot 等硬链接不可用的
+    // 现场曾因此每次认证都失败（锁降级见 server-credentials.ts）。
+    // Upstream: 一律先进锁再判断。
+    const cached = await this.store.load(this.baseUrl, identity.deviceId)
+    if (cached !== undefined && cached.refreshTokenExpiresAt > Date.now() + 30_000
+      && cached.accessTokenExpiresAt > Date.now() + 30_000) return cached
     return this.withRefreshLock(async () => {
       const stored = await this.store.load(this.baseUrl, identity.deviceId)
       if (stored === undefined || stored.refreshTokenExpiresAt <= Date.now() + 30_000) {

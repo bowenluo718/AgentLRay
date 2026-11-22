@@ -34,7 +34,7 @@ AgentLRay 自建连接（`ClientServerApi` + `IdentityStore` + `AdaptiveTranspor
 
 ### D5 账号/凭据：共享一套 + secret 加密
 
-`settings.json` 新增 `dsh` section（`role`/`serverUrl`/`email`/`passwordEnc`/`deviceName`），password 经现有 `lib/secret.js` AES-256-GCM 加密（复用 ssh 私钥/llm.apiKey 方案），GET 不回明文。设备身份（25519 密钥对）落 `~/.agentlray/dsh-device.json` + `.key`（0600）。共享账号 + 设备身份 + Host 固定身份三重校验（ds-harness-remote 原生语义）。
+`settings.json` 新增 `dsh` section（`role`/`serverUrl`/`email`/`passwordEnc`/`deviceName`），password 经现有 `lib/secret.js` AES-256-GCM 加密（复用 ssh 私钥/llm.apiKey 方案），GET 不回明文。设备身份（25519 密钥对）落 `~/.agentlray/dsh/dsh-device.json` + `.key`（0600）。共享账号 + 设备身份 + Host 固定身份三重校验（ds-harness-remote 原生语义）。
 
 ### D6 传输抽象：独立 `lib/dsh/` 模块，`type` 分支
 

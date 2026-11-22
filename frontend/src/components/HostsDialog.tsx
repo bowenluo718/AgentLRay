@@ -219,7 +219,7 @@ export function HostsDialog({
   const dshLabel = (deviceId: string): string => {
     const d = (devices.data ?? []).find((it) => it.deviceId === deviceId);
     if (!d) return deviceId;
-    return `${d.name}（${d.online ? '在线' : '离线'}）· ${deviceId.slice(0, 8)}`;
+    return `${d.name}（${d.online == null ? '状态未知' : d.online ? '在线' : '离线'}）· ${deviceId.slice(0, 8)}`;
   };
 
   return (

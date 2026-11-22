@@ -129,7 +129,7 @@ ds-harness-remote 的账号认证 + WebRTC/TURN/Relay 转发服务。AgentLRay �
 ds-harness-remote 提供的、经加密通道把 HTTP/WS 代理到显式 IPv4 loopback 端口的机制（连接方 `LoopbackPreview` / 被连接方 `LoopbackHost` 镜像对称）。AgentLRay 用它把本地 HTTP 请求转发到远端 AgentLRay 的 loopback 端口（目标端口 = dsh 主机「远端 AgentLRay 端口」字段，默认 3800），等价于 ssh `-L` 后的本地转发。被连接方需在 dsh 设置放行对应端口。
 
 **设备身份（Device identity）**：
-AgentLRay 实例在中继服务器上的身份，首启生成 25519 密钥对落 `~/.agentlray/dsh-device.json` + `.key`（0600）。配合共享账号 + Host 固定身份做「账号成员 + 设备身份 + Host 固定身份」三重校验。
+AgentLRay 实例在中继服务器上的身份，首启生成 25519 密钥对落 `~/.agentlray/dsh/dsh-device.json` + `.key`（0600）。配合共享账号 + Host 固定身份做「账号成员 + 设备身份 + Host 固定身份」三重校验。
 
 **连接来源（via）**：
 inbound peer 快照每项标注的连接方式来源：`ssh`（连接方 ssh 上报 + 心跳）或 `dsh`（ds-harness-remote 被连接方从设备体系直接获知）。旧 peer 无 `via` 视为 `ssh`。前端「被 N 连」徽标与明细统一展示两种来源。

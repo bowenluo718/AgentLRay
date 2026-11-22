@@ -91,7 +91,7 @@ ds-harness-remote 是一个 pnpm workspace 单仓（GitHub `liguobao/ds-harness-
 ### 账号与设备身份
 
 - `hosts.json` 顶层新增 `dsh` section（见「数据模型」），共享一套账号（email/password），password 加密存 `passwordEnc`。
-- 设备身份：首次连接生成 25519 密钥对，落 `~/.agentlray/dsh-device.json` + `~/.agentlray/dsh-device.key`（沿用 ds-harness-remote 命名），作为该 AgentLRay 实例在中继服务器上的设备身份。
+- 设备身份：首次连接生成 25519 密钥对，落 `~/.agentlray/dsh/dsh-device.json` + `~/.agentlray/dsh/dsh-device.key`（沿用 ds-harness-remote 命名），作为该 AgentLRay 实例在中继服务器上的设备身份。
 - 被连接方固定身份：Host 侧在服务器上注册/固定自己的 identityKey，连接方连接时做「账号成员 + 设备身份 + Host 固定身份」三重校验（ds-harness-remote 原生语义）。
 
 ### 双向连接
@@ -163,11 +163,14 @@ ds-harness-remote 是一个 pnpm workspace 单仓（GitHub `liguobao/ds-harness-
 - 密码沿用 `lib/secret.js` AES-256-GCM 加密（复用 ssh 私钥/llm.apiKey 方案），GET 只回 `hasPassword` 不明文。
 - **旧版本迁移**：曾存于 `settings.json` 的 `dsh` section，首次读取时经 `migrateDshSectionOnce` 状态驱动幂等迁移到 hosts.json。
 
-### 设备身份文件（`~/.agentlray/`）
+### 设备身份文件（`~/.agentlray/dsh/`）
 
 - `dsh-device.json`：设备公开信息（deviceId、公钥）。
 - `dsh-device.key`：25519 私钥，0600。
-- 沿用 ds-harness-remote `identity-store.ts` 的生成/持久语义；首启生成。
+- 按用途拆分 `host`/`client`/`probe` 三套（`dsh-{client,probe}.json` + `.key`），与各 scope 凭据目录 `~/.agentlray/dsh/<scope>/` 同处 `~/.agentlray/dsh/` 下，不散落 `~/.agentlray` 根目录。
+- **退出即清空**：`POST /api/dsh/auth/logout` 先停被连接方服务（常驻服务持有凭据存储、会重连写盘），再关闭 `hosts.js` 运行时持有的全部 dsh 隧道（client/probe 会话的令牌刷新同样会把凭据写回；ssh 隧道不依赖 dsh 凭据，保持不动），最后递归删除整个 `~/.agentlray/dsh/`（凭据 + 身份/密钥 + 信任库），下次登录重新生成设备身份；dsh 配置（`role`/`serverUrl`/`deviceName`/`allowedPorts`）在 `hosts.json`，不受影响。
+- **设备身份只在登录时生成**：登录态判定（`scopeLoginStatus`）、列设备（`listDshDevices`）、发现登录方式（`discoverProviders`）、发起扫码（`startQrLogin`）、建隧道、被连接方启动等路径一律只读既有身份（`loadExisting` + `loadPeers`），无身份时按「登录已失效」处理。否则退出后 UI 一刷新（`GET /api/dsh/config`）、打开登录表单或主机弹框就会把 `dsh-device.*`/`dsh-client.*` 写回目录。
+- 键对生成/编码沿用 ds-harness-remote `identity-store.ts` 的语义（base64url 无填充、公钥指纹同算法）；持久化位置与生成时机由 AgentLRay 决定（登录时生成、退出时清除）。
 
 ### `hosts.json` 新增 `type: 'dsh'` 目标
 
@@ -249,7 +252,7 @@ ds-harness-remote 是一个 pnpm workspace 单仓（GitHub `liguobao/ds-harness-
 | # | 初版设计 | 实际实现 | 依据 |
 | --- | --- | --- | --- |
 | 1 | 借码「连接骨架 + loopback」 | **借码连接骨架，loopback 两端自研**（`lib/dsh/loopback*.js`），沿用上游同一套线协议（`describe`/`http.open`/`http.read`/`close`） | 上游 `LoopbackPreview` 是浏览器预览模型（要求 `Host` 等于随机 `*.localhost` 授权域，否则 403），与 AgentLRay「服务器到服务器网关转发、`Host` 须原样透传（远端 csrf 依赖 `Host == Origin`）」不兼容；上游 `LoopbackHost` 的 `http.read` 空闲 20 秒即断链，会切断 AgentLRay 的 SSE 会话尾随 |
-| 2 | 出站/被连共用一套设备身份 | **按用途拆分三套身份**：`host`（`~/.agentlray/dsh-device.json`，本机被连）、`client`（`dsh-client.json`，出站隧道）、`probe`（`dsh-probe.json`，连接测试） | 中继服务器对**同一设备只保留一条控制连接**（实测：`gateway.ts` 新连接时 `disconnect(device.deviceId, 'CONNECTION_REPLACED')`）。共用身份会让「连接测试」顶替正在使用的出站隧道 |
+| 2 | 出站/被连共用一套设备身份 | **按用途拆分三套身份**：`host`（`~/.agentlray/dsh/dsh-device.json`，本机被连）、`client`（`dsh-client.json`，出站隧道）、`probe`（`dsh-probe.json`，连接测试） | 中继服务器对**同一设备只保留一条控制连接**（实测：`gateway.ts` 新连接时 `disconnect(device.deviceId, 'CONNECTION_REPLACED')`）。共用身份会让「连接测试」顶替正在使用的出站隧道 |
 | 3 | 传输链路 LAN → P2P → TURN → Relay | **仅 Relay**（`forceRelay: true`） | AgentLRay 不内置 WebRTC/TURN 后端（上游依赖 `werift` 纯 JS WebRTC 栈 + ICE 服务）；Relay 通道由中继服务器承载，天然穿 NAT。预留 `forceRelay` 开关，后续可加 WebRTC |
 | 4 | —（初版未涉及） | 借码层补丁：`ConnectionController` **不再按 `peerDeviceId` 顶替**并发连接（只按 `connectionId` 顶替） | 同上：上游「同一对端设备只保留一条逻辑连接」会顶替同设备的另一条隧道（实测：探测隧道顶替常驻隧道，常驻隧道随即 502）。补丁说明见 `lib/dsh/vendor/README.md` §4.8 |
 | 5 | 放行端口「默认 3800、可在 dsh 设置追加」 | 落到 `hosts.json` 顶层 `dsh.allowedPorts`（默认 `[3800]`），被连接方**每条连接一个独立 loopback 宿主** | 共享 loopback 宿主时，一条连接断开会把**所有**连接的在途请求一起断掉（实测 502） |

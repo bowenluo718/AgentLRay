@@ -57,6 +57,7 @@ import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.
 import type { SafeLogger } from './logging.js'
 import type { AuthorizedPeerDevice, HostServerApi } from './server-api.js'
 import { ServerApiError } from './server-api.js'
+import type { ServerCredentials } from './server-credentials.js'
 import { createNodeWebSocket } from './node-websocket.js'
 import { TransportUpgradeHost, wrapUpgradedTransportFrame } from './transport-upgrade.js'
 import type { AuthenticatedPeerChannel } from './types.js'
@@ -114,6 +115,8 @@ export class HostServerConnection {
   private reconnectRequested = false
   private resumeQueued = false
   private authRecoveryAttempted = false
+  /** 本次 connectOnce 收到的中继业务关闭（code + reason），随失败日志输出。 */
+  private lastServerClose?: { code: number; reason: string }
   private rtcFactory?: RtcPeerConnectionFactory
   private negotiatedCapabilities: string[] = ['transport.relay']
   private controlFrameLimits: ControlFrameByteLimits = {}
@@ -203,7 +206,11 @@ export class HostServerConnection {
 
   private async run(): Promise<void> {
     this.authRecoveryAttempted = false
+    this.lastServerClose = undefined
     while (!this.stopped) {
+      // 每轮重连前清空：上一轮的中继关闭信息只对其自身的失败有意义，泄漏到本轮
+      // 无关失败（DNS/TLS/超时）的诊断字段里会把现场误导成「另一实例顶替」。
+      this.lastServerClose = undefined
       try {
         await this.connectOnce()
       } catch (error) {
@@ -211,11 +218,11 @@ export class HostServerConnection {
         const code = errorCode(error)
         if (code === 'CREDENTIALS_REFRESHED') continue
         this.terminalError = code
+        // AgentLRay §4.13: 失败原因（message / cause）是现场唯一线索——WS 打不开、
+        // 凭据刷新超时、代理连接失败必须能从这一行区分。
         this.logger.warn('server control connection failed', {
-          code, retryable: isRetryable(error),
-          ...(error instanceof ServerApiError && error.phase !== undefined ? { phase: error.phase } : {}),
-          ...(error instanceof ServerApiError && error.status !== undefined ? { status: error.status } : {}),
-          ...(error instanceof ServerApiError && error.reason !== undefined ? { reason: error.reason } : {}),
+          ...connectionFailureFields(error, code),
+          ...serverCloseFields(this.lastServerClose),
         })
         if (code === 'UNSUPPORTED_VERSION') {
           this.logger.warn('Server does not support the Remote protocol version; automatic reconnect is paused.')
@@ -254,7 +261,14 @@ export class HostServerConnection {
   }
 
   private async connectOnce(): Promise<void> {
-    const credentials = await this.api.authenticate(this.identity)
+    let credentials: ServerCredentials
+    try {
+      credentials = await this.api.authenticate(this.identity)
+    } catch (error) {
+      // AgentLRay §4.13: 失败日志已带 cause；此处仅在 debug 下把完整错误链打到控制台（含 syscall 级原因）。
+      if (error instanceof Error) this.logger.debug('server control authenticate failed', { chain: describeErrorChain(error) })
+      throw error
+    }
     if (this.stopped) return
     const offeredCapabilities = this.rtcFactoryProvider === undefined || this.config.forceRelay
       ? [RELAY_RESUME_CAPABILITY, 'transport.relay', 'transport.relay.attach', ...this.hostCapabilities()]
@@ -333,6 +347,7 @@ export class HostServerConnection {
         }
         closing = true
         clearLiveness()
+        if (!forced && isServerCloseReason(event)) this.lastServerClose = { code: event.code, reason: event.reason }
         const closeSemantics = classifyControlClose(event.code, event.reason)
         // Retain authenticated tunnels only for an expected Server outage or a
         // peer heartbeat expiry. Another instance replacing us (4003) and
@@ -559,15 +574,21 @@ export class HostServerConnection {
           invalidControl = true
           const code = errorCode(error)
           this.terminalError = code
+          // AgentLRay §4.13: 带上底层 cause（如中继/代理返回非 JSON 帧时的 SyntaxError）。
           this.logger.error('server control frame failed', {
             code,
             reason: diagnosticReason(error),
+            ...(errorCauseCode(error) === undefined ? {} : { cause: errorCauseCode(error) }),
           })
           closeSocket(4008, 'invalid control frame')
         })
       }
-      socket.onerror = () => {
-        if (!acknowledged) finish(new ControlConnectionError('CONNECTION_FAILED', 'Unable to open the Server WebSocket.'))
+      socket.onerror = event => {
+        // AgentLRay §4.13: WebSocket 'error' 事件携带底层 cause（ECONNREFUSED / UND_ERR_CONNECT_TIMEOUT /
+        // 代理握手失败等），丢进 ControlConnectionError 的 cause 以便失败日志可读。
+        if (!acknowledged) {
+          finish(new ControlConnectionError('CONNECTION_FAILED', 'Unable to open the Server WebSocket.', websocketErrorCause(event)))
+        }
       }
       socket.onclose = event => {
         handleClose(event)
@@ -646,7 +667,8 @@ export class HostServerConnection {
         if (payload.retryable) this.logger.info('server closed a remote connection', fields)
         else this.logger.warn('server closed a remote connection', fields)
       } else if (payload.code === 'AUTH_INVALID' || payload.code === 'TOKEN_EXPIRED') {
-        this.logger.warn('server returned a control error', { code: payload.code, retryable: payload.retryable })
+        // AgentLRay §4.13: 与其它 control error 分支保持一致，带上中继给出的 message。
+        this.logger.warn('server returned a control error', controlErrorFields(payload))
         if (this.forceCloseSocket) this.forceCloseSocket(4002, payload.code)
         else this.socket?.close(4002, payload.code)
       } else if (payload.code === 'UNSUPPORTED_VERSION') {
@@ -1619,7 +1641,8 @@ export class ServerNoiseChannel implements AuthenticatedPeerChannel {
 }
 
 class ControlConnectionError extends Error {
-  constructor(readonly code: string, message: string) { super(message) }
+  // AgentLRay §4.13: 可选 cause 透传底层网络错误（WebSocket error 事件等），便于失败日志取证。
+  constructor(readonly code: string, message: string, cause?: Error) { super(message, cause === undefined ? undefined : { cause }) }
 }
 
 function websocketUrl(baseUrl: string): string {
@@ -1748,6 +1771,86 @@ function rtcDiagnostics(rtc: RtcDataChannelTransport): RtcConnectionDiagnostics 
     return undefined
   }
 }
+/** 失败日志字段：错误码、是否可重试、原始 message、凭据刷新阶段、底层 cause。 */
+function connectionFailureFields(error: unknown, code: string): Record<string, unknown> {
+  const cause = errorCauseCode(error)
+  return {
+    code,
+    retryable: isRetryable(error),
+    message: asError(error).message,
+    ...(error instanceof ServerApiError && error.phase !== undefined ? { phase: error.phase } : {}),
+    ...(error instanceof ServerApiError && error.status !== undefined ? { status: error.status } : {}),
+    ...(error instanceof ServerApiError && error.reason !== undefined ? { reason: error.reason } : {}),
+    ...(cause === undefined ? {} : { cause }),
+  }
+}
+
+/**
+ * 建连阶段的 WS 关闭是否带业务含义（中继以 close 表达拒绝，如 4002 invalid access token）。
+ * 1000/1005/1006/1008 等是通用关闭码：1008 由 refresh 路径生成，也不代表中继的原因。
+ */
+function isServerCloseReason(event: { code: number; reason: string }): boolean {
+  return typeof event.reason === 'string' && event.reason.trim() !== '' && !SOCKET_CODES.has(event.code)
+}
+
+const SOCKET_CODES = new Set([1000, 1001, 1002, 1003, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015])
+
+/** 中继关闭码与原因的日志字段（仅中继给出的业务关闭才输出）。 */
+function serverCloseFields(close: { code: number; reason: string } | undefined): Record<string, unknown> {
+  if (close === undefined || !isServerCloseReason(close)) return {}
+  return { closeCode: close.code, closeReason: close.reason }
+}
+
+/** 控制 error 帧的日志字段（含中继给出的 message）。 */
+function controlErrorFields(payload: ControlErrorPayload): Record<string, unknown> {
+  return {
+    code: payload.code,
+    message: payload.message,
+    retryable: payload.retryable,
+    ...(payload.connectionId === undefined ? {} : { connectionId: payload.connectionId }),
+  }
+}
+
+/** 沿 `cause` 链取最底层的系统错误码（fetch failed → UND_ERR_* / ECONNREFUSED / ENOTFOUND…）。 */
+function errorCauseCode(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined
+  const cause: unknown = error.cause
+  if (cause instanceof Error) {
+    if (Array.isArray((cause as Error & { errors?: unknown }).errors)) {
+      for (const inner of (cause as Error & { errors: unknown[] }).errors) {
+        const innerCode = errorCauseCode(inner)
+        if (innerCode !== undefined) return innerCode
+      }
+    }
+    // 先递归到链底（fetch failed 自身没有 code，真正的 syscall 错误在更下一层），
+    // 再取本层 code。
+    const deeper = errorCauseCode(cause)
+    if (deeper !== undefined) return deeper
+    const code = (cause as Error & { code?: unknown }).code
+    if (typeof code === 'string') return code
+  }
+  // ServerApiError 的 `code` 是业务错误码（如 CONNECTION_FAILED），不是系统错误码，不能当 cause 用。
+  if (error instanceof ServerApiError) return undefined
+  const own = (error as Error & { code?: unknown }).code
+  return typeof own === 'string' ? own : undefined
+}
+
+/** 错误链文本（name: message [code] → ...），仅供 debug 级控制台输出。 */
+function describeErrorChain(error: Error, depth = 0): string {
+  const code = errorCauseCode(error)
+  const head = `${error.name}: ${error.message}${code === undefined ? '' : ` [${code}]`}`
+  if (depth >= 4 || error.cause === undefined) return head
+  if (!(error.cause instanceof Error)) return `${head} → ${String(error.cause)}`
+  return `${head} → ${describeErrorChain(error.cause, depth + 1)}`
+}
+
+/** WebSocket 'error' 事件的底层 cause（Node 内置 WebSocket 为 ErrorEvent.error）。 */
+function websocketErrorCause(event: unknown): Error | undefined {
+  if (typeof event !== 'object' || event === null) return undefined
+  const inner = (event as { error?: unknown }).error
+  return inner instanceof Error ? inner : undefined
+}
+
 function errorCode(error: unknown): string { return error instanceof ServerApiError || error instanceof ControlConnectionError ? error.code : 'CONNECTION_FAILED' }
 function isRetryable(error: unknown): boolean { return errorCode(error) !== 'UNSUPPORTED_VERSION' && !TERMINAL_AUTH_ERRORS.has(errorCode(error)) && (!(error instanceof ServerApiError) || error.retryable) }
 function closeCode(code: number): string {

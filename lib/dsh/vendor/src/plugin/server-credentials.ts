@@ -25,16 +25,30 @@ const credentialSchema = z.object({
 
 export interface ServerCredentials extends z.infer<typeof credentialSchema> {}
 
+// PATCH(AgentLRay): 可注入硬链接实现。Android/PRoot、/sdcard(FUSE) 等环境不支持硬链接，
+// 默认实现会让每次认证都抛 SERVER_CREDENTIALS_LOCK_UNSUPPORTED；带注入参数是为了让
+// 这类现场可测试地降级（见 withQueueLock 的进程内互斥回退）。
+export interface ServerCredentialStoreOptions {
+  linkFile?: (existingPath: string, newPath: string) => Promise<void>
+}
+
+/** 进程内刷新队列（硬链接不可用时的回退），按锁路径串行。 */
+const processQueues = new Map<string, Promise<void>>()
+
 export class ServerCredentialStore {
   private readonly path: string
+  private readonly linkFile: (existingPath: string, newPath: string) => Promise<void>
 
-  constructor(directory: string) { this.path = join(directory, 'server-credentials.json') }
+  constructor(directory: string, options: ServerCredentialStoreOptions = {}) {
+    this.path = join(directory, 'server-credentials.json')
+    this.linkFile = options.linkFile ?? link
+  }
 
   /** Each process owns one queue record. A dead process cannot hold the queue. */
   async withRefreshLock<T>(operation: () => Promise<T>): Promise<T> {
     const gate = defaultMigrationGate(dirname(this.path))
-    const run = () => withQueueLock(`${this.path}.refresh-lock`, operation)
-    return gate === undefined ? run() : withQueueLock(gate, run)
+    const run = () => withQueueLock(`${this.path}.refresh-lock`, operation, this.linkFile)
+    return gate === undefined ? run() : withQueueLock(gate, run, this.linkFile)
   }
 
   async pairingHostOnly(): Promise<boolean> {
@@ -68,6 +82,7 @@ export class ServerCredentialStore {
 
   async clear(): Promise<void> {
     await rm(this.path, { force: true })
+    await removeStaleRefreshQueue(`${this.path}.refresh-lock`)
   }
 }
 
@@ -105,14 +120,47 @@ export async function assertRefreshQueueIdle(directory: string): Promise<void> {
   if ((await participants(lock)).length > 0) throw new ServerCredentialsBusyError()
 }
 
-async function withQueueLock<T>(lock: string, operation: () => Promise<T>): Promise<T> {
+// PATCH(AgentLRay): 硬链接不可用时降级为进程内互斥，而不是让认证/拉设备列表直接失败。
+// 触发条件仅限「获取文件锁阶段」失败（ServerCredentialsLockUnsupportedError）；operation
+// 自身抛出的错误原样上抛，绝不重跑。注意：降级只保护同一进程，跨进程互斥在该文件系统上
+// 本就不可得（上游对此直接报错）。
+// Upstream: withQueueLock 直接抛 ServerCredentialsLockUnsupportedError。
+async function withQueueLock<T>(
+  lock: string,
+  operation: () => Promise<T>,
+  linkFile: (existingPath: string, newPath: string) => Promise<void> = link,
+): Promise<T> {
+  let acquired = false
+  try {
+    return await withFileQueueLock(lock, operation, linkFile, () => { acquired = true })
+  } catch (error) {
+    if (acquired || !(error instanceof ServerCredentialsLockUnsupportedError)) throw error
+    return withProcessQueueLock(lock, operation)
+  }
+}
+
+function withProcessQueueLock<T>(lock: string, operation: () => Promise<T>): Promise<T> {
+  const previous = processQueues.get(lock) ?? Promise.resolve()
+  const result = previous.then(operation, operation)
+  const tail = result.then(() => undefined, () => undefined)
+  processQueues.set(lock, tail)
+  void tail.then(() => { if (processQueues.get(lock) === tail) processQueues.delete(lock) })
+  return result
+}
+
+async function withFileQueueLock<T>(
+  lock: string,
+  operation: () => Promise<T>,
+  linkFile: (existingPath: string, newPath: string) => Promise<void>,
+  onAcquired: () => void,
+): Promise<T> {
   await mkdir(dirname(lock), { recursive: true, mode: 0o700 })
   const deadline = Date.now() + 15_000
-  await ensureQueueMarker(lock, deadline)
+  await ensureQueueMarker(lock, deadline, linkFile)
   const id = `${process.pid}-${uuidV7()}`
   const holder = `${lock}.holder-${id}`
   // Publish intent first. A later contender must see this record before it chooses a ticket.
-  await publishExclusive(holder, `${id} choosing\n`)
+  await publishExclusive(holder, `${id} choosing\n`, linkFile)
   try {
     const ticket = 1 + (await participants(lock)).reduce((max, entry) => Math.max(max, entry.ticket ?? 0), 0)
     if (!Number.isSafeInteger(ticket)) throw new ServerCredentialsBusyError()
@@ -125,6 +173,7 @@ async function withQueueLock<T>(lock: string, operation: () => Promise<T>): Prom
       if (Date.now() >= deadline) throw new ServerCredentialsBusyError()
       await new Promise(resolve => setTimeout(resolve, 50))
     }
+    onAcquired()
     return await operation()
   } finally {
     await rm(holder, { force: true })
@@ -151,11 +200,15 @@ export class ServerCredentialsLockUnsupportedError extends Error {
 
 export const SERVER_CREDENTIALS_QUEUE_MARKER = 'DSH_REFRESH_LOCK_V2\n'
 
-async function ensureQueueMarker(lock: string, deadline: number): Promise<void> {
+async function ensureQueueMarker(
+  lock: string,
+  deadline: number,
+  linkFile: (existingPath: string, newPath: string) => Promise<void>,
+): Promise<void> {
   // Old versions use this path as their lock. Keep them outside the new queue.
   for (;;) {
     try {
-      await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER)
+      await publishExclusive(lock, SERVER_CREDENTIALS_QUEUE_MARKER, linkFile)
       return
     } catch (error) {
       if (!(await isLockContention(error, lock))) throw error
@@ -195,11 +248,15 @@ async function participants(lock: string): Promise<QueueParticipant[]> {
   return result
 }
 
-async function publishExclusive(path: string, record: string): Promise<void> {
+async function publishExclusive(
+  path: string,
+  record: string,
+  linkFile: (existingPath: string, newPath: string) => Promise<void>,
+): Promise<void> {
   const temporary = `${path}.${process.pid}.${uuidV7()}.tmp`
   await writeFile(temporary, record, { mode: 0o600, flag: 'wx' })
   try {
-    try { await link(temporary, path) } catch (error) {
+    try { await linkFile(temporary, path) } catch (error) {
       if (error instanceof Error && 'code' in error
         && ['EXDEV', 'EOPNOTSUPP', 'ENOTSUP', 'ENOSYS', 'EPERM', 'EACCES'].includes(String(error.code))) {
         throw new ServerCredentialsLockUnsupportedError()
@@ -228,6 +285,27 @@ async function readQueueMarker(lock: string): Promise<string | undefined> {
     if (error instanceof Error && 'code' in error && error.code === 'EISDIR') return undefined
     throw error
   }
+}
+
+// PATCH(AgentLRay): clear() 顺带清理残留刷新队列文件（上游只删凭据文件，旧锁标记与
+// 已死进程的 holder 会一直留在目录里，Android 现场因此积累无效锁）。
+// 只删「已退出进程」的 holder；锁标记仅在没有存活 holder 时删除，避免破坏仍在运行的
+// 其它实例之间的互斥。
+async function removeStaleRefreshQueue(lock: string): Promise<void> {
+  const directory = dirname(lock)
+  if (!(await exists(directory))) return
+  const prefix = `${basename(lock)}.holder-`
+  let liveHolders = 0
+  for (const name of await readdir(directory)) {
+    if (!name.startsWith(prefix) || name.endsWith('.tmp')) continue
+    const id = name.slice(prefix.length)
+    const separator = id.indexOf('-')
+    const pid = separator > 0 ? Number(id.slice(0, separator)) : Number.NaN
+    if (!Number.isSafeInteger(pid)) continue
+    if (!(await ownerExited(pid))) { liveHolders += 1; continue }
+    await rm(join(directory, name), { force: true })
+  }
+  if (liveHolders === 0 && (await readQueueMarker(lock)) !== undefined) await rm(lock, { force: true })
 }
 
 async function ownerExited(pid: number): Promise<boolean> {
