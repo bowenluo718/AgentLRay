@@ -30,7 +30,6 @@ import java.util.concurrent.Executors
 object NetworkWatch {
 
     private const val TAG = "AgentLRayNetwork"
-    private const val PORT = 3801
     private const val TOKEN_FILE = "ui-token"
     /** ConnectivityManager.RESTRICT_BACKGROUNDED（hidden 常量，值为 1）。 */
     private const val RESTRICT_BACKGROUNDED = 1
@@ -149,7 +148,8 @@ object NetworkWatch {
             append('}')
         }
         try {
-            val conn = URL("http://127.0.0.1:$PORT/api/network/status").openConnection() as HttpURLConnection
+            // 端口与 NodeRuntimeManager 的 PORT= 同一真源（ThinNavigation.thinPort）。
+            val conn = URL("${ThinNavigation.thinOrigin}/api/network/status").openConnection() as HttpURLConnection
             conn.connectTimeout = 1_500
             conn.readTimeout = 2_000
             conn.requestMethod = "POST"

@@ -136,7 +136,8 @@ proot --kill-on-exit -0 -r <filesDir>/runtime/rootfs \
 
 ## 调试入口：导出用户配置
 
-debug 构建在界面右下角悬浮「同步配置」按钮（`MainActivity.installSyncFab`）：点击后把应用私有目录
+debug 构建提供**桌面图标长按快捷方式「同步配置」**（`res/xml/shortcuts.xml` → `SyncShortcutActivity`
+→ `SyncTask`；组件与资源都在 `app/src/debug/` 源集，正式构建不含该入口）：点击后把应用私有目录
 `filesDir/.agentlray`（`hosts.json`/`settings.json`/`secret`/dsh 凭据）**递归同步**到
 
 ```
@@ -144,12 +145,14 @@ debug 构建在界面右下角悬浮「同步配置」按钮（`MainActivity.ins
 ```
 
 - 该路径在**共享外部存储根**下，需要存储权限：Android 11+（API 30+）为「所有文件访问权限」
-  （`MANAGE_EXTERNAL_STORAGE`，首次点击会跳到系统设置页，授予后返回自动续跑）；API ≤29 为
-  `WRITE_EXTERNAL_STORAGE` 运行时权限（Manifest 已声明并带 `maxSdkVersion=29`，
-  application 设 `requestLegacyExternalStorage="true"`）。
+  （`MANAGE_EXTERNAL_STORAGE`）。首次长按触发时未授权会跳到系统设置页并提示**返回后再次长按图标**；
+  API ≤29 为 `WRITE_EXTERNAL_STORAGE` 运行时权限（Manifest 已声明并带 `maxSdkVersion=29`，
+  application 设 `requestLegacyExternalStorage="true"`），该分支转交 `MainActivity`
+  （`EXTRA_SYNC`）在前台申请，授权后自动续跑。
 - 实现：`DataDirSyncer`（镜像覆盖拷贝，不删目标侧多余文件；符号链接/特殊文件跳过），结果计数
   与失败项经 Toast 展示，同时写入运行日志环；同步后抽查 `hosts.json`/`settings.json`/`secret` 是否落地。
-- 拷贝在后台线程执行（`agentlray-sync`），完成后回主线程提示。
+- 拷贝在 `SyncTask` 的进程级后台线程执行（`agentlray-sync`，单飞防并发），Activity 已 finish
+  也不中断，完成后用 `applicationContext` 提示。
 - `secret` 为 AES-256-GCM 密文，导出后仍是密文（设计如此）。
 - 该权限仅用于此调试入口；正式分发若要保留需评估 Play 政策（`MANAGE_EXTERNAL_STORAGE` 属敏感权限）。
 

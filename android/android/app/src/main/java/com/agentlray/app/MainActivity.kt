@@ -3,8 +3,6 @@ package com.agentlray.app
 import android.Manifest
 import android.app.AlertDialog
 import android.content.Intent
-import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,9 +10,7 @@ import android.os.Environment
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
-import android.view.Gravity
 import android.webkit.CookieManager
-import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.core.content.ContextCompat
@@ -25,7 +21,8 @@ import com.getcapacitor.BridgeActivity
  *
  * - 继承 Capacitor BridgeActivity：onCreate 先加载占位页（www/）；
  * - onStart：触发运行时启动（串行化在 NodeRuntimeManager 内），就绪后把 WebView 导航到
- *   本地薄服务 http://127.0.0.1:3801（方案 A：就绪后手动 loadUrl，避免未就绪错误页）；
+ *   本地薄服务（[THIN_ORIGIN]，端口见 [ThinNavigation.thinPort]；方案 A：就绪后手动 loadUrl，
+ *   避免未就绪错误页）；
  * - onStop：5s 防抖后停薄服务（吸收对话框/通知栏等短暂切后台）；onStart 取消该防抖；
  * - 失败：弹出含日志尾部的错误对话框，三动作「重试 / 查看日志 / 清除运行时并重装」（D-2）。
  * - 首启：解压进度（D-2）由 App → runtime.onProgress → [renderProgress] 注入占位页；
@@ -33,9 +30,10 @@ import com.getcapacitor.BridgeActivity
  *
  * 注意（§7.2）：不用 onPause（权限弹窗/通知栏会误停）；旋转不重建（configChanges 见 Manifest）。
  *
- * 调试入口：debug 构建在右下角悬浮「同步配置」按钮，把 `filesDir/.agentlray` 递归同步到
- * `/sdcard/com.agentlray.app/files/agentlray`（见 [DataDirSyncer]）。共享外部存储需要
- * 「所有文件访问权限」（API 30+）或 WRITE_EXTERNAL_STORAGE（API ≤29），未授权时先引导授权。
+ * 调试入口：debug 构建在桌面图标长按快捷方式「同步配置」（`res/xml/shortcuts.xml` →
+ * [SyncShortcutActivity] → [SyncTask]）把 `filesDir/.agentlray` 递归同步到
+ * `/sdcard/com.agentlray.app/files/agentlray`。API ≤29 无法在无界面 Activity 里申请运行时存储
+ * 权限时，本 Activity 以 Intent extra [EXTRA_SYNC] 被拉起，授权后自动续跑同步。
  */
 class MainActivity : BridgeActivity() {
 
@@ -44,7 +42,7 @@ class MainActivity : BridgeActivity() {
         App.instance.runtime.stop()
     }
     private var errorDialog: AlertDialog? = null
-    /** 已点击同步但还在等存储权限返回（从系统设置页回来后自动续跑）。 */
+    /** 已请求同步但还在等存储权限返回（从系统设置页/权限弹窗回来后自动续跑）。 */
     private var pendingSync = false
     /** 上次成功兑换 cookie 的令牌（持久化）：令牌变化时需强制重载换 cookie。 */
     private var exchangedToken: String? = null
@@ -52,10 +50,15 @@ class MainActivity : BridgeActivity() {
     private var lastProgress: RootfsInstaller.Progress? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        // 本地插件注册（Capacitor 7：super 之后注册）。
+        // 本地插件注册需早于 super.onCreate：Bridge 在 super 内构建（含首次加载占位页），
+        // 之后才注册的插件不会进入该 Bridge。
         registerPlugin(SaveFilePlugin::class.java)
-        if (BuildConfig.DEBUG) installSyncFab()
+        // 薄服务同源导航放行（见 ThinNavigation）：插件钩子只对首次导航之后的跳转生效，
+        // 真正的兜底是 super 之后的 installThinNavigation()。
+        registerPlugin(ThinNavigationPlugin::class.java)
+        super.onCreate(savedInstanceState)
+        installThinNavigation()
+        if (BuildConfig.DEBUG) consumeSyncIntent(intent)
 
         val runtime = App.instance.runtime
         runtime.onReady = { runOnUiThread { loadThinUi() } }
@@ -70,14 +73,20 @@ class MainActivity : BridgeActivity() {
         // 从「所有文件访问权限」设置页返回：权限已授予则自动续跑同步。
         if (pendingSync && hasStorageAccess()) {
             pendingSync = false
-            startSync()
+            SyncTask.start(this)
         }
+    }
+
+    /** singleTask：已在前台/后台时再次以 [EXTRA_SYNC] 拉起不会走 onCreate，需在此承接。 */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        if (BuildConfig.DEBUG) consumeSyncIntent(intent)
     }
 
     override fun onStart() {
         super.onStart()
         handler.removeCallbacks(stopRunnable)
-        // 串行启动：内部 await 旧进程回收后再 spawn，避免 3801 EADDRINUSE。
+        // 串行启动：内部 await 旧进程回收后再 spawn，避免薄服务端口 EADDRINUSE。
         App.instance.runtime.start()
     }
 
@@ -98,35 +107,28 @@ class MainActivity : BridgeActivity() {
         super.onDestroy()
     }
 
-    // ---- 调试：同步 .agentlray 到 /sdcard/agentlray ----
-
-    /** 右下角悬浮按钮（debug 构建才有）。 */
-    private fun installSyncFab() {
-        val density = resources.displayMetrics.density
-        val size = (56 * density).toInt()
-        val margin = (16 * density).toInt()
-        val fab = TextView(this).apply {
-            text = "同步\n配置"
-            setTextColor(Color.WHITE)
-            textSize = 11f
-            gravity = Gravity.CENTER
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(0xFF2E7D6B.toInt())
-            }
-            elevation = 6 * density
-            contentDescription = "同步 .agentlray 到 /sdcard/agentlray"
-            setOnClickListener { onSyncClicked() }
-        }
-        val lp = FrameLayout.LayoutParams(size, size, Gravity.END or Gravity.BOTTOM).apply {
-            setMargins(margin, margin, margin, margin + (72 * density).toInt())
-        }
-        addContentView(fab, lp)
+    /**
+     * 内部页面单页签（见 [ThinNavigationPlugin.install]）：薄服务页面及占位页只在这一个
+     * WebView 里加载；外部链接保持 Capacitor 默认行为，交给外部浏览器。
+     */
+    private fun installThinNavigation() {
+        val plugin = bridge?.getPlugin("ThinNavigation")?.instance as? ThinNavigationPlugin ?: return
+        plugin.install()
     }
 
-    private fun onSyncClicked() {
+    // ---- 调试：同步 .agentlray 到 /sdcard/agentlray（入口：桌面图标长按快捷方式）----
+
+    /**
+     * 承接 [EXTRA_SYNC]（API ≤29 由 [SyncShortcutActivity] 拉起）：已授权则直接同步，
+     * 否则申请运行时权限并在结果回调 / onResume 中续跑。
+     */
+    private fun consumeSyncIntent(intent: Intent?) {
+        val syncIntent = intent ?: return
+        if (!syncIntent.getBooleanExtra(EXTRA_SYNC, false)) return
+        // 单例 Activity：消费后清掉，避免后续 onNewIntent/重建重复触发。
+        syncIntent.removeExtra(EXTRA_SYNC)
         if (hasStorageAccess()) {
-            startSync()
+            SyncTask.start(this)
         } else {
             pendingSync = true
             requestStorageAccess()
@@ -170,33 +172,11 @@ class MainActivity : BridgeActivity() {
         if (requestCode != REQ_STORAGE) return
         if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             pendingSync = false
-            startSync()
+            SyncTask.start(this)
         } else {
             pendingSync = false
             Toast.makeText(this, "未授予存储权限，无法写入 /sdcard", Toast.LENGTH_LONG).show()
         }
-    }
-
-    private fun startSync() {
-        val dst = DataDirSyncer.targetDir(this)
-        Toast.makeText(this, "开始同步 .agentlray → $dst", Toast.LENGTH_SHORT).show()
-        // 拷贝可能涉及较多文件，放后台线程；结果回主线程提示并写日志环。
-        Thread({
-            val result = try {
-                DataDirSyncer.sync(this)
-            } catch (e: Exception) {
-                DataDirSyncer.Result(0, 0, 0, listOf("同步异常：${e.message}"))
-            }
-            val missing = if (result.ok) DataDirSyncer.verify(this) else emptyList()
-            val text = buildString {
-                append(result.summary())
-                if (missing.isNotEmpty()) append("\n校验缺失：${missing.joinToString("、")}")
-            }
-            App.instance.logRing.append("", text)
-            runOnUiThread {
-                Toast.makeText(this, text, Toast.LENGTH_LONG).show()
-            }
-        }, "agentlray-sync").apply { isDaemon = true }.start()
     }
 
     /**
@@ -329,7 +309,10 @@ class MainActivity : BridgeActivity() {
     }
 
     companion object {
-        private const val THIN_ORIGIN = "http://127.0.0.1:3801"
+        /** 由 [SyncShortcutActivity] 附带：本 Activity 拉起后执行一次「同步配置」（debug 构建）。 */
+        const val EXTRA_SYNC = "com.agentlray.app.extra.SYNC"
+        /** 薄服务同源；端口与 [ThinNavigation.thinPort] 同一真源（NodeRuntimeManager 设置）。 */
+        private val THIN_ORIGIN: String get() = "http://127.0.0.1:${ThinNavigation.thinPort}"
         /** 本机鉴权 cookie 名（与 lib/auth.js 的 COOKIE_NAME 一致）。 */
         private const val COOKIE_NAME = "agentlray_token"
         private const val STOP_DEBOUNCE_MS = 5_000L

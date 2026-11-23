@@ -5,8 +5,9 @@
     <!-- 网络：薄服务 loopback + dsh 中继（WSS）。无本地数据面。 -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- 调试「同步配置」入口：写入共享外部存储 /sdcard/com.agentlray.app/files/agentlray。
-         Android 11+ 需在系统设置手动授予「所有文件访问权限」（MANAGE_EXTERNAL_STORAGE）。 -->
+    <!-- 调试「同步配置」入口（桌面图标长按快捷方式，debug 构建）：写入共享外部存储
+         /sdcard/com.agentlray.app/files/agentlray。Android 11+ 需在系统设置手动授予
+         「所有文件访问权限」（MANAGE_EXTERNAL_STORAGE）。 -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />

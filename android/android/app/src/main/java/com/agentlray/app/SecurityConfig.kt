@@ -23,6 +23,9 @@ object SecurityConfig {
         settings.allowFileAccessFromFileURLs = false
         settings.allowUniversalAccessFromFileURLs = false
         settings.javaScriptCanOpenWindowsAutomatically = false
+        // 单页签：window.open / target=_blank 不另开窗口，一律在当前页内处理。
+        // 外部 http(s) 链接仍由 ThinNavigationPlugin 交系统浏览器（ACTION_VIEW），此处不影响。
+        settings.setSupportMultipleWindows(false)
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         settings.domStorageEnabled = true
         // 调试开关跟随构建类型（release=false）。

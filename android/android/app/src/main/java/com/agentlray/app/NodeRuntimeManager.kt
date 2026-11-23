@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * 关键约束：
  * - 串行化：任何时刻至多一个 proot 子进程存活。start()/stop() 都经单线程 executor 排队，
- *   避免快速前后台切换时新旧进程并存撞 3801 端口（EADDRINUSE）。
+ *   避免快速前后台切换时新旧进程并存撞薄服务端口（EADDRINUSE）。
  * - start()：spawn proot → 轮询 GET /api/version（200ms，≤20s）→ 就绪回调。
  * - stop()：SIGTERM（proot --kill-on-exit 连带清 Node），3s 后 SIGKILL。
  * - 非主动退出 → 指数退避重启（1s/2s/4s，最多 3 次）；超限 → 错误回调（错误屏）。
@@ -184,7 +184,7 @@ class NodeRuntimeManager(
         val ready = awaitHealthy(20_000)
         if (ready) {
             restartCount = 0
-            // D-1/A-4：服务端已起来 → 补报一次当前网络状态（壳启动期间的首次上报会因 3801
+            // D-1/A-4：服务端已起来 → 补报一次当前网络状态（壳启动期间的首次上报会因薄服务端口未就绪
             // 未监听而失败）；若此刻正处于系统阻断状态，前端横幅会立即出现。
             runCatching { NetworkWatch.reportCurrent() }
             onReady?.invoke()
@@ -273,7 +273,7 @@ class NodeRuntimeManager(
             "AGENTLRAY_HOME=/home/agentlray",
             "AGENTLRAY_DISABLE_SSH=1",
             "AGENTLRAY_NATIVE_SAVE=1",
-            "PORT=3801",
+            "PORT=${ThinNavigation.thinPort}",
             "HOST=127.0.0.1",
             // 本机接口令牌（C-1）：thin-server 据此对 /api 鉴权；/api/version 保持公开供健康探测。
             "AGENTLRAY_UI_TOKEN=$token",
@@ -300,7 +300,7 @@ class NodeRuntimeManager(
 
     private fun isHealthy(): Boolean {
         return try {
-            val conn = URL("http://127.0.0.1:$PORT/api/version").openConnection() as HttpURLConnection
+            val conn = URL("http://127.0.0.1:${ThinNavigation.thinPort}/api/version").openConnection() as HttpURLConnection
             conn.connectTimeout = 600
             conn.readTimeout = 800
             conn.requestMethod = "GET"
@@ -373,7 +373,6 @@ class NodeRuntimeManager(
         private const val TOKEN_EXCHANGED_FILE = "ui-token.exchanged"
 
         private const val TAG = "AgentLRayRuntime"
-        private const val PORT = 3801
         private const val PID_FILE = "node.pid"
         private const val PROOT_NAME = "libproot.so"
         private const val LOADER_NAME = "libproot-loader.so"

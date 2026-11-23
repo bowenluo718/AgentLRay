@@ -192,7 +192,7 @@
 
 **上游证据**：`docs/design/onboarding-parallel-setup.md`（底部固定玻璃胶囊 `◔ 运行环境 42%`、点开是进度/剩余时间/日志/失败三动作）；`docs/design/runtime-cold-start.md`（原生与 UI 并行拉起引擎，App 侧 490ms→160ms）。
 
-**现状**：`android/www/index.html` 只有一行「正在启动本地薄服务…」；`RootfsInstaller` 已记录条目数与耗时（`logger()`），**数据在但没送到 UI**。
+**现状**：`android/www/index.html` 只有一行「正在启动本地服务…」；`RootfsInstaller` 已记录条目数与耗时（`logger()`），**数据在但没送到 UI**。
 
 **动作**：
 1. `RootfsInstaller` 每 N 条目回调 `(done, total)` → 原生注入占位页（`loadUrl("javascript:setProgress(...)")`）。

@@ -268,6 +268,31 @@ node -e "require('@lukeburns/clatterjs'); require('ws'); require('express'); req
 
 无论哪种，都必须在加载前确认 `/api/version` 可访问；否则用户会看到系统错误页。
 
+**`allowNavigation` 必须写裸主机名（踩坑记录）**：Capacitor 的 `Bridge.launchIntent` 用 `HostMask` 判定导航是否属于 App 内，
+`HostMask.Simple` 把掩码和 `Uri.getHost()` 都按 `.` 切分后逐段比对，**不做 scheme/端口解析**。写成
+`http://127.0.0.1:3801` 会被切成 `["http://127","0","0","1:3801"]`，永远匹配不上 host `127.0.0.1`。
+后果：`loadUrl('http://127.0.0.1:3801/?token=...')` 返回 302 到 `/#token=` 时，WebView 对该**重定向**
+回调 `shouldOverrideUrlLoading` → Capacitor 判为外部 URL → `ACTION_VIEW`，于是「一点图标就跳到系统浏览器
+打开 AgentLRay 页面」，App 内始终停在占位页。修复为三层：
+1. `capacitor.config.ts` 写 `allowNavigation: ['127.0.0.1']`（端口不参与匹配，薄服务端口由 `ThinNavigation.thinPort` 统一）；
+2. `ThinNavigationPlugin.shouldOverrideLoad` 对薄服务同源返回 `false`；
+3. `MainActivity.installThinNavigation()` 在 `WebViewClient` 层再兜底（老 APK 内打包的旧配置也能生效），
+   其余回调委托 Capacitor 原客户端。包装客户端必须经 `Bridge.setWebViewClient(...)` 安装，
+   **不能**直接给 WebView 赋值：Capacitor 的 `BridgeWebViewClient.onRenderProcessGone` 不调 `super`，
+   渲染进程崩溃后的 `destroy()` 只由 `setWebViewClient` 触发。插件钩子（第 2 条）只对首次导航
+   之后的跳转生效，首次加载的占位页不走它。
+
+**内部页面单页签策略**：App 内只有 `MainActivity` 这一个 WebView，**内部页面**（薄服务同源、
+Capacitor 占位页 `https://localhost`）之间的跳转与重定向只能在这个页签内完成，禁止新开页签、
+禁止跳系统浏览器；**外部链接**保持 Capacitor 默认行为，交给外部浏览器。
+
+- `WebSettings.setSupportMultipleWindows(false)` + `javaScriptCanOpenWindowsAutomatically=false`：
+  内部页里 `target="_blank"` / `window.open` 不创建新窗口（`SecurityConfig.harden`）。
+- `ThinNavigationPlugin`（`shouldOverrideLoad`）+ 包装后的 `WebViewClient`（`shouldOverrideUrlLoading`）
+  两层裁决：内部页返回 `false` 由当前页加载；其余 URL（外部 http(s)、`intent:`/`mailto:` 等）
+  返回 `null` 交 Capacitor 默认策略（外部 http(s) → `ACTION_VIEW` 系统浏览器）。
+- 端口不参与 `allowNavigation` 匹配；薄服务端口统一取 `ThinNavigation.thinPort`。
+
 ---
 
 ## 5. 仓库模块改造方案
