@@ -1,6 +1,8 @@
 package com.agentlray.app
 
 import android.app.Application
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import java.io.File
 import java.util.concurrent.Executors
@@ -71,6 +73,64 @@ class App : Application() {
 
     private var cachedLayout: RootfsInstaller.Layout? = null
 
+    // ---- 前后台保活（§7.2）----
+    //
+    // 防抖状态放在**进程级**而不是 Activity：Activity 可能在后台被系统销毁
+    // （「不保留活动」、低内存回收单 Activity），若定时器寄宿在 Activity 的 Handler 上，
+    // 销毁即丢失，前台服务与 proot/Node 将无人收敛。这里用 Application 的 Handler，
+    // 且 Runnable 只读 [activityStarted]，不持有 Activity 引用（无泄漏）。
+
+    private val debounceHandler = Handler(Looper.getMainLooper())
+
+    /** Activity 是否处于 started（对用户可见）。由 MainActivity 前后台回调维护。 */
+    @Volatile
+    private var activityStarted = false
+
+    /** 防抖到期：先停薄服务再收起前台服务。期间已回前台（[activityStarted]）则跳过——
+     *  进程被冻结时定时器会推迟到解冻后才派发，可能晚于 onStart。 */
+    private val stopDebounce = Runnable {
+        if (activityStarted) return@Runnable
+        Log.i(TAG, "后台防抖到期，停止运行时")
+        RuntimeService.stop(this)
+        runtime.stop()
+    }
+
+    /** 回前台：立即收起前台服务并取消防抖。 */
+    fun onActivityStarted() {
+        activityStarted = true
+        debounceHandler.removeCallbacks(stopDebounce)
+        RuntimeService.stop(this)
+    }
+
+    /**
+     * 退后台：转前台服务保活并启动防抖窗口。
+     *
+     * 在 `onStop` 立即拉起前台服务（而非靠定时器）：此时代进程仍按「刚离开可见态」计权，
+     * Android 12+ 的启动限制通常不触发；偶发被拒时 [RuntimeService.start] 返回 false，
+     * 记日志并退化为「仅靠防抖定时器」。**不**改用 `onPause` 预启动——通知栏/权限弹窗都会
+     * 触发 onPause，会导致保活通知反复闪现（见 §7.2「不要用 onPause」）。
+     */
+    fun onActivityStopped() {
+        activityStarted = false
+        if (!RuntimeService.start(this)) {
+            logRing.append("", "前台服务启动被拒（后台启动限制），本次退后台仅靠防抖保活")
+        }
+        debounceHandler.removeCallbacks(stopDebounce)
+        debounceHandler.postDelayed(stopDebounce, STOP_DEBOUNCE_MS)
+    }
+
+    /**
+     * 用户主动退出（`isFinishing`）：立即收敛，不留后台运行时。
+     *
+     * 用有限的同步停止而非 `killNow()`：SIGKILL proot 会绕过 `--kill-on-exit`，被 trace 的
+     * Node 可能变孤儿；这里给它 1s 优雅退出窗口（正常毫秒级），超时才 SIGKILL。
+     */
+    fun onActivityFinishing() {
+        debounceHandler.removeCallbacks(stopDebounce)
+        RuntimeService.stop(this)
+        runtime.stopBlocking(FINISH_GRACE_MS)
+    }
+
     /**
      * 取运行时布局（解压单飞在 `RootfsInstaller.ensure()` 内）。
      *
@@ -89,6 +149,15 @@ class App : Application() {
 
     companion object {
         private const val TAG = "AgentLRayApp"
+        /**
+         * 退后台停服务的防抖窗口。5 分钟窗口内回前台：服务进程未换代 → 页面纯复用
+         * （见 MainActivity.loadThinUi）；超过则停服务，回前台重启并重新导航。窗口越长越省
+         * 「重启 + 重新导航」，但后台 proot/Node 会持续占用 CPU/内存/网络（SSE 连接），
+         * 5 分钟是体验与耗电的折中。与 MainActivity 文档一致。
+         */
+        private const val STOP_DEBOUNCE_MS = 5 * 60 * 1000L
+        /** 主动退出时给 proot 的优雅退出窗口（`--kill-on-exit`）。 */
+        private const val FINISH_GRACE_MS = 1_000L
         private val bootstrapExecutor = Executors.newSingleThreadExecutor { r ->
             Thread(r, "runtime-bootstrap").apply { isDaemon = true }
         }

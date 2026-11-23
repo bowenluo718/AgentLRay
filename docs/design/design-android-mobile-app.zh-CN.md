@@ -15,6 +15,9 @@
 | v1.2 | 2026-11-21 | 构建实测整改：①debug APK 已在本机产出（JDK21+Gradle8.11+AGP8.7.2+SDK35）；②zstd-jni 无 Android ABI，运行时层改 `.tgz` + 内置 `GZIPInputStream`（偏差②）；③真机首启报「rootfs 内缺少 node」，定位为 `ensure()` 并发竞态（onCreate 后台线程 × onStart 双跑共用 tmp），修复见 §7.1（`@Synchronized` + 哨兵校验 + 自愈）；④资产扩展名取 `.tgz` 因 aapt2 会解压并改写 `assets/**.gz` 名（偏差④）。 |
 | v1.3 | 2026-11-21 | 真机二次定位：proot 报 `library "libtalloc.so.2" not found`。根因：Android 8+ bionic linker **忽略 app 进程的 `LD_LIBRARY_PATH`**（安全策略），原注入无效；且 proot 的 `DT_RUNPATH` 指向 Termux 前缀（宿主不存在）。修复：依赖库与 proot 同放 `jniLibs/arm64-v8a/`（nativeLibraryDir），用 patchelf 把 proot 及其依赖的 `DT_RUNPATH` 改为 `${ORIGIN}`（bionic API 24+ 支持），`--replace-needed libtalloc.so.2→libtalloc.so`（jniLibs 只收 `*.so`）；删除 `LD_LIBRARY_PATH` 注入与 `assets/runtime/lib` 拷贝。fetch-proot.sh 已内建 patchelf 步骤。 |
 | v1.4 | 2026-11-21 | 真机三次定位：proot 已 LINK 并启动，报 `/usr/bin/env: '<宿主 node 绝对路径>': No such file or directory`。根因：传给 guest 进程的程序路径用了宿主绝对路径（`layout.nodeBin.absolutePath`），proot 的 `-r rootfsDir` 只映射 guest `/`，宿主绝对路径在 guest 里被当 guest 路径解析而失配。修复：新增 `Layout.nodeGuestPath="/usr/local/bin/node"`，`buildCommand` 用 guest 根路径（env/脚本本就是 guest 路径）。§7.1 启动顺序补「guest 程序路径必须用 guest 视角」。 |
+| v1.5 | 2026-11-23 | 真机反馈整改：**切后台再回前台 WebView 被刷新回主页**。根因两层：①`onStart → runtime.start()` 在服务已健康时同样回调 `onReady`，壳无条件导航（`7f674da` 起为 `webView.reload()`），每次前后台往返整页重载；②重载后 SPA 状态丢失（会话选择不持久化）。修复（修复 1）：`NodeRuntimeManager.generation` 标记薄服务进程生命周期（新 spawn 递增），壳以 `onPageFinished` 记录「已加载页面 + 对应代号」，回前台满足「页面已加载完成 ∧ 代号一致 ∧ 令牌/cookie 有效」时**纯复用、绝不 reload**；仅在冷启动/服务换代/页面失效时导航，且把当前站内路径作为 `next` 传给令牌兑换，避免 302 后丢会话上下文。§7.1/§7.2 同步更新。 |
+| v1.6 | 2026-11-23 | 退后台停服务窗口由 5s 延长到 **5 分钟**，并新增 `RuntimeService`（`foregroundServiceType=specialUse` 前台服务）承担保活——仅拉长定时器无效：cached 进程会被系统整体回收，定时器来不及执行。清单补 `FOREGROUND_SERVICE` / `FOREGROUND_SERVICE_SPECIAL_USE` / `POST_NOTIFICATIONS` 权限与 service 声明（含 Android 14+ 子类型 property）；`onStart`/防抖到期收起前台服务，`onTimeout` 收敛停运行时。§7.2 同步。 |
+| v1.7 | 2026-11-23 | 保活机制评审整改（代码走查）：①`NodeRuntimeManager` 的 `userStopped` 在每次 `start()` 清零并重置重启预算——修复「一次主动停止后崩溃永久不自愈」；②防抖状态上移到进程级 `App`，修复「Activity 后台被销毁后前台服务与运行时无人收敛」；③`ThinNavigationPlugin` 新增 `onNavigationStarted`/`onMainFrameError`，配合 `runtime.onExit` 多重作废页面证据——修复「失败导航后误判可复用、跳过重新导航」；④`onTaskRemoved`/服务超时/主动退出改用同步 `stopBlocking`，避免 proot 孤儿；⑤`RuntimeService.start()` 返回布尔并记录后台启动受限，`onCreate` 申请 `POST_NOTIFICATIONS`。§7.2 细化上述实现约束。 |
 
 本文档是 ADR-0008 的**可落地工程蓝图**：把已收敛的决策展开为架构图、工程结构、模块改造、构建打包、生命周期状态机、分阶段实施计划与验收标准。**决策本身以 ADR-0008 为准，本文件只回答"怎么做"。**
 
@@ -33,7 +36,7 @@
 - rootfs / app bundle 的首次解压、版本升级与完整性校验。
 - 薄服务进程管理：启动、就绪探测、停止、崩溃重启、孤儿进程清理。
 - Capacitor WebView 加载本地 `http://127.0.0.1:3801`。
-- 启动屏 + 薄服务就绪门控 + 仅前台生命周期。
+- 启动屏 + 薄服务就绪门控 + 短时后台保活（退后台 `specialUse` 前台服务保活 5 分钟，超窗即停）。
 - 主机表单（dsh deviceId / 中继端口）→ 复用 web 前端 `HostFormDialog`，凭据 AES 落盘。
 - 能力面裁剪：Android 模式只暴露 dsh 传输。
 - 签名 / 加固 / 崩溃上报（原生 + Node 两侧）。
@@ -421,26 +424,41 @@ Application.onCreate / Service.onCreate
   → RootfsInstaller.ensure()           # 版本标记/校验/解压（仅首次或升级）
   → NodeRuntimeManager.start()          # spawn proot → node thin-server
   → 轮询 GET /api/version（200ms，≤20s）
-  → 就绪 → WebView.loadUrl("http://127.0.0.1:3801")
+  → 就绪 → 页面已对应当前服务进程则复用；否则 WebView.loadUrl(
+             "http://127.0.0.1:3801/?token=…&next=<当前站内路径>")   # 302 兑换 cookie
   → 失败（超时/进程退出）→ 错误屏：展示日志尾部 + 重试
 ```
 
 > `/api/version` 只代表 HTTP 服务已监听，**不代表 dsh 已连上**；主机连接状态由前端 `HostConnectingView` 负责。
 
-### 7.2 前台/后台（仅前台策略）
+### 7.2 前台/后台（退后台前台服务保活 5 分钟）
 
 | 事件 | 行为 |
 | --- | --- |
-| `onStop`（界面不可见，防抖 5s） | `SIGTERM` proot（`--kill-on-exit` 连带清理 Node），等待 3s 后 `SIGKILL`；记录退出原因。 |
-| `onStart`（回前台） | 重新 `start()`，恢复上次选中的主机，WebView reload。 |
+| `onStop`（界面不可见） | 立即转**前台服务**保活（`foregroundServiceType=specialUse`），防抖 **5 分钟**；到期才 `SIGTERM` proot（`--kill-on-exit` 连带清理 Node），等待 3s 后 `SIGKILL`，并收起前台服务。 |
+| `onStart`（回前台） | 取消防抖并立即收起前台服务；重新 `start()`；服务仍健康（同一进程代号）且页面已加载完成 → **纯复用页面，不 reload**；服务换代/页面失效 → 重新导航并带上站内 `next`。 |
 | 隧道断开 | 薄服务 hostReady 置 false，web 端显示断线占位；重连由 `autoConnectThinHost` 或用户操作触发。 |
+
+- **回前台绝不 reload**：`onStart → NodeRuntimeManager.start()` 在服务已健康时（`alreadyHealthy`）同样回调 `onReady`，若壳每次都导航，就会在每次前后台往返时重建 SPA——丢失当前会话/滚动位置、触发全量重拉与 SSE 重连（真机现象：回到主页）。判据由 `MainActivity.pageIsCurrent` 统一给出，三条必须同时成立：
+  1. **页面已加载完成**：`ThinNavigationPlugin` 包装的 `BridgeWebViewClient.onPageFinished` 记录 URL，且落在薄服务同源——只认「加载完成」，不用 `webView.url`（后者在加载中/加载失败时也是薄服务地址）；
+  2. **服务进程没换过**：`NodeRuntimeManager.generation` 只在**新 spawn** 后递增，壳记录导航时的代号，代号不一致说明退后台防抖已杀进程并重启，旧页面指向已退出进程（刷新/SSE 全失败），必须重新导航；
+  3. **令牌一致且 cookie 仍在**：WebView cookie jar 可能被回收，此时链接全 401，必须重新导航兑换。
+  重新导航时把当前站内路径（query，不含 fragment）作为 `next` 传给 `/?token=`，服务端 `safeNextPath` 校验后 302 回原页面，避免丢掉 `?view=&session=&sid=`。
 
 - **不要在 `onStart` 时与 `onStop` 的回收竞态**：`start()` 前必须 `await` 旧进程完全回收（SIGTERM 后至多 3s 的 `SIGKILL` 完成）再 spawn 新进程；否则快速前后台切换会同时存在新旧进程，撞 `3801` 端口 `EADDRINUSE`。`NodeRuntimeManager.start()` 内部串行化：任何时刻至多一个 proot 子进程存活。
 - **`ensure()` 必须单飞**：`Application.onCreate` 的后台线程与 `MainActivity.onStart → start()` 会**并发**调用 `RootfsInstaller.ensure()`。若不加锁，两条路径共用 `runtime/rootfs.tmp`，会互相删除 tmp/目标目录，产生「流程正常返回但 rootfs 残缺（缺 `usr/local/bin/node`）」的竞态——真机实测即报「rootfs 内缺少 node」。修复：`ensure()` 加 `@Synchronized`；解压后按哨兵（rootfs 的 `usr/local/bin/node`、app 的 `bin/thin-server.js`）校验，残缺即抛错；`spawnAndAwait` 与 `ensureLayout` 的缓存也过哨兵，命中残缺目录则删除重建（自愈）。
 
 - **不要用 `onPause`**：对话框、通知栏、权限弹窗都可能触发，会误停服务。
 - 旋转/多窗口：`android:configChanges` 避免 Activity 重建；进程管理放在 Application/Service 单例，不绑定 Activity 生命周期。
-- `onStop` 后的 5s 防抖用于吸收短暂切后台（如系统弹窗），避免频繁杀进程/冷启动。
+- **防抖窗口 = 5 分钟，且必须配前台服务**：单纯的 `Handler.postDelayed` 撑不住长窗口——界面不可见后进程进入 **cached** 状态，系统可在数分钟内回收整个进程（proot/Node 一并消失），定时器根本没机会执行。因此 `onStop` 先 `startForegroundService(RuntimeService)`（`foregroundServiceType="specialUse"`，常驻低优先级通知），进程在窗口内按前台服务计权；`onStart` 与防抖到期都先 `stopService`。通知权限（Android 13+ `POST_NOTIFICATIONS`）未授予时通知不展示，但前台服务本身仍生效。
+- `RuntimeService` 的两条边界：①**不要**在 `onStopForeground` 里停运行时（回前台时壳主动收起前台服务，那正是要复用页面的时刻）；②`onTimeout`（Android 15+ `specialUse` 6 小时上限，或 ROM 更短）必须立即停运行时并 `stopSelf`，否则按 ANR 处理。服务返回 `START_NOT_STICKY`——自行重建时无人调 `startForeground`，会立刻被杀。
+- 防抖到期判定要复查 `activityStarted`：进程被冻结时定时器会推迟到解冻（可能已在 `onStart` 之后）才派发，不复查会在前台把服务停掉。
+- 5 分钟窗口是体验与耗电的折中：窗口内回前台纯复用页面（服务未换代），超窗则停服务、回前台重启并重新导航。后台期间 proot/Node 仍占 CPU/内存，SSE 连接保持（这正是「回前台无感」的前提）。
+- **防抖状态放在 `App`（进程级）而非 Activity**：Activity 可能在后台被系统销毁（「不保留活动」、低内存回收单 Activity），若定时器寄宿在 Activity 的 Handler 上则随销毁丢失，前台服务与运行时无人收敛。改为 `App.debounceHandler` 持有 Runnable（只读 `activityStarted`，不持有 Activity 引用，无泄漏）；Activity 销毁只影响它自己，收敛责任交给进程级定时器。
+- **页面证据必须多重作废**：`thinPageSel`/`loadedGeneration` 不只在 `loadThinUi` 里清空——`ThinNavigationPlugin` 在 `onPageStarted`（任何新文档）与主框架 `onReceivedError`（加载失败不触发 `onPageFinished`）时回调作废，`runtime.onExit` 也作废。否则一次失败的全页导航会留下过期证据，`pageIsCurrent` 误判为可复用而跳过重新导航，把用户留在 Chrome 错误页。
+- **停止必须区分异步/同步**：`onTaskRemoved`、前台服务超时、主动退出这几个「进程即将被回收」的场景用 `stopBlocking(graceMs)`——同步 `SIGTERM` 并等待（默认 1s），超时才 `SIGKILL`；若只把 `SIGTERM` 丢进 daemon executor，线程可能来不及跑，proot/Node 变孤儿继续占 3801。
+- **`userStopped` 必须在每次 `start()` 清零**：否则一次主动停止后，本进程内后续崩溃会被 `maybeRestart` 永久短路，既不重启也不报错（WebView 停在死页面）。
+- **Android 12+ 后台启动前台服务受限**：`onStop` 时刻可能已被判定后台，`startForegroundService` 抛 `ForegroundServiceStartNotAllowedException`。`RuntimeService.start()` 返回布尔，失败记入运行时日志，保活退化为仅靠防抖定时器（用户可在日志/错误屏看到，而非静默）。Android 13+ 另需在 `onCreate` 申请 `POST_NOTIFICATIONS`，否则通知被隐藏（服务本身仍计权）。
 
 ### 7.3 崩溃与重启
 

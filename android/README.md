@@ -102,8 +102,9 @@ cd android/android && ./gradlew assembleDebug     # 或 assembleRelease
 - **启动**：`App.onCreate` 后台 `RootfsInstaller.ensure()`（校验 SHA-256 → 解压到 filesDir）→
   `NodeRuntimeManager.start()`（spawn `proot`）→ 轮询 `/api/version`（200ms，≤20s）→ 就绪后
   `MainActivity` 将 WebView 导航到 `http://127.0.0.1:3801`。
-- **前后台**：`onStop` 防抖 5s 后 `SIGTERM`（`proot --kill-on-exit`）→ 3s 后 `SIGKILL`；`onStart`
-  取消防抖并重启（串行化，避免 3801 `EADDRINUSE`）。
+- **前后台**：`onStop` 转 `specialUse` 前台服务保活并防抖 **5 分钟**（防抖状态在 `App`，进程级，
+  覆盖 Activity 后台被销毁的场景）；窗口内回前台纯复用页面。超窗或用户划掉任务 → `SIGTERM`
+  （`proot --kill-on-exit`）→ 3s 后 `SIGKILL`；`onStart` 取消防抖并重启（串行化，避免 3801 `EADDRINUSE`）。
 - **崩溃**：非主动退出 → 指数退避重启（1s/2s/4s，最多 3 次）→ 超限错误屏（日志尾部 + 重试）。
 - **孤儿清理**：启动读 `runtime/node.pid`，`/proc/<pid>/cmdline` 命中则 `SIGKILL`。
 - **能力面**：`/api/mode` 下发 `capabilities.transports=['dsh']`（`AGENTLRAY_DISABLE_SSH=1`）与

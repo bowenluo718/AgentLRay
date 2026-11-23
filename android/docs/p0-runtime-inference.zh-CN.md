@@ -109,8 +109,9 @@ SSE 连续 5 分钟（P0-A 验收原文）。
 
 ## 3. P0-C 生命周期
 
-**[证据]** `NodeRuntimeManager`（串行 executor + 单 proot 进程）、`MainActivity`（onStart/onStop 5s
-防抖/onDestroy）、`RuntimeWatchdog`（孤儿清理）、`RuntimeLogRing`（环形缓冲）。崩溃指数退避
+**[证据]** `NodeRuntimeManager`（串行 executor + 单 proot 进程）、`MainActivity`（onStart/onStop
+5 分钟防抖 + `RuntimeService` 前台服务保活/onDestroy）、`RuntimeWatchdog`（孤儿清理）、
+`RuntimeLogRing`（环形缓冲）。崩溃指数退避
 1s/2s/4s 最多 3 次 → 错误屏（日志尾部 + 重试）。`proot --kill-on-exit` 连带清 tracee。
 
 **[推断]** 逻辑完整。**必验**：前后台往返 ≥3、崩溃自动重启、旋转不重载（Manifest `configChanges` 全项）、

@@ -8,6 +8,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.SecureRandom
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -39,6 +40,15 @@ class NodeRuntimeManager(
     var onProgress: ((RootfsInstaller.Progress) -> Unit)? = null
 
     private var restartCount = 0
+    /**
+     * 「用户/壳主动停止」标记：置位后 [maybeRestart] 不再自愈重启。
+     *
+     * `@Volatile`：由 executor 线程写、被 "node-waiter" 线程读（见 [maybeRestart] 的调用点）。
+     * **任何** [start] 都必须先清零——否则一次 stop（退后台超窗、[RuntimeService.onTaskRemoved]）
+     * 之后，同进程内后续崩溃会被 [maybeRestart] 的 `if (userStopped) return` 永久短路，
+     * 既不重启也不报错，WebView 停在指向已退进程的死页面。
+     */
+    @Volatile
     private var userStopped = false
     /**
      * 本机接口令牌（C-1）：首次启动随机生成后**持久化到 filesDir/ui-token**，经 env
@@ -51,8 +61,25 @@ class NodeRuntimeManager(
     val uiToken: String?
         get() = uiTokenValue
 
+    /**
+     * 薄服务进程代号：每次**新 spawn** 成功后递增，进程存活期间不变。
+     *
+     * 供壳判定「WebView 里的页面是否仍对应当前薄服务进程」：代号相同说明服务没重启过，
+     * 回前台必须纯复用页面（reload 会丢掉 SPA 状态：当前会话、滚动位置、SSE 增量）；
+     * 代号变化（退后台防抖被杀后重启、崩溃重启）说明旧页面已指向退出的进程，需要重新导航。
+     * 仅作为「是否同一次服务生命周期」的判据，不承担版本/健康语义。
+     */
+    @Volatile
+    var generation: Int = 0
+        private set
+
     fun start() {
         executor.execute {
+            // 每次 start 都是一次新的「用户意图」：必须清除主动停止标记并重置重启预算。
+            // 否则一次 stop()（退后台超窗、任务被划掉）之后，本进程内后续崩溃会被
+            // [maybeRestart] 的 `if (userStopped) return` 永久短路——既不重启也不报错。
+            userStopped = false
+            restartCount = 0
             val alreadyHealthy = synchronized(this) { running.get() && isHealthy() }
             if (alreadyHealthy) {
                 Log.i(TAG, "运行时已就绪，跳过重启")
@@ -64,21 +91,61 @@ class NodeRuntimeManager(
         }
     }
 
+    /** 异步停止（排队到 executor 串行执行）。 */
     fun stop() {
-        executor.execute {
-            userStopped = true
-            running.set(false)
-            shutdownProcess()
-            Log.i(TAG, "运行时已停止")
-        }
+        executor.execute { stopInternal(PROCESS_GRACE_MS) }
     }
 
-    /** 立即 SIGKILL（进程退出兜底 / onDestroy）。 */
+    /**
+     * 同步停止：SIGTERM → 等待最久 [graceMs]（proot `--kill-on-exit` 连带清理 Node）→ 必要时
+     * SIGKILL，**完成后再返回**。用于进程/服务即将被系统回收、异步队列可能来不及执行的场景
+     * （任务被划掉、前台服务超时）：此时若只把 SIGTERM 塞进 daemon executor，进程可能在
+     * 线程跑起来之前就被销毁，proot/Node 变成孤儿继续占用 3801。
+     *
+     * 仍**经 executor 串行执行**（不绕过「至多一个 proot」的约束）：先同步置位停止标记
+     * 阻止 waiter 线程重启，再入队等待。若 executor 正忙于一次 spawn 的 20s 探测而超时，
+     * 兜底直接 SIGKILL，避免阻塞调用方（可能是主线程/即将被杀的进程）。
+     */
+    fun stopBlocking(graceMs: Long = STOP_GRACE_MS) {
+        userStopped = true
+        running.set(false)
+        val task = try {
+            executor.submit { shutdownProcess(graceMs) }
+        } catch (e: Exception) {
+            null
+        }
+        if (task != null) {
+            try {
+                task.get(graceMs + KILL_WAIT_MS, TimeUnit.MILLISECONDS)
+                Log.i(TAG, "运行时已停止（同步）")
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "同步停止等待超时，直接强杀：${e.message}")
+            }
+        }
+        val proc = synchronized(this) {
+            val p = process
+            process = null
+            p
+        }
+        proc?.destroyForcibly()
+        deletePid()
+    }
+
+    /** 立即 SIGKILL（进程退出兜底 / onDestroy）。同时置位 [userStopped]，阻止 waiter 线程重启。 */
     fun killNow() {
+        userStopped = true
         running.set(false)
         process?.destroyForcibly()
         process = null
         deletePid()
+    }
+
+    private fun stopInternal(graceMs: Long) {
+        userStopped = true
+        running.set(false)
+        shutdownProcess(graceMs)
+        Log.i(TAG, "运行时已停止")
     }
 
     // ---- 内部：spawn + 探测 ----
@@ -148,6 +215,8 @@ class NodeRuntimeManager(
         synchronized(this) {
             process = proc
             running.set(true)
+            // 新进程 = 新生命周期：壳据此判定已有页面是否需要重新导航（见 [generation]）。
+            generation += 1
         }
         writePid(pidOf(proc))
 
@@ -327,12 +396,11 @@ class NodeRuntimeManager(
             } catch (e: InterruptedException) {
                 return@execute
             }
-            userStopped = false
             spawnAndAwait()
         }
     }
 
-    private fun shutdownProcess() {
+    private fun shutdownProcess(graceMs: Long = PROCESS_GRACE_MS) {
         val proc = synchronized(this) {
             val p = process
             process = null
@@ -340,7 +408,7 @@ class NodeRuntimeManager(
         } ?: return
         if (!proc.isAlive) return
         proc.destroy() // SIGTERM
-        val deadline = System.currentTimeMillis() + 3_000
+        val deadline = System.currentTimeMillis() + graceMs
         while (proc.isAlive && System.currentTimeMillis() < deadline) {
             try {
                 Thread.sleep(50)
@@ -349,6 +417,9 @@ class NodeRuntimeManager(
             }
         }
         if (proc.isAlive) proc.destroyForcibly() // SIGKILL
+        // SIGKILL 后短暂等待进程真正回收：awaitTerminate 期间死进程仍 isAlive 的窗口极小，
+        // 但必须确认后再返回，否则调用方（如 onTaskRemoved 后的进程销毁）可能先于清理完成。
+        runCatching { proc.waitFor(500, TimeUnit.MILLISECONDS) }
         deletePid()
     }
 
@@ -378,5 +449,11 @@ class NodeRuntimeManager(
         private const val LOADER_NAME = "libproot-loader.so"
         private const val MAX_RESTARTS = 3
         private val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000)
+        /** SIGTERM 后等待 proot 自行退出的时长；超时转 SIGKILL。 */
+        private const val PROCESS_GRACE_MS = 3_000L
+        /** [stopBlocking] 的默认宽限期（与 [PROCESS_GRACE_MS] 一致）。 */
+        private const val STOP_GRACE_MS = 3_000L
+        /** SIGKILL 后等待进程被系统回收的额外时长。 */
+        private const val KILL_WAIT_MS = 500L
     }
 }

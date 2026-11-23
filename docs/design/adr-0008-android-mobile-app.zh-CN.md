@@ -4,7 +4,7 @@
 > 需求来源：`todo.md` #17「开发移动端 APP，用于远程连接」（ADR-0007 Q5/Q6 的 Android 落地）
 > 前置文档：`design-thin-service`（ADR-0007，薄服务已实现）、`design-multi-host`、`design-dsh-host-connection`、`design-dsh-login-methods`
 > 方法：`grill-with-docs`（grilling + domain-modeling 收敛，R1–R6）
-> 修订：**2026-11-21 R2 承载由 nodejs-mobile 改为 PRoot**（原方案受 Node 18 限制无法运行 dsh 栈，详见 §1.2 修订说明与 §3）
+> 修订：**2026-11-21 R2 承载由 nodejs-mobile 改为 PRoot**（原方案受 Node 18 限制无法运行 dsh 栈，详见 §1.2 修订说明与 §3）；**2026-11-23 R4 后台由「仅前台」放宽为「退后台前台服务保活 5 分钟」**（见 §2.2 R4 后台）。
 
 ## 1. 背景与问题
 
@@ -52,7 +52,7 @@ AgentLRay 的设计前提是**读本机 agent 日志**；手机（Android）上�
 | **R4 交互面** | app 除启动屏外**不做任何 UI 操作**；**所有操作与查看都在 web 页面内完成**（含主机管理）。 |
 | **R4 主机管理** | 复用 web 前端 `HostFormDialog`；Android 下只暴露 **dsh** 传输（deviceId / 中继端口），凭据 **AES-256-GCM 加密落盘**。 |
 | **R4 启动** | 原生启动屏 + PRoot/Node 就绪探测（`/api/version`）通过后再加载 WebView；失败显示错误屏与日志。 |
-| **R4 后台** | **仅前台**：`onStop` 防抖后停 PRoot 子进程，回前台重建（省电、简单、符合"查看工具"定位）。 |
+| **R4 后台** | **短时后台保活（2026-11-23 修订）**：原定「仅前台」——`onStop` 防抖后即停 PRoot 子进程。真机反馈「切后台再回来页面被刷新」后放宽为：退后台转 `specialUse` 前台服务保活 **5 分钟**，窗口内回前台纯复用页面；超窗或用户划掉任务才停 PRoot 子进程（详见 [design-android-mobile-app](design-android-mobile-app.zh-CN.md) §7.2）。 |
 | **R4 发布** | 签名、加固、崩溃上报；首版按侧载/企业内部分发设计（PRoot + `lib*.so` 与 Play 政策需单独评估）。 |
 
 ### 2.3 Android 特有适配点
@@ -79,7 +79,7 @@ AgentLRay 的设计前提是**读本机 agent 日志**；手机（Android）上�
 - **PRoot 而非 Kotlin 重写**：dsh 隧道为纯 JS（`lib/dsh/vendor` 约 1008K），Kotlin 重写需移植完整中继协议栈，成本极高且易失真；PRoot 直接复用现有 thin-server 代码，语义完全一致。
 - **dsh-only**：dsh 是移动端穿透 NAT 连桌面的关键通道（ADR-0007 Q17）。PRoot 下 `child_process` 可用，SSH 已非技术障碍；首版保持 dsh-only 是产品裁剪（减少密钥管理与 rootfs 体积），后续可按需放开（§6）。
 - **Capacitor**：获得生命周期、返回键、插件生态与签名/加固工具链，避免手写原生 WebView；同时用插件桥解决 WebView 的 blob 下载限制。
-- **仅前台**：app 定位是"远程查看工具"，无后台刷新/推送需求；避免 Android 后台进程限制与常驻通知。
+- **短时后台保活（2026-11-23 修订，原「仅前台」）**：app 定位是"远程查看工具"，无后台刷新/推送需求，因此**不做后台常驻**；但真机反馈「切后台再回前台页面被刷新」，故放宽为退后台 `specialUse` 前台服务保活 **5 分钟**——仅覆盖短暂切走（锁屏/切应用/看通知），超窗或用户划掉任务即停 PRoot 子进程。既避免真正的后台常驻与长期通知，又消除频繁重建。
 - **App 不操作 UI**：主机管理、会话查看全部复用现有 web 前端（已有 `HostFormDialog`、多主机、thin 空态），app 层零业务逻辑，最小化维护面。
 
 ## 4. 影响与兼容
@@ -102,7 +102,7 @@ AgentLRay 的设计前提是**读本机 agent 日志**；手机（Android）上�
 | `AGENTLRAY_HOME` 重定向到 `filesDir` | ⬜ 待实现 | `lib/config.js:5`（已支持该变量） |
 | app bundle 打包（含 `@lukeburns/clatterjs`） | ⬜ 待实现 | `package.json`、`frontend/dist` |
 | 私钥 AES 落盘 + 主机表单（dsh 能力裁剪） | ⬜ 待实现 | `lib/secret.js`、`HostFormDialog` |
-| 启动屏 + 就绪门控 + 仅前台生命周期 | ⬜ 待实现 | — |
+| 启动屏 + 就绪门控 + 前后台生命周期（5 分钟前台服务保活，R4 修订） | 🟡 已实现（真机待验） | `MainActivity.kt`、`RuntimeService.kt`、`AndroidManifest.xml` |
 | 签名/加固/崩溃上报 | ⬜ 待实现 | — |
 | 本机令牌鉴权 / 接口鉴权 | ✅ 已实现（2026-11-22，见 [design-android-mobile-app](design-android-mobile-app.zh-CN.md) §8.1） | `lib/auth.js`、`NodeRuntimeManager.kt`、`MainActivity.kt` |
 | 随机端口 | ⏸ 暂缓 | 见 §7 D3 |
