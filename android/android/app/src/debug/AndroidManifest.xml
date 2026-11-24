@@ -5,9 +5,11 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <application>
+        <!-- 必须 exported：launcher 是外部进程，桌面快捷方式只能显式启动导出组件。
+             无 intent-filter 时仅能按全限定类名显式拉起，入口即快捷方式本身。 -->
         <activity
             android:name=".SyncShortcutActivity"
-            android:exported="false"
+            android:exported="true"
             android:excludeFromRecents="true"
             android:noHistory="true"
             android:taskAffinity=""

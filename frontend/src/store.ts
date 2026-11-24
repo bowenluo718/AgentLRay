@@ -335,6 +335,8 @@ export type GroupBy = 'platform' | 'project' | 'none';
 // （?view=）随切换一并反映。刷新后从 URL 恢复「正在查看的详情 + 所在页签」，再回退
 // localStorage。用 replaceState 不产生历史栈噪音；筛选/分组配置仍走 localStorage，
 // 两者独立。
+// 注意：history.state 归 lib/backNavigation 所有（存该页面的层级快照），这里写 URL 时
+// 必须原样带回，不能传 null——否则页面内后退时读不到快照。
 const URL_PARAM_SESSION = 'session'; // 平台
 const URL_PARAM_SID = 'sid'; // 会话 id（URLSearchParams 自动编解码）
 const URL_PARAM_AGENT = 'agent'; // openclaw 归属 agent（可选）
@@ -396,7 +398,11 @@ function syncSessionUrl(): void {
       params.delete(URL_PARAM_AGENT);
     }
     const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
+    window.history.replaceState(
+      window.history.state,
+      '',
+      qs ? `${window.location.pathname}?${qs}` : window.location.pathname
+    );
   } catch {
     /* non-fatal */
   }
@@ -457,8 +463,11 @@ interface AppState {
   projectFilter: string[];
   /** 折叠的组名集合，按分组模式分别记忆（名字带 kind: 前缀防键撞）。 */
   collapsedGroups: Record<GroupBy, string[]>;
-  /** 桌面端左侧菜单折叠（true = 只显示主内容；移动端抽屉展开仍由局部 navigationOpen 控制）。 */
+  /** 桌面端左侧菜单折叠（true = 只显示主内容）。 */
   sidebarCollapsed: boolean;
+  /** 移动端会话列表覆盖层是否展开（<768px）。放在 store 而非组件局部状态：系统返回键
+   *  的页面层级（lib/backNavigation）需要它作为最上层，才能「返回键先收起列表」。 */
+  navigationOpen: boolean;
   /** 桌面端左侧菜单宽度（可拖拽，200–480px）。 */
   sidebarWidth: number;
   /** true when the persisted settings carried an explicit platform (skip auto-pick on boot) */
@@ -583,6 +592,8 @@ interface AppState {
   toggleGroupCollapsed: (mode: GroupBy, name: string) => void;
   /** 设置桌面端左侧菜单折叠（持久化）。 */
   setSidebarCollapsed: (collapsed: boolean) => void;
+  /** 展开/收起移动端会话列表覆盖层（不持久化）。 */
+  setNavigationOpen: (open: boolean) => void;
   /** 拖拽侧栏宽度（持久化，自动收敛到 200–480）。 */
   setSidebarWidth: (width: number) => void;
   /** 设置会话详情上下文（来源平台/agent），不动筛选上下文。聚合视图点击/⌘K/分析跳转用。 */
@@ -616,6 +627,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   projectFilter: initial.projectFilter,
   collapsedGroups: initial.collapsedGroups,
   sidebarCollapsed: initial.sidebarCollapsed,
+  navigationOpen: false,
   sidebarWidth: initial.sidebarWidth,
   hasStoredPlatform: initial.hasStoredPlatform,
   detailPlatform: urlDetail.detailPlatform ?? initial.platform,
@@ -1042,6 +1054,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().sidebarCollapsed === collapsed) return;
     set({ sidebarCollapsed: collapsed });
     persistState();
+  },
+  setNavigationOpen: (open) => {
+    if (get().navigationOpen === open) return;
+    set({ navigationOpen: open });
   },
   setSidebarWidth: (width) => {
     const next = clampSidebarWidth(Math.round(width));

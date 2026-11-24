@@ -1,7 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 桌面图标长按快捷方式（debug 构建专用，见 src/debug/AndroidManifest.xml）。
      targetClass 必须写全限定类名：SyncShortcutActivity 只在 debug 变体存在，
-     main 源集不能引用该类，因此该资源放 debug 源集。 -->
+     主源集不能引用该类，因此该资源放 debug 源集。
+     targetPackage 必须写字面包名：manifest 占位符（${applicationId} 等）只在
+     AndroidManifest.xml 中被替换，res/xml 资源里会原样保留 → 系统解析不到包，
+     点击快捷方式报「未安装应用」。 -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
     <shortcut
         android:shortcutId="sync-config"
@@ -12,7 +15,7 @@
         android:shortcutDisabledMessage="@string/shortcut_sync_disabled">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="${applicationId}"
+            android:targetPackage="com.agentlray.app"
             android:targetClass="com.agentlray.app.SyncShortcutActivity" />
     </shortcut>
 </shortcuts>

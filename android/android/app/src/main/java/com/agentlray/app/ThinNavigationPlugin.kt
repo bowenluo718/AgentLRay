@@ -35,6 +35,20 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "ThinNavigation")
 class ThinNavigationPlugin : Plugin() {
 
+    /** 薄服务页面加载完成回调（壳据 [ThinNavigation] 策略决定是否需要重新导航）。 */
+    var onPageFinished: ((String?) -> Unit)? = null
+    /**
+     * 新导航开始（主框架）。壳据此作废「已加载完成」证据：一次**未走 loadThinUi** 的导航
+     * （SPA 重定向、`target=_blank` 内联、用户点击）会把页面换成新文档，旧证据不再成立。
+     * 只有其后的 onPageFinished 才能重新建立证据。
+     */
+    var onNavigationStarted: ((String?) -> Unit)? = null
+    /**
+     * 主框架加载失败（连接被拒/超时等）。失败不会触发 onPageFinished（未配置 `errorPath`），
+     * 若不在此作废证据，壳会误判页面仍可复用而跳过重新导航，把用户留在错误页。
+     */
+    var onMainFrameError: ((String?) -> Unit)? = null
+
     override fun shouldOverrideLoad(url: Uri): Boolean? =
         if (ThinNavigation.isInternal(url.toString())) false else null
 
@@ -65,13 +79,21 @@ class ThinNavigationPlugin : Plugin() {
             override fun shouldInterceptRequest(view: WebView, url: String): WebResourceResponse? =
                 delegate.shouldInterceptRequest(view, url)
 
-            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) =
+            override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 delegate.onPageStarted(view, url, favicon)
+                onNavigationStarted?.invoke(url)
+            }
 
-            override fun onPageFinished(view: WebView, url: String?) = delegate.onPageFinished(view, url)
+            override fun onPageFinished(view: WebView, url: String?) {
+                delegate.onPageFinished(view, url)
+                onPageFinished?.invoke(url)
+            }
 
-            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) =
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 delegate.onReceivedError(view, request, error)
+                // 只有主框架失败才会让整页失效；子资源（图片/脚本）失败不影响页面可用性。
+                if (request.isForMainFrame) onMainFrameError?.invoke(request.url.toString())
+            }
 
             override fun onReceivedHttpError(
                 view: WebView,

@@ -162,7 +162,7 @@ _Avoid_: Kotlin 薄服务（曾考虑的替代路径，R6 后废弃）、Android
 跨平台 WebView 容器框架（原生壳 + 插件桥）。本方案用它托管 WebView 加载本地薄服务 URL，获得生命周期、返回键、插件生态与签名/加固工具链。注意 `server.url` 会在 `onCreate` 立即加载，必须先等 `/api/version` 就绪（启动屏门控）；WebView 的 blob 下载不可用，导出/下载走自定义保存插件。_Avoid_: Cordova（旧同源方案）、原生 WebView（`android.webkit.WebView` 直接加载，无框架层）
 
 **极简壳（Minimal shell）**：
-移动端 app 的交互边界：app 除启动动图外不做任何 UI 操作，**所有操作与查看（含主机管理）都在 web 页面内完成**，app 层零业务逻辑。后台策略**仅前台**（切后台断隧道/停薄服务，回前台重建）。_Avoid_: 混合导航壳（原生 Tab + WebView 内容，非本方案）
+移动端 app 的交互边界：app 除启动动图外不做任何 UI 操作，**所有操作与查看（含主机管理）都在 web 页面内完成**，app 层零业务逻辑。后台策略为**短时保活**（退后台转 `specialUse` 前台服务保活 5 分钟，超窗/划掉任务才停薄服务，回前台纯复用页面）。_Avoid_: 混合导航壳（原生 Tab + WebView 内容，非本方案）
 
 > 注：本文档随 grill-with-docs 设计会话逐步增补，尚未定稿。
 

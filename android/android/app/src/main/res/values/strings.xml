@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AgentLRay</string>
+    <!-- 后台保活前台服务通知（design-android-mobile-app §7.2）。 -->
+    <string name="runtime_notification_channel">本地运行时</string>
+    <string name="runtime_notification_title">AgentLRay 正在后台运行</string>
+    <string name="runtime_notification_text">5 分钟内返回无需重启服务</string>
 </resources>

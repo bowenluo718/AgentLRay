@@ -14,6 +14,13 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="29" />
 
+    <!-- 后台保活（§7.2）：退后台后最多 5 分钟内保持 proot/Node 存活，避免 cached 进程
+         被系统回收导致回前台重启。specialUse 是「本地薄服务」最贴近的类型；Android 13+
+         通知权限未授予时通知不展示，但前台服务本身仍生效（Task Manager 可见）。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- Android 11+ 查询分享目标（SaveFilePlugin ACTION_SEND）。 -->
     <queries>
         <intent>
@@ -47,6 +54,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 后台保活前台服务（§7.2）：仅退后台期间存在，回前台立即收起。
+             specialUse 需声明子类型说明（Android 14+ 要求）。 -->
+        <service
+            android:name=".RuntimeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="local_web_runtime" />
+        </service>
 
         <!-- 原生保存桥：FileProvider 授权 filesDir/exports 供 ACTION_SEND 分享。 -->
         <provider

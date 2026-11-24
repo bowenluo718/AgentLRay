@@ -10,4 +10,7 @@ ext {
     androidxWebkitVersion = '1.12.0'
     kotlinVersion = '2.0.21'
     commonsCompressVersion = '1.27.0'
+    // 本地 JVM 单测（android/app/src/test）。
+    junitVersion = '4.13.2'
+    assertjVersion = '3.22.0'
 }
