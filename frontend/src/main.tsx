@@ -5,6 +5,7 @@ import { Toaster } from '@/components/ui/sonner';
 import App from './App';
 import { getMode } from '@/api/client';
 import { adoptTokenFromLocation } from '@/api/ui-token';
+import { installBackNavigation } from '@/lib/backNavigation';
 import { useAppStore } from '@/store';
 import { DEMO } from '@/demo/flag';
 import './index.css';
@@ -43,6 +44,9 @@ async function render() {
   // 本机令牌（C-1）：启动 URL 里带令牌时写入长效缓存并抹掉地址栏（必须在任何 API 请求前）。
   await adoptTokenFromLocation();
   await bootMode();
+  // 系统返回键 → 页面内后退（design-android-system-back）。只装一次：StrictMode 会重复
+  // 执行 effect，而 history 改写不能重复；浏览器（完整实例）没有原生桥，上报自动空转。
+  installBackNavigation();
   ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>

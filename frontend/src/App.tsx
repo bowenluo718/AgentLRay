@@ -57,7 +57,10 @@ export default function App() {
   const applyRemoteSelection = useAppStore((s) => s.applyRemoteSelection);
   const adoptThinHost = useAppStore((s) => s.adoptThinHost);
   const queryClient = useQueryClient();
-  const [navigationOpen, setNavigationOpen] = useState(false);
+  // 移动端会话列表覆盖层：状态放 store，系统返回键（lib/backNavigation）才能把它当成
+  // 最上一层——返回键先收起列表，再退会话/页签。
+  const navigationOpen = useAppStore((s) => s.navigationOpen);
+  const setNavigationOpen = useAppStore((s) => s.setNavigationOpen);
   const [settingsOpen, setSettingsOpen] = useState(false);
   // 薄服务空态「添加主机」：点击打开远程主机配置弹框（HostsDialog），
   // 由其中「添加主机」/「dsh 配置」入口进一步打开对应表单/配置。

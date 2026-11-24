@@ -45,6 +45,12 @@ android {
         buildConfig true
     }
 
+    // 本地 JVM 单测（src/test）：纯逻辑（如 NativeBackHost 的返回键决策）不依赖 Android 运行时；
+    // org.json 等 framework 桩由 returnDefaultValues 兜底（相关用例不触达真实实现）。
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
+
     // jniLibs 安装时解压（对应 AndroidManifest 的 extractNativeLibs=true 语义）。
     packagingOptions {
         jniLibs {
@@ -88,4 +94,8 @@ dependencies {
     // 原设计用 zstd-jni，但其无 Android ABI 分类器（linux_aarch64 为 glibc，bionic 无法加载），
     // 按 design「解压兼容性兜底」改用 gzip。
     implementation "org.apache.commons:commons-compress:$commonsCompressVersion"
+
+    // 本地 JVM 单测（NativeBackHostTest 等）。
+    testImplementation "junit:junit:$junitVersion"
+    testImplementation "org.assertj:assertj-core:$assertjVersion"
 }

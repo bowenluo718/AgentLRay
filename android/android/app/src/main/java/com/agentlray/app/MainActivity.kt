@@ -14,6 +14,7 @@ import android.util.Log
 import android.webkit.CookieManager
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
 import com.getcapacitor.BridgeActivity
 
@@ -29,6 +30,9 @@ import com.getcapacitor.BridgeActivity
  * - 失败：弹出含日志尾部的错误对话框，三动作「重试 / 查看日志 / 清除运行时并重装」（D-2）。
  * - 首启：解压进度（D-2）由 App → runtime.onProgress → [renderProgress] 注入占位页；
  *   系统网络变化（D-1/A-4）由 [NetworkWatch] 在 App 内注册，就绪后补报一次网络状态。
+ *
+ * - 系统返回（[installBackHandling]）：页面能后退则页面内退一步（层级由薄服务页面经
+ *   [BackBridge] 上报，策略见 [NativeBackHost]），否则按原语义退出。
  *
  * 注意（§7.2）：不用 onPause（权限弹窗/通知栏会误停）；旋转不重建（configChanges 见 Manifest）。
  *
@@ -53,6 +57,9 @@ class MainActivity : BridgeActivity() {
     private var navGeneration: Int = -1
     /** [thinPageSel] 对应的薄服务进程代号（[NodeRuntimeManager.generation]）；-1 = 无效。 */
     private var loadedGeneration: Int = -1
+    /** 页面最近一次上报的返回层级（[BackBridge]）；null = 未上报（占位页/加载中）。 */
+    @Volatile
+    private var backSnapshot: NativeBackHost.BackSnapshot? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // 本地插件注册需早于 super.onCreate：Bridge 在 super 内构建（含首次加载占位页），
@@ -63,6 +70,7 @@ class MainActivity : BridgeActivity() {
         registerPlugin(ThinNavigationPlugin::class.java)
         super.onCreate(savedInstanceState)
         installThinNavigation()
+        installBackHandling()
         if (BuildConfig.DEBUG) consumeSyncIntent(intent)
 
         val runtime = App.instance.runtime
@@ -165,7 +173,11 @@ class MainActivity : BridgeActivity() {
         plugin.install()
         // 任何新导航（含壳之外的 SPA 重定向/用户点击）都先把旧证据作废：新文档尚未加载完成，
         // 此时复用等同于把用户留在旧内容或空白页。其后的 onPageFinished 才重新建立证据。
-        plugin.onNavigationStarted = { invalidatePageEvidence("新导航开始：$it") }
+        // 返回层级同理：新文档的层级未知，在它重新上报前返回键走系统默认（退出）。
+        plugin.onNavigationStarted = {
+            invalidatePageEvidence("新导航开始：$it")
+            backSnapshot = null
+        }
         // 主框架加载失败不会触发 onPageFinished（未配置 Capacitor errorPath），必须单独作废，
         // 否则回前台时 pageIsCurrent 会误用旧证据而跳过重新导航。
         plugin.onMainFrameError = { invalidatePageEvidence("主框架加载失败：$it") }
@@ -184,6 +196,43 @@ class MainActivity : BridgeActivity() {
                 thinPageSel = finished
             }
         }
+    }
+
+    /**
+     * 系统返回键（design-android-system-back）：页面能后退则让页面退一步，否则交回系统
+     * 默认语义（`finish()`，即原来的「退出」）。策略与决策见 [NativeBackHost]。
+     *
+     * 走 `OnBackPressedDispatcher` 而非重写 `onBackPressed()`：targetSdk 35 下兼容层同样
+     * 接管预测性返回（Manifest 未开 `enableOnBackInvokedCallback`）。
+     */
+    private fun installBackHandling() {
+        // 页面 → 原生：无能力 JS 桥，只收「能否后退 + 层级名」（见 BackBridge 的信任说明）。
+        bridge?.webView?.addJavascriptInterface(
+            BackBridge { snapshot ->
+                backSnapshot = snapshot
+                Log.i(TAG, "返回层级上报：level=${snapshot.level} canGoBack=${snapshot.canGoBack}")
+            },
+            BACK_BRIDGE_NAME,
+        )
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    when (NativeBackHost.decide(backSnapshot)) {
+                        NativeBackHost.Action.CallFrontend -> {
+                            Log.i(TAG, "系统返回：页面内后退（level=${backSnapshot?.level}）")
+                            bridge?.webView?.let { NativeBackHost.callFrontend(it) }
+                        }
+                        // 置 false 后转发：复用系统默认的 finish 语义，而不是在这里手写
+                        // finish()/onBackPressed()（后者在 API 33+ 已废弃且绕过 dispatcher）。
+                        NativeBackHost.Action.Exit -> {
+                            isEnabled = false
+                            onBackPressedDispatcher.onBackPressed()
+                        }
+                    }
+                }
+            },
+        )
     }
 
     // ---- 调试：同步 .agentlray 到 /sdcard/agentlray（入口：桌面图标长按快捷方式）----
@@ -438,5 +487,7 @@ class MainActivity : BridgeActivity() {
         private const val COOKIE_FLUSH_DELAY_MS = 3_000L
         private const val REQ_STORAGE = 1001
         private const val REQ_NOTIFICATIONS = 1002
+        /** 返回层级上报的 JS 全局名（与 frontend/src/lib/backNavigation.ts 一致）。 */
+        private const val BACK_BRIDGE_NAME = "AgentLRayNative"
     }
 }
